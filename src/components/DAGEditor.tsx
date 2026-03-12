@@ -38,7 +38,7 @@ import { buildUserModelState, hydrateUserModelState, type UserModelState } from 
 // ── Module-level constants (stable across renders) ────────────────────────────
 
 const nodeTypes = { promptNode: PromptNode };
-const PROVIDERS: LlmProvider[] = ['gemini'];
+const PROVIDERS: LlmProvider[] = ['gemini', 'openai', 'anthropic'];
 const USER_MODEL_STATE_STORAGE_KEY = 'pbt_user_model_state';
 
 // Stable no-op; only needed to satisfy ReactFlow's onConnectEnd prop type
