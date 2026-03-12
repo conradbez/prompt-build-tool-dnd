@@ -33,6 +33,11 @@ import {
   subscribePyScriptBridgeState,
   type PyScriptBridgeState,
 } from '@/lib/pyscriptBridge';
+import {
+  DEFAULT_PROVIDER_KEYS,
+  hydrateProviderKeyState,
+  PROVIDER_KEYS_STORAGE_KEY,
+} from '@/lib/providerKeyState';
 import { buildUserModelState, hydrateUserModelState, type UserModelState } from '@/lib/userModelState';
 
 // ── Module-level constants (stable across renders) ────────────────────────────
@@ -54,6 +59,21 @@ const REF_RE = /ref\(['"]([^'"]+)['"]\)/g;
 
 function extractRefs(source: string): string[] {
   return [...new Set([...source.matchAll(REF_RE)].map((m) => m[1]))];
+}
+
+function getInitialProviderKeys(): Record<LlmProvider, string> {
+  try {
+    const hydratedProviderKeys = hydrateProviderKeyState(
+      localStorage.getItem(PROVIDER_KEYS_STORAGE_KEY),
+    );
+    console.log('[pbt] Loaded provider API keys from local storage.', {
+      providers: PROVIDERS.filter((provider) => Boolean(hydratedProviderKeys[provider])),
+    });
+    return hydratedProviderKeys;
+  } catch {
+    localStorage.removeItem(PROVIDER_KEYS_STORAGE_KEY);
+    return DEFAULT_PROVIDER_KEYS;
+  }
 }
 
 /**
@@ -105,11 +125,7 @@ export default function DAGEditor() {
   const [promptFileRows, setPromptFileRows] = useState<PromptFileRow[]>([]);
 
   const [selectedProvider, setSelectedProvider] = useState<LlmProvider>('gemini');
-  const [providerKeys, setProviderKeys] = useState<Record<LlmProvider, string>>({
-    gemini: '',
-    openai: '',
-    anthropic: '',
-  });
+  const [providerKeys, setProviderKeys] = useState<Record<LlmProvider, string>>(getInitialProviderKeys);
   const [pyScriptState, setPyScriptState] = useState<PyScriptBridgeState>(getPyScriptBridgeState());
 
   const rfInstance = useRef<ReactFlowInstance | null>(null);
@@ -152,6 +168,20 @@ export default function DAGEditor() {
       localStorage.removeItem(USER_MODEL_STATE_STORAGE_KEY);
     }
   }, [applyLoadedState]);
+
+  useEffect(() => {
+    const providersWithKeys = PROVIDERS.filter((provider) => Boolean(providerKeys[provider]));
+    if (providersWithKeys.length === 0) {
+      console.log('[pbt] Skipped saving empty provider API keys.');
+      localStorage.removeItem(PROVIDER_KEYS_STORAGE_KEY);
+      return;
+    }
+
+    console.log('[pbt] Saved provider API keys to local storage.', {
+      providers: providersWithKeys,
+    });
+    localStorage.setItem(PROVIDER_KEYS_STORAGE_KEY, JSON.stringify(providerKeys));
+  }, [providerKeys]);
 
   useEffect(() => {
     let cancelled = false;
@@ -414,21 +444,10 @@ export default function DAGEditor() {
   const runtimeReady = pyScriptState.status === 'ready';
   const runDisabledReason = runtimeReady ? undefined : pyScriptState.message;
   const pyScriptStatusSummary = useMemo(() => {
-    if (pyScriptState.status === 'ready') {
-      if (pyScriptState.runtimeInfo?.geminiSdkStatus === 'fallback') {
-        return 'PyScript ready • browser fetch fallback';
-      }
-      if (pyScriptState.runtimeInfo?.geminiSdkStatus === 'installed') {
-        return 'PyScript ready • Gemini SDK installed';
-      }
-      return 'PyScript ready';
-    }
+    if (pyScriptState.status === 'ready') return 'PyScript ready';
     return `PyScript: ${pyScriptState.message}`;
   }, [pyScriptState]);
-  const pyScriptStatusDetail = [
-    pyScriptState.message,
-    pyScriptState.runtimeInfo?.geminiSdkMessage,
-  ].filter(Boolean).join(' ');
+  const pyScriptStatusDetail = pyScriptState.message;
 
   return (
     <div className="flex flex-col h-full">

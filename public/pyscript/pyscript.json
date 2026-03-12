@@ -1,3 +1,11 @@
 {
+  "packages": [
+    "jinja2",
+    "networkx",
+    "rich",
+    "click",
+    "python-dotenv",
+    "prompt_build_tool"
+  ],
   "experimental_create_proxy": "auto"
 }

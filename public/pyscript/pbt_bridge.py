@@ -1,12 +1,9 @@
 import asyncio
-import base64
-import io
 import json
 import re
 import traceback
 
-from js import CustomEvent, Object
-from pyodide.http import pyfetch
+from js import CustomEvent, Object, XMLHttpRequest
 from pyscript import ffi, window
 
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
@@ -14,7 +11,6 @@ _GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"
 _OPENAI_DEFAULT_MODEL = "gpt-5-mini"
 _ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
 _ANTHROPIC_VERSION = "2023-06-01"
-_PBT_VERSION = "0.1.10"
 
 
 def _dispatch_status(message: str) -> None:
@@ -50,40 +46,40 @@ def _serialise(outputs: dict[str, object]) -> tuple[dict[str, object], list[str]
     return serialised, errors
 
 
-def _decode_promptfiles(items: list[dict] | None) -> dict[str, io.BytesIO] | None:
-    if not items:
-        return None
+def _send_json_request(url: str, headers: dict[str, str], body: dict) -> dict:
+    xhr = XMLHttpRequest.new()
+    xhr.open("POST", url, False)
+    for header_name, header_value in headers.items():
+        xhr.setRequestHeader(header_name, header_value)
+    xhr.send(json.dumps(body))
 
-    promptfiles: dict[str, io.BytesIO] = {}
-    for item in items:
-        raw = base64.b64decode(item["dataBase64"])
-        buffer = io.BytesIO(raw)
-        buffer.name = item["fileName"]
-        promptfiles[item["name"]] = buffer
-    return promptfiles
+    try:
+        payload = json.loads(xhr.responseText or "{}")
+    except Exception:
+        payload = {}
+
+    if xhr.status < 200 or xhr.status >= 300:
+        message = payload.get("error", {}).get("message") or payload.get("error", {}).get("details")
+        if not message:
+            message = xhr.responseText or f"HTTP {xhr.status}"
+        raise RuntimeError(str(message))
+
+    return payload
 
 
-async def _call_gemini(prompt: str, api_key: str, model: str) -> str:
-    response = await pyfetch(
+def _call_gemini(prompt: str, api_key: str, model: str) -> str:
+    payload = _send_json_request(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
-        method="POST",
-        headers={"Content-Type": "application/json"},
-        body=json.dumps(
-            {
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [{"text": prompt}],
-                    }
-                ]
-            }
-        ),
+        {"Content-Type": "application/json"},
+        {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": prompt}],
+                }
+            ]
+        },
     )
-
-    payload = await response.json()
-    if not response.ok:
-        message = payload.get("error", {}).get("message", "Gemini request failed.")
-        raise RuntimeError(message)
 
     candidates = payload.get("candidates") or []
     parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
@@ -93,26 +89,18 @@ async def _call_gemini(prompt: str, api_key: str, model: str) -> str:
     return text
 
 
-async def _call_openai(prompt: str, api_key: str, model: str) -> str:
-    response = await pyfetch(
+def _call_openai(prompt: str, api_key: str, model: str) -> str:
+    payload = _send_json_request(
         "https://api.openai.com/v1/responses",
-        method="POST",
-        headers={
+        {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         },
-        body=json.dumps(
-            {
-                "model": model,
-                "input": prompt,
-            }
-        ),
+        {
+            "model": model,
+            "input": prompt,
+        },
     )
-
-    payload = await response.json()
-    if not response.ok:
-        message = payload.get("error", {}).get("message", "OpenAI request failed.")
-        raise RuntimeError(message)
 
     if payload.get("output_text"):
         return payload["output_text"]
@@ -128,33 +116,25 @@ async def _call_openai(prompt: str, api_key: str, model: str) -> str:
     raise RuntimeError("OpenAI returned an empty response.")
 
 
-async def _call_anthropic(prompt: str, api_key: str, model: str) -> str:
-    response = await pyfetch(
+def _call_anthropic(prompt: str, api_key: str, model: str) -> str:
+    payload = _send_json_request(
         "https://api.anthropic.com/v1/messages",
-        method="POST",
-        headers={
+        {
             "Content-Type": "application/json",
             "x-api-key": api_key,
             "anthropic-version": _ANTHROPIC_VERSION,
         },
-        body=json.dumps(
-            {
-                "model": model,
-                "max_tokens": 4096,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
-            }
-        ),
+        {
+            "model": model,
+            "max_tokens": 4096,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+        },
     )
-
-    payload = await response.json()
-    if not response.ok:
-        message = payload.get("error", {}).get("message", "Anthropic request failed.")
-        raise RuntimeError(message)
 
     content = payload.get("content") or []
     text = "".join(part.get("text", "") for part in content if part.get("type") == "text")
@@ -163,23 +143,23 @@ async def _call_anthropic(prompt: str, api_key: str, model: str) -> str:
     return text
 
 
-async def _call_llm(provider: str, prompt: str, api_key: str) -> str:
+def _call_llm(provider: str, prompt: str, api_key: str) -> str:
     if provider == "gemini":
-        return await _call_gemini(
+        return _call_gemini(
             prompt,
             api_key=api_key,
             model=window.localStorage.getItem("pbt.geminiModel") or _GEMINI_DEFAULT_MODEL,
         )
 
     if provider == "openai":
-        return await _call_openai(
+        return _call_openai(
             prompt,
             api_key=api_key,
             model=window.localStorage.getItem("pbt.openaiModel") or _OPENAI_DEFAULT_MODEL,
         )
 
     if provider == "anthropic":
-        return await _call_anthropic(
+        return _call_anthropic(
             prompt,
             api_key=api_key,
             model=window.localStorage.getItem("pbt.anthropicModel") or _ANTHROPIC_DEFAULT_MODEL,
@@ -190,9 +170,8 @@ async def _call_llm(provider: str, prompt: str, api_key: str) -> str:
 
 async def _run_dag(payload_json: str) -> str:
     try:
-        from pbt import ModelError
-        from pbt.executor.graph import build_models_from_dict, execution_order
-        from pbt.executor.parser import render_prompt
+        import pbt
+        from pbt.storage import MemoryStorageBackend
 
         payload = json.loads(payload_json)
         provider = payload.get("provider") or "gemini"
@@ -208,73 +187,37 @@ async def _run_dag(payload_json: str) -> str:
             for node in nodes
         }
         promptdata = payload.get("promptdata") or None
-        select = set(payload.get("select") or [])
-        promptfiles = _decode_promptfiles(payload.get("promptfiles"))
+        select = payload.get("select") or None
+        if payload.get("promptfiles"):
+            return json.dumps({
+                "outputs": {},
+                "errors": ["Promptfiles are not supported by the browser pbt runner yet."],
+            })
 
-        all_models = build_models_from_dict(models_dict)
-        ordered_models = execution_order(all_models)
+        def llm_call(prompt: str, files=None, config=None) -> str:
+            if files:
+                raise ValueError("Promptfiles are not supported by the browser pbt runner yet.")
 
-        outputs: dict[str, object] = {}
-        successful_outputs: dict[str, object] = {}
-        failed_models: set[str] = set()
-        skipped_models: set[str] = set()
+            output = _call_llm(provider, prompt, api_key)
+            if config and config.get("output_format", "text") == "json":
+                _parse_json_output(output)
+            return output
 
-        for model in ordered_models:
-            blocked_by = [dependency for dependency in model.depends_on if dependency in failed_models]
-            if blocked_by:
-                failed_models.add(model.name)
-                outputs[model.name] = ModelError(f"Skipped because upstream models failed: {blocked_by}")
-                continue
-
-            rendered, skip_state = render_prompt(
-                model.source,
-                successful_outputs,
-                promptdata=promptdata,
-                prompt_skipped_models=skipped_models,
-            )
-
-            if skip_state.skip_value is not None:
-                outputs[model.name] = skip_state.skip_value
-                successful_outputs[model.name] = skip_state.skip_value
-                skipped_models.add(model.name)
-                continue
-
-            if model.promptfiles_used:
-                if not promptfiles:
-                    outputs[model.name] = ModelError(
-                        f"Model '{model.name}' requires promptfiles, but the browser runner does not support file-backed inputs yet."
-                    )
-                    failed_models.add(model.name)
-                    continue
-
-                missing = [name for name in model.promptfiles_used if name not in promptfiles]
-                if missing:
-                    outputs[model.name] = ModelError(
-                        f"Missing promptfiles for model '{model.name}': {', '.join(missing)}"
-                    )
-                    failed_models.add(model.name)
-                    continue
-
-                outputs[model.name] = ModelError(
-                    f"Model '{model.name}' uses promptfiles, which are not yet supported by the browser runner."
-                )
-                failed_models.add(model.name)
-                continue
-
-            llm_output = await _call_llm(provider, rendered, api_key)
-
-            if model.config.get("output_format", "text") == "json":
-                parsed = _parse_json_output(llm_output)
-                outputs[model.name] = parsed
-                successful_outputs[model.name] = parsed
-            else:
-                outputs[model.name] = llm_output
-                successful_outputs[model.name] = llm_output
+        outputs = pbt.run(
+            models_from_dict=models_dict,
+            select=select,
+            llm_call=llm_call,
+            verbose=False,
+            promptdata=promptdata,
+            validation_dir=None,
+            storage_backend=MemoryStorageBackend(),
+        )
 
         serialised, errors = _serialise(outputs)
         if select:
-            serialised = {name: value for name, value in serialised.items() if name in select}
-            errors = [error for error in errors if error.split(":", 1)[0] in select]
+            selected_set = set(select)
+            serialised = {name: value for name, value in serialised.items() if name in selected_set}
+            errors = [error for error in errors if error.split(":", 1)[0] in selected_set]
         return json.dumps({"outputs": serialised, "errors": errors})
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
@@ -283,24 +226,14 @@ async def _run_dag(payload_json: str) -> str:
 
 async def _init_runtime() -> None:
     gemini_sdk_status = "fallback"
-    gemini_sdk_message = "Installing prompt-build-tool from PyPI."
+    gemini_sdk_message = "Using browser fetch for provider requests."
 
     _dispatch_status("Preparing browser Python runtime…")
 
     try:
-        import pyodide_js
-
-        _dispatch_status("Loading micropip…")
-        await pyodide_js.loadPackage("micropip")
-        import micropip
-
-        _dispatch_status("Installing prompt-build-tool from PyPI…")
-        await micropip.install(f"prompt-build-tool=={_PBT_VERSION}")
-
-        _dispatch_status("Installing optional Gemini dependency…")
-        await micropip.install("google-genai==1.66.0")
+        import pbt  # noqa: F401
         gemini_sdk_status = "installed"
-        gemini_sdk_message = "prompt-build-tool and google-genai installed; runtime uses browser fetch for provider requests."
+        gemini_sdk_message = "prompt-build-tool wheel loaded via PyScript packages; provider requests use browser fetch."
     except Exception as exc:
         gemini_sdk_message = f"PyScript bootstrap failed: {exc}"
         window.__pbtPyBridgeError = str(exc)

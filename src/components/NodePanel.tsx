@@ -318,8 +318,9 @@ export default function NodePanel({
             title="When enabled, this model output is the literal template text and will not call the LLM."
           >
             <span
-              className="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform"
-              style={{ transform: isTemplate ? 'translateX(20px)' : 'translateX(2px)' }}
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${
+                isTemplate ? 'left-[22px]' : 'left-0.5'
+              }`}
             />
           </button>
         </label>
