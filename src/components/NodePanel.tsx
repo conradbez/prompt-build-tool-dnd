@@ -14,11 +14,13 @@ interface NodePanelProps {
   output: string | undefined;
   errors: string[];
   isRunning: boolean;
+  isTemplate: boolean;
   otherNodeNames: string[];
   promptDataNames: string[];
   promptFileNames: string[];
   onPromptChange: (value: string) => void;
   onRename: (newName: string) => void;
+  onTemplateChange: (value: boolean) => void;
   onClose: () => void;
   onRun: () => void;
 }
@@ -92,11 +94,13 @@ export default function NodePanel({
   output,
   errors,
   isRunning,
+  isTemplate,
   otherNodeNames,
   promptDataNames,
   promptFileNames,
   onPromptChange,
   onRename,
+  onTemplateChange,
   onClose,
   onRun,
 }: NodePanelProps) {
@@ -281,7 +285,7 @@ export default function NodePanel({
       </div>
 
       {/* Run button */}
-      <div className="px-4 py-2 border-t border-border">
+      <div className="px-4 py-2 border-t border-border flex items-center gap-3">
         <Button onClick={onRun} disabled={isRunning} size="sm">
           {isRunning ? (
             <><RefreshCwIcon size={13} className="animate-spin" /> Running…</>
@@ -289,6 +293,24 @@ export default function NodePanel({
             <><PlayIcon size={13} /> Run model</>
           )}
         </Button>
+        <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground select-none">
+          <span>Template</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isTemplate}
+            onClick={() => onTemplateChange(!isTemplate)}
+            className={`relative h-5 w-10 rounded-full transition-colors ${
+              isTemplate ? 'bg-primary' : 'bg-slate-300'
+            }`}
+            title="When enabled, this model output is the literal template text and will not call the LLM."
+          >
+            <span
+              className="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform"
+              style={{ transform: isTemplate ? 'translateX(20px)' : 'translateX(2px)' }}
+            />
+          </button>
+        </label>
       </div>
 
       {/* Errors */}

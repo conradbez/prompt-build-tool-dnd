@@ -6,6 +6,7 @@ export type PromptNodeData = {
   label: string;
   hasOutput: boolean;
   isRunning: boolean;
+  isTemplate: boolean;
 };
 
 function PromptNode({ data, selected }: NodeProps) {
@@ -43,6 +44,11 @@ function PromptNode({ data, selected }: NodeProps) {
           </span>
         ) : (
           <span className="text-[10px] text-slate-400">click to edit</span>
+        )}
+        {d.isTemplate && (
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+            template
+          </span>
         )}
       </div>
 

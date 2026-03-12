@@ -5,7 +5,10 @@ const BASE = '/api';
 export interface DagNodePayload {
   name: string;
   source: string;
+  isTemplate?: boolean;
 }
+
+export type LlmProvider = 'gemini' | 'openai' | 'anthropic';
 
 export interface RunResponse {
   outputs: Record<string, string>;
@@ -21,11 +24,13 @@ export async function runDag(
   select?: string[],
   promptdata?: Record<string, string>,
   promptfiles?: Record<string, File>,
-  geminiKey?: string,
+  provider: LlmProvider = 'gemini',
+  apiKey?: string,
 ): Promise<RunResponse> {
   const form = new FormData();
   form.append('nodes', JSON.stringify(nodes));
-  if (geminiKey) form.append('gemini_key', geminiKey);
+  form.append('provider', provider);
+  if (apiKey) form.append('api_key', apiKey);
   select?.forEach((s) => form.append('select', s));
   if (promptdata && Object.keys(promptdata).length > 0) {
     form.append('promptdata', JSON.stringify(promptdata));

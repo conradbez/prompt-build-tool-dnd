@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import traceback
 from typing import Any, List, Optional
 
 try:
@@ -52,6 +53,39 @@ def _raw_response(
 class RunResponse(BaseModel):
     outputs: dict[str, Any]
     errors: list[str] = []
+
+
+def _log_exception(context: str, exc: Exception) -> None:
+    print(f"[pbt-server] {context}: {exc}")
+    print(traceback.format_exc())
+
+
+def _log_run_errors(errors: list[str]) -> None:
+    if not errors:
+        return
+    print("[pbt-server] run returned errors:")
+    for error in errors:
+        print(f"[pbt-server]   {error}")
+
+
+def _log_latest_db_errors() -> None:
+    try:
+        latest_runs = pbt.db.get_latest_runs(1)
+        if not latest_runs:
+            return
+        run_id = latest_runs[0]["run_id"]
+        rows = pbt.db.get_run_results(run_id)
+    except Exception as exc:
+        print(f"[pbt-server] failed to inspect pbt db for detailed errors: {exc}")
+        return
+
+    detailed_rows = [row for row in rows if row["status"] == "error" and row["error"]]
+    if not detailed_rows:
+        return
+
+    print(f"[pbt-server] latest run detailed model errors (run_id={run_id}):")
+    for row in detailed_rows:
+        print(f"[pbt-server]   {row['model_name']}: {row['error']}")
 
 
 
@@ -113,6 +147,10 @@ def _parse_promptfiles(uploads: list[UploadFile] | None) -> dict | None:
     return result or None
 
 
+def _inline_template_source(source: str) -> str:
+    return "{{skip_and_set_to_value(" + json.dumps(source) + ")}}"
+
+
 def _build_run_endpoint(
     models_dir: str,
     validation_dir: str,
@@ -142,8 +180,11 @@ def _build_run_endpoint(
                 verbose=False,
             )
         except Exception as exc:
+            _log_exception("GET /run failed", exc)
             return RunResponse(outputs={}, errors=[str(exc)])
         serialised, errors = _serialise(outputs)
+        _log_run_errors(errors)
+        _log_latest_db_errors()
         raw = _raw_response(serialised, output_model, _model_extensions)
         if raw is not None:
             return raw
@@ -327,8 +368,11 @@ def create_app(
                 verbose=False,
             )
         except Exception as exc:
+            _log_exception("POST /run failed", exc)
             return RunResponse(outputs={}, errors=[str(exc)])
         serialised, errors = _serialise(outputs)
+        _log_run_errors(errors)
+        _log_latest_db_errors()
         raw = _raw_response(serialised, output_model, model_extensions)
         if raw is not None:
             return raw
@@ -373,21 +417,31 @@ def create_app(
                 "Each file's filename (without extension) is used as the promptfile key."
             ),
         ),
-        gemini_key: Optional[str] = Form(
+        provider: str = Form(
+            "gemini",
+            description="Selected LLM provider: gemini, openai, or anthropic.",
+        ),
+        api_key: Optional[str] = Form(
             None,
-            description="Gemini API key. If provided, sets GEMINI_API_KEY for this run.",
+            description="Provider API key. If omitted, the server environment variable is used.",
         ),
     ) -> RunResponse:
         """
         Build and execute a DAG from inline node definitions in a single request.
         No separate registration step required — pbt handles caching internally.
         """
-        from client import make_llm_call, llm_call as default_llm_call
-        llm_call_fn = make_llm_call(gemini_key) if gemini_key else default_llm_call
+        from client import make_llm_call
+        if provider not in {"gemini", "openai", "anthropic"}:
+            return RunResponse(outputs={}, errors=[f"Unsupported provider: {provider}"])
+
+        llm_call_fn = make_llm_call(api_key=api_key, provider=provider)
 
         try:
             nodes_list = json.loads(nodes)
-            models_dict = {n["name"]: n["source"] for n in nodes_list}
+            models_dict = {
+                n["name"]: _inline_template_source(n["source"]) if n.get("isTemplate") else n["source"]
+                for n in nodes_list
+            }
         except Exception as exc:
             return RunResponse(outputs={}, errors=[f"Invalid nodes payload: {exc}"])
 
@@ -408,8 +462,11 @@ def create_app(
                 verbose=False,
             )
         except Exception as exc:
+            _log_exception("POST /dag/run failed", exc)
             return RunResponse(outputs={}, errors=[str(exc)])
         serialised, errors = _serialise(outputs)
+        _log_run_errors(errors)
+        _log_latest_db_errors()
         return RunResponse(outputs=serialised, errors=errors)
 
     return app

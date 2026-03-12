@@ -1,0 +1,14 @@
+[project]
+name = "dnd-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.135.1",
+    "google-genai>=1.66.0",
+    "openai>=2.26.0",
+    "prompt-build-tool @ file:///Users/conradbez/Documents/prompt-build-tool-for-LLMs",
+    "python-multipart>=0.0.22",
+    "uvicorn>=0.41.0",
+]

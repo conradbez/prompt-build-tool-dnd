@@ -27,25 +27,14 @@ import { Input } from '@/components/ui/input';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { runDag } from '../api';
-
-// ── localStorage persistence ──────────────────────────────────────────────────
-
-const STORAGE_KEY = 'pbt_dag_state';
-const GEMINI_KEY_STORAGE = 'pbt_gemini_key';
-
-const _initialSavedState: Record<string, unknown> | null = (() => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-})();
+import { runDag, type LlmProvider } from '../api';
+import { buildUserModelState, hydrateUserModelState, type UserModelState } from '@/lib/userModelState';
 
 // ── Module-level constants (stable across renders) ────────────────────────────
 
 const nodeTypes = { promptNode: PromptNode };
+const PROVIDERS: LlmProvider[] = ['gemini', 'openai', 'anthropic'];
+const USER_MODEL_STATE_STORAGE_KEY = 'pbt_user_model_state';
 
 // Stable no-op; only needed to satisfy ReactFlow's onConnectEnd prop type
 const handleConnectEnd: OnConnectEnd = () => {};
@@ -90,20 +79,11 @@ function computeEdges(nodes: Node[], nodeRefs: Record<string, string[]>): Edge[]
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function DAGEditor() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(
-    (_initialSavedState?.nodes as Node[] | undefined)?.map((n) => ({
-      ...n,
-      data: { ...(n.data as PromptNodeData), hasOutput: false, isRunning: false },
-    })) ?? [],
-  );
-  const [nodePrompts, setNodePrompts] = useState<Record<string, string>>(
-    (_initialSavedState?.nodePrompts as Record<string, string> | undefined) ?? {},
-  );
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [nodePrompts, setNodePrompts] = useState<Record<string, string>>({});
   // Per-node extracted ref list — updated whenever a prompt changes (avoids
   // running the regex over every node on every keystroke).
-  const [nodeRefs, setNodeRefs] = useState<Record<string, string[]>>(
-    (_initialSavedState?.nodeRefs as Record<string, string[]> | undefined) ?? {},
-  );
+  const [nodeRefs, setNodeRefs] = useState<Record<string, string[]>>({});
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [nodeOutputs, setNodeOutputs] = useState<Record<string, string>>({});
@@ -116,44 +96,81 @@ export default function DAGEditor() {
   // Manager dialogs
   const [showDataManager, setShowDataManager] = useState(false);
   const [showFileManager, setShowFileManager] = useState(false);
-  const [promptDataRows, setPromptDataRows] = useState<PromptDataRow[]>(
-    (_initialSavedState?.promptDataRows as PromptDataRow[] | undefined) ?? [],
-  );
-  const [promptFileRows, setPromptFileRows] = useState<PromptFileRow[]>(
-    // Files can't be serialised — restore id+name only, file stays null
-    ((_initialSavedState?.promptFileRows as Array<{ id: string; name: string }> | undefined) ?? [])
-      .map((r) => ({ ...r, file: null })),
-  );
+  const [promptDataRows, setPromptDataRows] = useState<PromptDataRow[]>([]);
+  const [promptFileRows, setPromptFileRows] = useState<PromptFileRow[]>([]);
 
-  const [geminiKey, setGeminiKey] = useState<string>(
-    () => localStorage.getItem(GEMINI_KEY_STORAGE) ?? '',
-  );
+  const [selectedProvider, setSelectedProvider] = useState<LlmProvider>('gemini');
+  const [providerKeys, setProviderKeys] = useState<Record<LlmProvider, string>>({
+    gemini: '',
+    openai: '',
+    anthropic: '',
+  });
 
   const rfInstance = useRef<ReactFlowInstance | null>(null);
 
-  // ── Persist to localStorage ───────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    localStorage.setItem(GEMINI_KEY_STORAGE, geminiKey);
-  }, [geminiKey]);
+  const markDirty = useCallback(() => {
+    setNodeOutputs({});
+    setRunErrors([]);
+  }, []);
+
+  const applyLoadedState = useCallback((state: UserModelState) => {
+    const hydrated = hydrateUserModelState(state);
+    setNodes(hydrated.nodes);
+    setNodePrompts(hydrated.nodePrompts);
+    setNodeRefs(hydrated.nodeRefs);
+    setPromptDataRows(hydrated.promptDataRows);
+    setPromptFileRows(hydrated.promptFileRows);
+    setSelectedProvider(hydrated.selectedProvider);
+    setSelectedNodeId(null);
+    setShowAddDialog(false);
+    setShowDataManager(false);
+    setShowFileManager(false);
+    setNodeOutputs({});
+    setRunErrors([]);
+  }, [setNodes]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          nodes: nodes.map((n) => ({
-            ...n,
-            data: { label: (n.data as PromptNodeData).label },
-          })),
+      const raw = localStorage.getItem(USER_MODEL_STATE_STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as UserModelState;
+      if (parsed.version !== 1) return;
+      if (!PROVIDERS.includes(parsed.selectedProvider)) return;
+      applyLoadedState(parsed);
+    } catch {
+      localStorage.removeItem(USER_MODEL_STATE_STORAGE_KEY);
+    }
+  }, [applyLoadedState]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const state = await buildUserModelState({
+          selectedProvider,
+          nodes,
           nodePrompts,
-          nodeRefs,
           promptDataRows,
-          promptFileRows: promptFileRows.map(({ id, name }) => ({ id, name })),
-        }),
-      );
-    } catch {}
-  }, [nodes, nodePrompts, nodeRefs, promptDataRows, promptFileRows]);
+          promptFileRows,
+        });
+        if (!cancelled) {
+          localStorage.setItem(USER_MODEL_STATE_STORAGE_KEY, JSON.stringify(state));
+        }
+      } catch {
+        if (!cancelled) {
+          localStorage.removeItem(USER_MODEL_STATE_STORAGE_KEY);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProvider, nodes, nodePrompts, promptDataRows, promptFileRows]);
 
   // ── Computed ──────────────────────────────────────────────────────────────
 
@@ -195,12 +212,7 @@ export default function DAGEditor() {
       : undefined;
   }, [promptFileRows]);
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
-  const markDirty = useCallback(() => {
-    setNodeOutputs({});
-    setRunErrors([]);
-  }, []);
+  const activeProviderKey = providerKeys[selectedProvider];
 
   const updateNodeData = useCallback(
     (nodeId: string, patch: Partial<PromptNodeData>) =>
@@ -287,7 +299,7 @@ export default function DAGEditor() {
         id,
         type: 'promptNode',
         position,
-        data: { label: name, hasOutput: false, isRunning: false } satisfies PromptNodeData,
+        data: { label: name, hasOutput: false, isRunning: false, isTemplate: false } satisfies PromptNodeData,
       },
     ]);
     setNodePrompts((prev) => ({ ...prev, [id]: '' }));
@@ -337,11 +349,16 @@ export default function DAGEditor() {
   const runMutation = useMutation({
     mutationFn: ({ modelName }: { modelName: string }) =>
       runDag(
-        nodes.map((n) => ({ name: (n.data as PromptNodeData).label, source: nodePrompts[n.id] ?? '' })),
+        nodes.map((n) => ({
+          name: (n.data as PromptNodeData).label,
+          source: nodePrompts[n.id] ?? '',
+          isTemplate: (n.data as PromptNodeData).isTemplate,
+        })),
         [modelName],
         promptDataForApi,
         promptFilesForApi,
-        geminiKey || undefined,
+        selectedProvider,
+        activeProviderKey || undefined,
       ),
 
     onMutate: ({ modelName }) => {
@@ -395,15 +412,34 @@ export default function DAGEditor() {
           PBT DAG Editor
         </span>
 
-        <div className="flex items-center gap-1 flex-1">
-          <KeyIcon size={13} className="text-muted-foreground shrink-0" />
-          <Input
-            type="password"
-            value={geminiKey}
-            onChange={(e) => setGeminiKey(e.target.value)}
-            placeholder="Gemini API key"
-            className="h-7 text-xs font-mono max-w-48"
-          />
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="inline-flex w-fit rounded-md border border-border bg-muted/30 p-0.5">
+            {PROVIDERS.map((provider) => (
+              <Button
+                key={provider}
+                type="button"
+                size="sm"
+                variant={selectedProvider === provider ? 'default' : 'ghost'}
+                className="h-7 rounded-[5px] px-2.5 font-mono text-[11px] capitalize"
+                onClick={() => setSelectedProvider(provider)}
+              >
+                {provider}
+              </Button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 flex-1 min-w-0 max-w-md">
+            <KeyIcon size={13} className="text-muted-foreground shrink-0" />
+            <Input
+              type="password"
+              value={activeProviderKey}
+              onChange={(e) =>
+                setProviderKeys((prev) => ({ ...prev, [selectedProvider]: e.target.value }))
+              }
+              placeholder={`${selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)} API key`}
+              className="h-7 text-xs font-mono"
+              spellCheck={false}
+            />
+          </div>
         </div>
 
         {/* Right-side manager + action buttons */}
@@ -484,11 +520,16 @@ export default function DAGEditor() {
             output={nodeOutputs[selectedModelName]}
             errors={runErrors}
             isRunning={isSelectedRunning}
+            isTemplate={(selectedNode.data as PromptNodeData).isTemplate}
             otherNodeNames={otherNodeNames}
             promptDataNames={promptDataRows.filter(r => r.name.trim()).map(r => r.name.trim())}
             promptFileNames={promptFileRows.filter(r => r.name.trim()).map(r => r.name.trim())}
             onPromptChange={(value) => handlePromptChange(selectedNode.id, value)}
             onRename={(newName) => handleRename(selectedNode.id, newName)}
+            onTemplateChange={(value) => {
+              updateNodeData(selectedNode.id, { isTemplate: value });
+              markDirty();
+            }}
             onClose={() => setSelectedNodeId(null)}
             onRun={handleRunModel}
           />
