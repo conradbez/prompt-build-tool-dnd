@@ -442,7 +442,12 @@ export default function DAGEditor() {
   const promptDataCount = promptDataRows.filter((r) => r.name.trim()).length;
   const promptFileCount = promptFileRows.filter((r) => r.name.trim() && r.file).length;
   const runtimeReady = pyScriptState.status === 'ready';
-  const runDisabledReason = runtimeReady ? undefined : pyScriptState.message;
+  const hasPromptFiles = promptFileCount > 0;
+  const runDisabledReason = !runtimeReady
+    ? pyScriptState.message
+    : hasPromptFiles
+      ? 'Prompt files are not supported by the browser runner yet.'
+      : undefined;
   const pyScriptStatusSummary = useMemo(() => {
     if (pyScriptState.status === 'ready') return 'PyScript ready';
     return `PyScript: ${pyScriptState.message}`;
@@ -571,7 +576,7 @@ export default function DAGEditor() {
             output={nodeOutputs[selectedModelName]}
             errors={runErrors}
             isRunning={isSelectedRunning}
-            isRunDisabled={!runtimeReady}
+            isRunDisabled={!runtimeReady || hasPromptFiles}
             runDisabledReason={runDisabledReason}
             isTemplate={(selectedNode.data as PromptNodeData).isTemplate}
             otherNodeNames={otherNodeNames}
