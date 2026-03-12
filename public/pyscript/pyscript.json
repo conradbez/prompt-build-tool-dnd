@@ -1,0 +1,10 @@
+{
+  "packages": [
+    "jinja2",
+    "networkx"
+  ],
+  "files": {
+    "/pyscript/vendor/pbt.tar.gz": "./vendor/*"
+  },
+  "experimental_create_proxy": "auto"
+}

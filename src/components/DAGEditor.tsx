@@ -25,15 +25,20 @@ import PromptFileManager, { type PromptFileRow } from './PromptFileManager';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import { runDag, type LlmProvider } from '../api';
+import {
+  getPyScriptBridgeState,
+  subscribePyScriptBridgeState,
+  type PyScriptBridgeState,
+} from '@/lib/pyscriptBridge';
 import { buildUserModelState, hydrateUserModelState, type UserModelState } from '@/lib/userModelState';
 
 // ── Module-level constants (stable across renders) ────────────────────────────
 
 const nodeTypes = { promptNode: PromptNode };
-const PROVIDERS: LlmProvider[] = ['gemini', 'openai', 'anthropic'];
+const PROVIDERS: LlmProvider[] = ['gemini'];
 const USER_MODEL_STATE_STORAGE_KEY = 'pbt_user_model_state';
 
 // Stable no-op; only needed to satisfy ReactFlow's onConnectEnd prop type
@@ -105,8 +110,11 @@ export default function DAGEditor() {
     openai: '',
     anthropic: '',
   });
+  const [pyScriptState, setPyScriptState] = useState<PyScriptBridgeState>(getPyScriptBridgeState());
 
   const rfInstance = useRef<ReactFlowInstance | null>(null);
+
+  useEffect(() => subscribePyScriptBridgeState(setPyScriptState), []);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -368,7 +376,7 @@ export default function DAGEditor() {
 
     onSuccess: (data) => {
       setNodeOutputs((prev) => ({ ...prev, ...data.outputs }));
-      if (data.errors.length > 0) setRunErrors(data.errors);
+      setRunErrors(data.errors);
 
       const updatedLabels = new Set(Object.keys(data.outputs));
       setNodes((nds) =>
@@ -403,6 +411,8 @@ export default function DAGEditor() {
 
   const promptDataCount = promptDataRows.filter((r) => r.name.trim()).length;
   const promptFileCount = promptFileRows.filter((r) => r.name.trim() && r.file).length;
+  const runtimeReady = pyScriptState.status === 'ready';
+  const runDisabledReason = runtimeReady ? undefined : pyScriptState.message;
 
   return (
     <div className="flex flex-col h-full">
@@ -439,6 +449,12 @@ export default function DAGEditor() {
               className="h-7 text-xs font-mono"
               spellCheck={false}
             />
+          </div>
+          <div className="text-[11px] text-muted-foreground truncate">
+            PyScript: {pyScriptState.message}
+            {pyScriptState.runtimeInfo && (
+              <span className="ml-1">{pyScriptState.runtimeInfo.geminiSdkMessage}</span>
+            )}
           </div>
         </div>
 
@@ -520,6 +536,8 @@ export default function DAGEditor() {
             output={nodeOutputs[selectedModelName]}
             errors={runErrors}
             isRunning={isSelectedRunning}
+            isRunDisabled={!runtimeReady}
+            runDisabledReason={runDisabledReason}
             isTemplate={(selectedNode.data as PromptNodeData).isTemplate}
             otherNodeNames={otherNodeNames}
             promptDataNames={promptDataRows.filter(r => r.name.trim()).map(r => r.name.trim())}
@@ -541,6 +559,9 @@ export default function DAGEditor() {
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Add model node</DialogTitle>
+            <DialogDescription>
+              Create a new inline prompt model in the browser DAG.
+            </DialogDescription>
           </DialogHeader>
           <div>
             <label className="block text-sm text-muted-foreground mb-1.5">Model name</label>

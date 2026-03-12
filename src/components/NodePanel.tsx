@@ -14,6 +14,8 @@ interface NodePanelProps {
   output: string | undefined;
   errors: string[];
   isRunning: boolean;
+  isRunDisabled: boolean;
+  runDisabledReason?: string;
   isTemplate: boolean;
   otherNodeNames: string[];
   promptDataNames: string[];
@@ -94,6 +96,8 @@ export default function NodePanel({
   output,
   errors,
   isRunning,
+  isRunDisabled,
+  runDisabledReason,
   isTemplate,
   otherNodeNames,
   promptDataNames,
@@ -286,13 +290,21 @@ export default function NodePanel({
 
       {/* Run button */}
       <div className="px-4 py-2 border-t border-border flex items-center gap-3">
-        <Button onClick={onRun} disabled={isRunning} size="sm">
+        <Button
+          onClick={onRun}
+          disabled={isRunning || isRunDisabled}
+          size="sm"
+          title={runDisabledReason}
+        >
           {isRunning ? (
             <><RefreshCwIcon size={13} className="animate-spin" /> Running…</>
           ) : (
             <><PlayIcon size={13} /> Run model</>
           )}
         </Button>
+        {isRunDisabled && runDisabledReason && (
+          <p className="text-[11px] text-muted-foreground">{runDisabledReason}</p>
+        )}
         <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground select-none">
           <span>Template</span>
           <button

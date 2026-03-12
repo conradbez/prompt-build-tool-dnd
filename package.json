@@ -5,6 +5,9 @@
   "type": "module",
   "packageManager": "yarn@4.6.0",
   "scripts": {
+    "package:pyscript-vendor": "tar -czf public/pyscript/vendor/pbt.tar.gz -C public/pyscript/vendor --exclude='pbt/__pycache__' --exclude='pbt/cli/__pycache__' --exclude='pbt/executor/__pycache__' --exclude='pbt/server/__pycache__' pbt",
+    "predev": "npm run package:pyscript-vendor",
+    "prebuild": "npm run package:pyscript-vendor",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"

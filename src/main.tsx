@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
+import { initializePyScript } from './lib/pyscriptBridge';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -10,6 +11,8 @@ const queryClient = new QueryClient({
     mutations: { retry: 0 },
   },
 });
+
+initializePyScript();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

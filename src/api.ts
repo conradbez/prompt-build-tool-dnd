@@ -1,6 +1,6 @@
-/** API client for the pbt server (proxied through Vite at /api → localhost:8000) */
+import { runDagInPyScript } from './lib/pyscriptBridge';
 
-const BASE = '/api';
+/** Browser-side client for the PyScript pbt runtime. */
 
 export interface DagNodePayload {
   name: string;
@@ -16,8 +16,7 @@ export interface RunResponse {
 }
 
 /**
- * Build and run a DAG inline — nodes, select, promptdata and promptfiles in one request.
- * Sent as multipart/form-data so promptfiles (File objects) can be included.
+ * Build and run a DAG inline inside the browser's PyScript runtime.
  */
 export async function runDag(
   nodes: DagNodePayload[],
@@ -27,23 +26,12 @@ export async function runDag(
   provider: LlmProvider = 'gemini',
   apiKey?: string,
 ): Promise<RunResponse> {
-  const form = new FormData();
-  form.append('nodes', JSON.stringify(nodes));
-  form.append('provider', provider);
-  if (apiKey) form.append('api_key', apiKey);
-  select?.forEach((s) => form.append('select', s));
-  if (promptdata && Object.keys(promptdata).length > 0) {
-    form.append('promptdata', JSON.stringify(promptdata));
-  }
-  if (promptfiles) {
-    for (const [name, file] of Object.entries(promptfiles)) {
-      form.append('promptfiles', file, name);
-    }
-  }
-  const res = await fetch(`${BASE}/dag/run`, { method: 'POST', body: form });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`POST /dag/run failed (${res.status}): ${text}`);
-  }
-  return res.json() as Promise<RunResponse>;
+  return runDagInPyScript({
+    nodes,
+    select,
+    promptdata,
+    promptfiles,
+    provider,
+    apiKey,
+  });
 }
