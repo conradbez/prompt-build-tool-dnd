@@ -413,6 +413,22 @@ export default function DAGEditor() {
   const promptFileCount = promptFileRows.filter((r) => r.name.trim() && r.file).length;
   const runtimeReady = pyScriptState.status === 'ready';
   const runDisabledReason = runtimeReady ? undefined : pyScriptState.message;
+  const pyScriptStatusSummary = useMemo(() => {
+    if (pyScriptState.status === 'ready') {
+      if (pyScriptState.runtimeInfo?.geminiSdkStatus === 'fallback') {
+        return 'PyScript ready • browser fetch fallback';
+      }
+      if (pyScriptState.runtimeInfo?.geminiSdkStatus === 'installed') {
+        return 'PyScript ready • Gemini SDK installed';
+      }
+      return 'PyScript ready';
+    }
+    return `PyScript: ${pyScriptState.message}`;
+  }, [pyScriptState]);
+  const pyScriptStatusDetail = [
+    pyScriptState.message,
+    pyScriptState.runtimeInfo?.geminiSdkMessage,
+  ].filter(Boolean).join(' ');
 
   return (
     <div className="flex flex-col h-full">
@@ -450,11 +466,11 @@ export default function DAGEditor() {
               spellCheck={false}
             />
           </div>
-          <div className="text-[11px] text-muted-foreground truncate">
-            PyScript: {pyScriptState.message}
-            {pyScriptState.runtimeInfo && (
-              <span className="ml-1">{pyScriptState.runtimeInfo.geminiSdkMessage}</span>
-            )}
+          <div
+            className="max-w-[220px] truncate text-[11px] text-muted-foreground"
+            title={pyScriptStatusDetail}
+          >
+            {pyScriptStatusSummary}
           </div>
         </div>
 
