@@ -9,7 +9,7 @@ from pyodide.http import pyfetch
 from pyscript import ffi, window
 
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
-_GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"
+_GEMINI_DEFAULT_MODEL = "gemini-3-flash-preview"
 _OPENAI_DEFAULT_MODEL = "gpt-5-mini"
 _ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
 _ANTHROPIC_VERSION = "2023-06-01"
