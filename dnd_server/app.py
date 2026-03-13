@@ -4,10 +4,21 @@ FastAPI application factory for the pbt server.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
+import pathlib
+import tempfile
 import traceback
 from typing import Any, List, Optional
+
+# ── Session file storage ───────────────────────────────────────────────────────
+# Files are stored under their content hash (first 16 hex chars of SHA-256).
+# The session index maps session_id → {original_filename: hash16}.
+UPLOADS_DIR = pathlib.Path(tempfile.gettempdir()) / "pbt_uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
+
+_sessions: dict[str, dict[str, str]] = {}  # session_id → {"key.ext": "hash16"}
 
 try:
     from fastapi import FastAPI, File, Form, Query, UploadFile
@@ -388,6 +399,38 @@ def create_app(
     app.get("/run", response_model=RunResponse, summary="Run models (query params)")(run_get)
 
     # -----------------------------------------------------------------------
+    # File upload endpoint — stores files by content hash, keyed by session
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/files/upload",
+        summary="Upload files to session storage",
+        tags=["DAG editor"],
+    )
+    async def upload_files(
+        session_id: str = Form(..., description="Client session identifier."),
+        files: List[UploadFile] = File(..., description="Files to store. The filename (with extension) becomes the session key; the stem is used as the promptfile key on run."),
+    ) -> dict:
+        """
+        Store uploaded files under their SHA-256 content hash (first 16 hex chars).
+        The session index maps ``original_filename → hash16`` so the same file is
+        never written twice and each run can look up files by session.
+        """
+        uploaded: dict[str, str] = {}
+        if session_id not in _sessions:
+            _sessions[session_id] = {}
+        for upload in files:
+            content = await upload.read()
+            hash16 = hashlib.sha256(content).hexdigest()[:16]
+            dest = UPLOADS_DIR / hash16
+            if not dest.exists():
+                dest.write_bytes(content)
+            original_name = upload.filename or hash16
+            _sessions[session_id][original_name] = hash16
+            uploaded[original_name] = hash16
+        return {"session_id": session_id, "uploaded": uploaded}
+
+    # -----------------------------------------------------------------------
     # DAG endpoint — used by the drag-and-drop front-end (utils/dnd-front-end)
     # -----------------------------------------------------------------------
 
@@ -416,6 +459,10 @@ def create_app(
                 "Files required by models that declare `promptfiles` in their config block. "
                 "Each file's filename (without extension) is used as the promptfile key."
             ),
+        ),
+        session_id: Optional[str] = Form(
+            None,
+            description="Session ID from /files/upload. Pre-uploaded files for this session are merged into promptfiles.",
         ),
         provider: str = Form(
             "gemini",
@@ -452,6 +499,30 @@ def create_app(
 
         pf = _parse_promptfiles(promptfiles)
 
+        # Merge pre-uploaded session files (don't overwrite explicitly uploaded ones)
+        if session_id and session_id in _sessions:
+            if pf is None:
+                pf = {}
+            for original_name, hash16 in _sessions[session_id].items():
+                file_path = UPLOADS_DIR / hash16
+                if not file_path.exists():
+                    continue
+                key = original_name.rsplit(".", 1)[0] if "." in original_name else original_name
+                if key not in pf:
+                    pf[key] = open(file_path, "rb")
+            if not pf:
+                pf = None
+
+        session_files = _sessions.get(session_id, {}) if session_id else {}
+        print("[pbt-server] dag/run models:")
+        for name, source in models_dict.items():
+            print(f"  [{name}]\n{source}\n")
+        print(f"[pbt-server] session files available: {list(session_files.keys()) if session_files else 'none'}")
+        print(f"[pbt-server] promptfiles passed to pbt: {list(pf.keys()) if pf else None}")
+
+        # Track file handles opened from disk so we can close them after the run
+        opened_files = [f for f in (pf or {}).values() if hasattr(f, "name")]
+
         try:
             outputs = pbt.run(
                 models_from_dict=models_dict,
@@ -464,6 +535,12 @@ def create_app(
         except Exception as exc:
             _log_exception("POST /dag/run failed", exc)
             return RunResponse(outputs={}, errors=[str(exc)])
+        finally:
+            for f in opened_files:
+                try:
+                    f.close()
+                except Exception:
+                    pass
         serialised, errors = _serialise(outputs)
         _log_run_errors(errors)
         _log_latest_db_errors()

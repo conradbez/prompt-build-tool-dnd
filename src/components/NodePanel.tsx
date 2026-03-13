@@ -1,5 +1,5 @@
-import { useRef, useState, useCallback } from 'react';
-import { PlayIcon, RefreshCwIcon, XIcon } from 'lucide-react';
+import { useRef, useState, useCallback, useMemo } from 'react';
+import { PlayIcon, RefreshCwIcon, XIcon, FileIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -186,6 +186,26 @@ export default function NodePanel({
     [suggestions, activeSuggestion, insertSuggestion],
   );
 
+  // ── Promptfiles config toggle ─────────────────────────────────────────────
+
+  const CONFIG_LINE_RE = /\{\{\s*config\(promptfiles=["'][^"']*["']\)\s*\}\}\n?/;
+
+  const activeFileNames = useMemo(() => {
+    const m = prompt.match(/\{\{\s*config\(promptfiles=["']([^"']*)["']\)\s*\}\}/);
+    return m ? m[1].split(',').map((s) => s.trim()).filter(Boolean) : [];
+  }, [prompt]);
+
+  const toggleFile = useCallback(
+    (name: string) => {
+      const next = activeFileNames.includes(name)
+        ? activeFileNames.filter((n) => n !== name)
+        : [...activeFileNames, name];
+      const stripped = prompt.replace(CONFIG_LINE_RE, '');
+      onPromptChange(next.length ? `{{ config(promptfiles="${next.join(',')}") }}\n` + stripped : stripped);
+    },
+    [prompt, activeFileNames, onPromptChange],
+  );
+
   // ── Rename ────────────────────────────────────────────────────────────────
 
   const commitRename = () => {
@@ -287,6 +307,31 @@ export default function NodePanel({
       >
         <div className="w-8 h-0.5 rounded-full bg-border group-hover:bg-muted-foreground transition-colors" />
       </div>
+
+      {/* Promptfiles picker */}
+      {promptFileNames.length > 0 && (
+        <div className="px-4 py-1.5 flex items-center gap-2 flex-wrap">
+          <FileIcon size={12} className="text-muted-foreground shrink-0" />
+          {promptFileNames.map((name) => {
+            const active = activeFileNames.includes(name);
+            return (
+              <button
+                key={name}
+                type="button"
+                onClick={() => toggleFile(name)}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono border transition-colors ${
+                  active
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-muted text-muted-foreground border-border hover:border-primary hover:text-foreground'
+                }`}
+                title={active ? `Remove config(promptfiles="${name}")` : `Prepend config(promptfiles="${name}")`}
+              >
+                {name}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Run button */}
       <div className="px-4 py-2 border-t border-border flex items-center gap-3">

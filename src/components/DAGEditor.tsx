@@ -27,7 +27,7 @@ import { Input } from '@/components/ui/input';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { runDag, type LlmProvider } from '../api';
+import { runDag, uploadFileToServer, USE_SERVER, type LlmProvider } from '../api';
 import {
   getPyScriptBridgeState,
   subscribePyScriptBridgeState,
@@ -284,7 +284,9 @@ export default function DAGEditor() {
       : undefined;
   }, [promptDataRows]);
 
+  // In server mode files are pre-uploaded; the session_id is sent instead of raw bytes.
   const promptFilesForApi = useMemo(() => {
+    if (USE_SERVER) return undefined;
     const entries = promptFileRows.filter((r) => r.name.trim() && r.file);
     return entries.length > 0
       ? Object.fromEntries(entries.map((r) => [r.name.trim(), r.file!]))
@@ -485,6 +487,17 @@ export default function DAGEditor() {
     runMutation.mutate({ modelName: (selectedNode.data as PromptNodeData).label });
   }, [selectedNode, runMutation]);
 
+  const handleFileSelected = useCallback((id: string, key: string, file: File) => {
+    if (!USE_SERVER) return;
+    uploadFileToServer(key, file)
+      .then((hash) => {
+        setPromptFileRows((rows: PromptFileRow[]) =>
+          rows.map((r: PromptFileRow) => (r.id === id ? { ...r, serverHash: hash } : r)),
+        );
+      })
+      .catch((err) => console.error('[pbt] file upload failed:', err));
+  }, []);
+
   // ── Derived panel props ───────────────────────────────────────────────────
 
   const selectedModelName = selectedNode
@@ -496,18 +509,21 @@ export default function DAGEditor() {
 
   const promptDataCount = promptDataRows.filter((r) => r.name.trim()).length;
   const promptFileCount = promptFileRows.filter((r) => r.name.trim() && r.file).length;
-  const runtimeReady = pyScriptState.status === 'ready';
-  const hasPromptFiles = promptFileCount > 0;
-  const runDisabledReason = !runtimeReady
-    ? pyScriptState.message
-    : hasPromptFiles
-      ? 'Prompt files are not supported by the browser runner yet.'
-      : undefined;
+  const runtimeReady = USE_SERVER || pyScriptState.status === 'ready';
+  const hasPromptFiles = !USE_SERVER && promptFileCount > 0;
+  const runDisabledReason = USE_SERVER
+    ? undefined
+    : !runtimeReady
+      ? pyScriptState.message
+      : hasPromptFiles
+        ? 'Prompt files are not supported by the browser runner yet.'
+        : undefined;
   const pyScriptStatusSummary = useMemo(() => {
+    if (USE_SERVER) return 'Server mode';
     if (pyScriptState.status === 'ready') return 'PyScript ready';
     return `PyScript: ${pyScriptState.message}`;
   }, [pyScriptState]);
-  const pyScriptStatusDetail = pyScriptState.message;
+  const pyScriptStatusDetail = USE_SERVER ? 'Running via local server' : pyScriptState.message;
 
   return (
     <div className="flex flex-col h-full">
@@ -569,20 +585,22 @@ export default function DAGEditor() {
           )}
         </Button>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowFileManager(true)}
-          title="Manage promptfiles uploads"
-        >
-          <FileIcon size={13} />
-          Prompt Files
-          {promptFileCount > 0 && (
-            <span className="ml-1 bg-primary text-primary-foreground rounded-full text-[10px] px-1.5 leading-none">
-              {promptFileCount}
-            </span>
-          )}
-        </Button>
+        {USE_SERVER && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowFileManager(true)}
+            title="Manage promptfiles uploads"
+          >
+            <FileIcon size={13} />
+            Prompt Files
+            {promptFileCount > 0 && (
+              <span className="ml-1 bg-primary text-primary-foreground rounded-full text-[10px] px-1.5 leading-none">
+                {promptFileCount}
+              </span>
+            )}
+          </Button>
+        )}
 
         <Button size="sm" onClick={openAddDialog}>
           <PlusIcon size={13} />
@@ -637,12 +655,12 @@ export default function DAGEditor() {
                 output={nodeOutputs[selectedModelName]}
                 errors={runErrors}
                 isRunning={isSelectedRunning}
-                isRunDisabled={!runtimeReady || hasPromptFiles}
+                isRunDisabled={!runtimeReady || (!USE_SERVER && hasPromptFiles)}
                 runDisabledReason={runDisabledReason}
                 isTemplate={(selectedNode.data as PromptNodeData).isTemplate}
                 otherNodeNames={otherNodeNames}
                 promptDataNames={promptDataRows.filter(r => r.name.trim()).map(r => r.name.trim())}
-                promptFileNames={promptFileRows.filter(r => r.name.trim()).map(r => r.name.trim())}
+                promptFileNames={USE_SERVER ? promptFileRows.filter(r => r.name.trim()).map(r => r.name.trim()) : []}
                 onPromptChange={(value) => handlePromptChange(selectedNode.id, value)}
                 onRename={(newName) => handleRename(selectedNode.id, newName)}
                 onTemplateChange={(value) => {
@@ -694,12 +712,15 @@ export default function DAGEditor() {
         rows={promptDataRows}
         onRowsChange={setPromptDataRows}
       />
-      <PromptFileManager
-        open={showFileManager}
-        onOpenChange={setShowFileManager}
-        rows={promptFileRows}
-        onRowsChange={setPromptFileRows}
-      />
+      {USE_SERVER && (
+        <PromptFileManager
+          open={showFileManager}
+          onOpenChange={setShowFileManager}
+          rows={promptFileRows}
+          onRowsChange={setPromptFileRows}
+          onFileSelected={handleFileSelected}
+        />
+      )}
     </div>
   );
 }

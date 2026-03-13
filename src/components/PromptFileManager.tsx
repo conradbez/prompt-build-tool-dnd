@@ -12,6 +12,8 @@ export interface PromptFileRow {
   id: string;
   name: string;
   file: File | null;
+  /** Hash returned by the server after a successful pre-upload (server mode only). */
+  serverHash?: string;
 }
 
 interface Props {
@@ -19,9 +21,11 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   rows: PromptFileRow[];
   onRowsChange: (rows: PromptFileRow[]) => void;
+  /** Called when a file is selected; used in server mode to trigger pre-upload. */
+  onFileSelected?: (id: string, key: string, file: File) => void;
 }
 
-export default function PromptFileManager({ open, onOpenChange, rows, onRowsChange }: Props) {
+export default function PromptFileManager({ open, onOpenChange, rows, onRowsChange, onFileSelected }: Props) {
   // One hidden file input per row, keyed by row id
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -78,7 +82,11 @@ export default function PromptFileManager({ open, onOpenChange, rows, onRowsChan
                       ref={(el) => { fileInputs.current[row.id] = el; }}
                       onChange={(e) => {
                         const f = e.target.files?.[0];
-                        if (f) updateFile(row.id, f);
+                        if (f) {
+                          updateFile(row.id, f);
+                          const key = row.name.trim() || f.name.replace(/\.[^.]+$/, '');
+                          onFileSelected?.(row.id, key, f);
+                        }
                       }}
                     />
                     <div className="flex items-center gap-2">
@@ -93,6 +101,11 @@ export default function PromptFileManager({ open, onOpenChange, rows, onRowsChan
                       {row.file && (
                         <span className="text-xs text-muted-foreground truncate max-w-[160px]">
                           {row.file.name}
+                        </span>
+                      )}
+                      {row.serverHash && (
+                        <span className="text-xs text-green-600 font-mono" title={`Server hash: ${row.serverHash}`}>
+                          ✓ uploaded
                         </span>
                       )}
                     </div>

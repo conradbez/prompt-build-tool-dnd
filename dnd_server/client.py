@@ -11,7 +11,9 @@ def _env_key_name(provider: str) -> str:
 
 def make_llm_call(api_key: str | None = None, provider: str = "gemini"):
     """Return a llm_call function bound to the given provider and API key."""
-    def llm_call(prompt: str) -> str:
+    def llm_call(prompt: str, files=None, config=None) -> str:
+        print(f"[llm_call] prompt sent to {provider}:\n{prompt[:500]}\n")
+        print(files)
         resolved_api_key = api_key or os.environ[_env_key_name(provider)]
 
         if provider == "gemini":
