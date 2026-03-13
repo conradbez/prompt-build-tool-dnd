@@ -9,6 +9,7 @@ from pyodide.http import pyfetch
 from pyscript import ffi, window
 
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+_storage_backend = None
 _GEMINI_DEFAULT_MODEL = "gemini-3-flash-preview"
 _OPENAI_DEFAULT_MODEL = "gpt-5-mini"
 _ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
@@ -155,7 +156,6 @@ async def _call_llm(provider: str, prompt: str, api_key: str) -> str:
 async def _run_dag(payload_json: str) -> str:
     try:
         import pbt
-        from pbt.storage import MemoryStorageBackend
 
         payload = json.loads(payload_json)
         provider = payload.get("provider") or "gemini"
@@ -194,7 +194,7 @@ async def _run_dag(payload_json: str) -> str:
             verbose=False,
             promptdata=payload.get("promptdata") or None,
             validation_dir=None,
-            storage_backend=MemoryStorageBackend(),
+            storage_backend=_storage_backend,
         )
 
         serialised, errors = _serialise(outputs)
@@ -209,10 +209,13 @@ async def _run_dag(payload_json: str) -> str:
 
 
 async def _init_runtime() -> None:
+    global _storage_backend
     _dispatch_status("Preparing browser Python runtime…")
 
     try:
         import pbt
+        from pbt.storage import MemoryStorageBackend
+        _storage_backend = MemoryStorageBackend()
     except Exception as exc:
         window.__pbtPyBridgeError = str(exc)
         _dispatch_status(f"PyScript bootstrap failed: {exc}")
