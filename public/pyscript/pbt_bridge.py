@@ -198,10 +198,6 @@ async def _run_dag(payload_json: str) -> str:
         )
 
         serialised, errors = _serialise(outputs)
-        if payload.get("select"):
-            selected_set = set(payload["select"])
-            serialised = {name: value for name, value in serialised.items() if name in selected_set}
-            errors = [error for error in errors if error.split(":", 1)[0] in selected_set]
         return json.dumps({"outputs": serialised, "errors": errors})
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()

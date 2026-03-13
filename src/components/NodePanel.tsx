@@ -195,7 +195,7 @@ export default function NodePanel({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white border-l border-border w-[420px] flex-shrink-0">
+    <div className="flex flex-col h-full bg-white border-l border-border w-full">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
         <div className="flex items-center gap-2 flex-1 min-w-0">

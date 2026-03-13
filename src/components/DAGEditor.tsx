@@ -76,6 +76,29 @@ function getInitialProviderKeys(): Record<LlmProvider, string> {
   }
 }
 
+/** Return the IDs of targetLabel's node plus all its transitive ancestors. */
+function getAncestorIds(targetLabel: string, nodes: Node[], edges: Edge[]): Set<string> {
+  const nameToId = new Map(nodes.map((n) => [(n.data as PromptNodeData).label, n.id]));
+  const targetId = nameToId.get(targetLabel);
+  if (!targetId) return new Set();
+
+  const parents = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (!parents.has(edge.target)) parents.set(edge.target, []);
+    parents.get(edge.target)!.push(edge.source);
+  }
+
+  const visited = new Set<string>();
+  const queue = [targetId];
+  while (queue.length) {
+    const id = queue.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    for (const p of parents.get(id) ?? []) queue.push(p);
+  }
+  return visited;
+}
+
 /**
  * Build React Flow edges from the per-node ref cache.
  * Refs are the single source of truth; edges are derived, never stored separately.
@@ -129,6 +152,24 @@ export default function DAGEditor() {
   const [pyScriptState, setPyScriptState] = useState<PyScriptBridgeState>(getPyScriptBridgeState());
 
   const rfInstance = useRef<ReactFlowInstance | null>(null);
+  const [panelWidth, setPanelWidth] = useState(420);
+  const panelDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  const handlePanelDragStart = useCallback((e: React.MouseEvent) => {
+    panelDragRef.current = { startX: e.clientX, startWidth: panelWidth };
+    const onMove = (ev: MouseEvent) => {
+      if (!panelDragRef.current) return;
+      const delta = panelDragRef.current.startX - ev.clientX;
+      setPanelWidth(Math.max(280, Math.min(800, panelDragRef.current.startWidth + delta)));
+    };
+    const onUp = () => {
+      panelDragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [panelWidth]);
 
   useEffect(() => subscribePyScriptBridgeState(setPyScriptState), []);
 
@@ -400,8 +441,14 @@ export default function DAGEditor() {
       ),
 
     onMutate: ({ modelName }) => {
-      const nodeId = nodes.find((n) => (n.data as PromptNodeData).label === modelName)?.id;
-      if (nodeId) updateNodeData(nodeId, { isRunning: true });
+      const affectedIds = getAncestorIds(modelName, nodes, edges);
+      setNodes((nds) =>
+        nds.map((n) =>
+          affectedIds.has(n.id)
+            ? { ...n, data: { ...n.data, isRunning: true } }
+            : n,
+        ),
+      );
     },
 
     onSuccess: (data) => {
@@ -410,18 +457,26 @@ export default function DAGEditor() {
 
       const updatedLabels = new Set(Object.keys(data.outputs));
       setNodes((nds) =>
-        nds.map((n) =>
-          updatedLabels.has((n.data as PromptNodeData).label)
-            ? { ...n, data: { ...n.data, isRunning: false, hasOutput: true } }
-            : n,
-        ),
+        nds.map((n) => {
+          const label = (n.data as PromptNodeData).label;
+          if (updatedLabels.has(label))
+            return { ...n, data: { ...n.data, isRunning: false, hasOutput: true } };
+          if ((n.data as PromptNodeData).isRunning)
+            return { ...n, data: { ...n.data, isRunning: false } };
+          return n;
+        }),
       );
     },
 
-    onError: (err, { modelName }) => {
+    onError: (err) => {
       setRunErrors([(err as Error).message]);
-      const nodeId = nodes.find((n) => (n.data as PromptNodeData).label === modelName)?.id;
-      if (nodeId) updateNodeData(nodeId, { isRunning: false });
+      setNodes((nds) =>
+        nds.map((n) =>
+          (n.data as PromptNodeData).isRunning
+            ? { ...n, data: { ...n.data, isRunning: false } }
+            : n,
+        ),
+      );
     },
   });
 
@@ -569,28 +624,36 @@ export default function DAGEditor() {
         {/* Node panel — key resets all local state when selected node changes,
             eliminating the need for useEffect-based draftName sync */}
         {selectedNode && selectedModelName && (
-          <NodePanel
-            key={selectedNode.id}
-            nodeName={selectedModelName}
-            prompt={nodePrompts[selectedNode.id] ?? ''}
-            output={nodeOutputs[selectedModelName]}
-            errors={runErrors}
-            isRunning={isSelectedRunning}
-            isRunDisabled={!runtimeReady || hasPromptFiles}
-            runDisabledReason={runDisabledReason}
-            isTemplate={(selectedNode.data as PromptNodeData).isTemplate}
-            otherNodeNames={otherNodeNames}
-            promptDataNames={promptDataRows.filter(r => r.name.trim()).map(r => r.name.trim())}
-            promptFileNames={promptFileRows.filter(r => r.name.trim()).map(r => r.name.trim())}
-            onPromptChange={(value) => handlePromptChange(selectedNode.id, value)}
-            onRename={(newName) => handleRename(selectedNode.id, newName)}
-            onTemplateChange={(value) => {
-              updateNodeData(selectedNode.id, { isTemplate: value });
-              markDirty();
-            }}
-            onClose={() => setSelectedNodeId(null)}
-            onRun={handleRunModel}
-          />
+          <>
+            <div
+              className="w-1 cursor-col-resize hover:bg-blue-400 bg-border transition-colors flex-shrink-0"
+              onMouseDown={handlePanelDragStart}
+            />
+            <div style={{ width: panelWidth }} className="flex-shrink-0 min-h-0 h-full overflow-hidden">
+              <NodePanel
+                key={selectedNode.id}
+                nodeName={selectedModelName}
+                prompt={nodePrompts[selectedNode.id] ?? ''}
+                output={nodeOutputs[selectedModelName]}
+                errors={runErrors}
+                isRunning={isSelectedRunning}
+                isRunDisabled={!runtimeReady || hasPromptFiles}
+                runDisabledReason={runDisabledReason}
+                isTemplate={(selectedNode.data as PromptNodeData).isTemplate}
+                otherNodeNames={otherNodeNames}
+                promptDataNames={promptDataRows.filter(r => r.name.trim()).map(r => r.name.trim())}
+                promptFileNames={promptFileRows.filter(r => r.name.trim()).map(r => r.name.trim())}
+                onPromptChange={(value) => handlePromptChange(selectedNode.id, value)}
+                onRename={(newName) => handleRename(selectedNode.id, newName)}
+                onTemplateChange={(value) => {
+                  updateNodeData(selectedNode.id, { isTemplate: value });
+                  markDirty();
+                }}
+                onClose={() => setSelectedNodeId(null)}
+                onRun={handleRunModel}
+              />
+            </div>
+          </>
         )}
       </div>
 
