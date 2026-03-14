@@ -1,8 +1,7 @@
 import { runDagInPyScript } from './lib/pyscriptBridge';
 
-/** Set to true to send DAG runs to the local server instead of PyScript. */
-// export const USE_SERVER = false;
-export const USE_SERVER = true;
+/** False by default. Set VITE_USE_SERVER=true in .env or environment to enable. */
+export const USE_SERVER = (import.meta as any).env?.VITE_USE_SERVER === 'true';
 
 /** Server base path — proxied by Vite to http://localhost:8000 via the /api rewrite. */
 const SERVER_URL = '/api';

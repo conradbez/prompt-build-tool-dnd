@@ -293,10 +293,6 @@ export default function NodePanel({
           )}
         </div>
 
-        <p className="text-[11px] text-muted-foreground mt-1 mb-0">
-          Type <code className="bg-muted px-0.5 rounded">ref(&#39;</code> to autocomplete a model
-          name. Arrow keys to navigate, Enter/Tab to insert.
-        </p>
       </div>
 
       {/* Drag handle */}
@@ -309,7 +305,7 @@ export default function NodePanel({
       </div>
 
       {/* Promptfiles picker */}
-      {promptFileNames.length > 0 && (
+      {promptFileNames.length > 0 && !isTemplate && (
         <div className="px-4 py-1.5 flex items-center gap-2 flex-wrap">
           <FileIcon size={12} className="text-muted-foreground shrink-0" />
           {promptFileNames.map((name) => {
@@ -334,7 +330,8 @@ export default function NodePanel({
       )}
 
       {/* Run button */}
-      <div className="px-4 py-2 border-t border-border flex items-center gap-3">
+      <div className="px-4 py-2 border-t border-border flex items-center gap-3 justify-between">
+        <div className="flex items-center gap-3">
         <Button
           onClick={onRun}
           disabled={isRunning || isRunDisabled}
@@ -350,12 +347,13 @@ export default function NodePanel({
         {isRunDisabled && runDisabledReason && (
           <p className="text-[11px] text-muted-foreground">{runDisabledReason}</p>
         )}
+        </div>
         <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground select-none">
           <span className="group relative cursor-help">
             Template
-            <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
+            <span className="pointer-events-none absolute bottom-full right-0 mb-2 w-52 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
               Not processed by AI — input is passed directly as output to the next model.
-              <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+              <span className="absolute top-full right-4 border-4 border-transparent border-t-slate-800" />
             </span>
           </span>
           <button
