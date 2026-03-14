@@ -15,48 +15,59 @@ function PromptNode({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        'relative flex flex-col items-center rounded-xl px-5 py-3 shadow-md cursor-pointer',
-        'bg-white border-2 transition-all duration-150 min-w-[140px]',
-        selected ? 'border-blue-500 shadow-blue-100 shadow-lg' : 'border-slate-200 hover:border-slate-400',
+        'relative flex flex-col rounded-2xl cursor-pointer',
+        'transition-all duration-200',
+        'min-w-[160px]',
+        selected
+          ? 'shadow-[0_0_0_2px_#6366f1,0_8px_24px_rgba(99,102,241,0.18)]'
+          : 'shadow-[0_2px_8px_rgba(0,0,0,0.10)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.14)]',
       )}
+      style={{
+        background: selected
+          ? 'linear-gradient(135deg,#f5f3ff 0%,#ede9fe 100%)'
+          : 'linear-gradient(135deg,#ffffff 0%,#f8fafc 100%)',
+        border: selected ? '2px solid #6366f1' : '1.5px solid #e2e8f0',
+      }}
     >
-      {/* target handle (top – receives connections from upstream models) */}
+      {/* target handle (left – receives connections from upstream models) */}
       <Handle
         type="target"
-        position={Position.Top}
-        className="!w-3 !h-3 !border-2 !border-slate-400 !bg-white"
+        position={Position.Left}
+        className="!w-3 !h-3 !rounded-full !border-2 !border-indigo-300 !bg-white !-left-1.5"
       />
 
-      {/* Node label */}
-      <div className="font-mono font-semibold text-sm text-slate-800 truncate max-w-[200px]">
-        {d.label}
+      <div className="px-4 py-3">
+        {/* Node label */}
+        <div className="font-mono font-semibold text-sm text-slate-800 truncate max-w-[200px] leading-tight">
+          {d.label}
+        </div>
+
+        {/* Status row */}
+        <div className="mt-1.5 flex items-center gap-1.5">
+          {d.isRunning ? (
+            <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 font-semibold tracking-wide uppercase">
+              <span className="animate-spin inline-block">⟳</span> running
+            </span>
+          ) : d.hasOutput ? (
+            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 font-semibold tracking-wide uppercase">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> done
+            </span>
+          ) : (
+            <span className="text-[10px] text-slate-400 tracking-wide">click to edit</span>
+          )}
+          {d.isTemplate && (
+            <span className="inline-flex items-center rounded-full bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600">
+              template
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Status badge */}
-      <div className="mt-1 flex items-center gap-1">
-        {d.isRunning ? (
-          <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 font-medium">
-            <span className="animate-spin">⟳</span> running
-          </span>
-        ) : d.hasOutput ? (
-          <span className="inline-flex items-center gap-1 text-[10px] text-green-600 font-medium">
-            ✓ done
-          </span>
-        ) : (
-          <span className="text-[10px] text-slate-400">click to edit</span>
-        )}
-        {d.isTemplate && (
-          <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
-            template
-          </span>
-        )}
-      </div>
-
-      {/* source handle (bottom – this model feeds into downstream models) */}
+      {/* source handle (right – this model feeds into downstream models) */}
       <Handle
         type="source"
-        position={Position.Bottom}
-        className="!w-3 !h-3 !border-2 !border-slate-400 !bg-white"
+        position={Position.Right}
+        className="!w-3 !h-3 !rounded-full !border-2 !border-indigo-300 !bg-white !-right-1.5"
       />
     </div>
   );

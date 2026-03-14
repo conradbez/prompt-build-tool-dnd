@@ -1,1 +1,3 @@
-`uvicorn main:app --port 8000 --reload  `
+` npm run dev`
+
+`uvicorn main:app --port 8000 --reload`

@@ -115,8 +115,8 @@ function computeEdges(nodes: Node[], nodeRefs: Record<string, string[]>): Edge[]
           source: sourceId,
           target: node.id,
           animated: true,
-          markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#94a3b8' },
-          style: { stroke: '#94a3b8', strokeWidth: 2 },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#818cf8' },
+          style: { stroke: '#818cf8', strokeWidth: 1.5 },
         });
       }
     }
