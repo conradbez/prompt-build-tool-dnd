@@ -351,7 +351,13 @@ export default function NodePanel({
           <p className="text-[11px] text-muted-foreground">{runDisabledReason}</p>
         )}
         <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground select-none">
-          <span>Template</span>
+          <span className="group relative cursor-help">
+            Template
+            <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
+              Not processed by AI — input is passed directly as output to the next model.
+              <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+            </span>
+          </span>
           <button
             type="button"
             role="switch"
@@ -390,7 +396,7 @@ export default function NodePanel({
       )}
 
       {/* Output */}
-      <div className="flex-1 overflow-hidden flex flex-col px-4 pb-4 min-h-0">
+      <div className={`flex-1 overflow-hidden flex flex-col px-4 pb-4 min-h-0 ${isTemplate ? 'hidden' : ''}`}>
         <div className="border-t border-border pt-3 flex-1 flex flex-col min-h-0">
           <label className="block text-xs font-medium text-muted-foreground mb-2">
             Output

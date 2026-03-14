@@ -56,8 +56,12 @@ function PromptNode({ data, selected }: NodeProps) {
             <span className="text-[10px] text-slate-400 tracking-wide">click to edit</span>
           )}
           {d.isTemplate && (
-            <span className="inline-flex items-center rounded-full bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600">
+            <span className="group relative inline-flex items-center rounded-full bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600 cursor-help">
               template
+              <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
+                Not processed by AI — input is passed directly as output to the next model.
+                <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+              </span>
             </span>
           )}
         </div>
