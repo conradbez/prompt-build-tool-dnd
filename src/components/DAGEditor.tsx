@@ -16,7 +16,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useMutation } from '@tanstack/react-query';
-import { PlusIcon, DatabaseIcon, FileIcon, KeyIcon } from 'lucide-react';
+import { PlusIcon, DatabaseIcon, FileIcon, KeyIcon, RepeatIcon } from 'lucide-react';
 
 import PromptNode, { type PromptNodeData } from './PromptNode';
 import NodePanel from './NodePanel';
@@ -140,6 +140,10 @@ export default function DAGEditor() {
   // Add-node dialog
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [addNodeName, setAddNodeName] = useState('');
+
+  // Add-loop-node dialog
+  const [showAddLoopDialog, setShowAddLoopDialog] = useState(false);
+  const [addLoopNodeName, setAddLoopNodeName] = useState('');
 
   // Manager dialogs
   const [showDataManager, setShowDataManager] = useState(false);
@@ -380,7 +384,7 @@ export default function DAGEditor() {
         id,
         type: 'promptNode',
         position,
-        data: { label: name, hasOutput: false, isRunning: false, isTemplate: false } satisfies PromptNodeData,
+        data: { label: name, hasOutput: false, isRunning: false, isTemplate: false, isLoop: false, loopOver: '' } satisfies PromptNodeData,
       },
     ]);
     setNodePrompts((prev) => ({ ...prev, [id]: '' }));
@@ -388,6 +392,43 @@ export default function DAGEditor() {
     markDirty();
     setShowAddDialog(false);
   }, [addNodeName, modelNameSet, setNodes, markDirty]);
+
+  const openAddLoopDialog = useCallback(() => {
+    setAddLoopNodeName('');
+    setShowAddLoopDialog(true);
+  }, []);
+
+  const confirmAddLoopNode = useCallback(() => {
+    const name = addLoopNodeName.trim();
+    if (!name) return;
+    if (/\s/.test(name)) {
+      alert('Model name cannot contain spaces.');
+      return;
+    }
+    if (modelNameSet.has(name)) {
+      alert(`A model named "${name}" already exists.`);
+      return;
+    }
+    const id = makeNodeId();
+    const rawPos = { x: 200 + Math.random() * 300, y: 150 + Math.random() * 200 };
+    const position = rfInstance.current
+      ? rfInstance.current.screenToFlowPosition(rawPos)
+      : rawPos;
+
+    setNodes((nds) => [
+      ...nds,
+      {
+        id,
+        type: 'promptNode',
+        position,
+        data: { label: name, hasOutput: false, isRunning: false, isTemplate: false, isLoop: true, loopOver: '' } satisfies PromptNodeData,
+      },
+    ]);
+    setNodePrompts((prev) => ({ ...prev, [id]: '' }));
+    setNodeRefs((prev) => ({ ...prev, [id]: [] }));
+    markDirty();
+    setShowAddLoopDialog(false);
+  }, [addLoopNodeName, modelNameSet, setNodes, markDirty]);
 
   // ── Node selection (click and double-click share one handler) ─────────────
 
@@ -430,11 +471,17 @@ export default function DAGEditor() {
   const runMutation = useMutation({
     mutationFn: ({ modelName }: { modelName: string }) =>
       runDag(
-        nodes.map((n) => ({
-          name: (n.data as PromptNodeData).label,
-          source: nodePrompts[n.id] ?? '',
-          isTemplate: (n.data as PromptNodeData).isTemplate,
-        })),
+        nodes.map((n) => {
+          const data = n.data as PromptNodeData;
+          let source = nodePrompts[n.id] ?? '';
+          if (data.isLoop) {
+            const loopConfig = data.loopOver.trim()
+              ? `{{ config(model_type="loop", loop_over="${data.loopOver.trim()}") }}\n`
+              : `{{ config(model_type="loop") }}\n`;
+            source = loopConfig + source;
+          }
+          return { name: data.label, source, isTemplate: data.isTemplate };
+        }),
         [modelName],
         promptDataForApi,
         promptFilesForApi,
@@ -454,6 +501,10 @@ export default function DAGEditor() {
     },
 
     onSuccess: (data) => {
+      console.log('[runDag] full response:', JSON.stringify(data, null, 2));
+      if (data.errors?.length) {
+        console.error('[runDag] errors:', data.errors);
+      }
       setNodeOutputs((prev) => ({ ...prev, ...data.outputs }));
       setRunErrors(data.errors);
 
@@ -471,6 +522,7 @@ export default function DAGEditor() {
     },
 
     onError: (err) => {
+      console.error('[runDag] mutation error:', err);
       setRunErrors([(err as Error).message]);
       setNodes((nds) =>
         nds.map((n) =>
@@ -606,6 +658,11 @@ export default function DAGEditor() {
           <PlusIcon size={13} />
           Add node
         </Button>
+
+        <Button size="sm" variant="outline" onClick={openAddLoopDialog}>
+          <RepeatIcon size={13} />
+          Loop node
+        </Button>
       </header>
 
       {/* ── Main content ── */}
@@ -658,6 +715,8 @@ export default function DAGEditor() {
                 isRunDisabled={!runtimeReady || (!USE_SERVER && hasPromptFiles)}
                 runDisabledReason={runDisabledReason}
                 isTemplate={(selectedNode.data as PromptNodeData).isTemplate}
+                isLoop={(selectedNode.data as PromptNodeData).isLoop}
+                loopOver={(selectedNode.data as PromptNodeData).loopOver}
                 otherNodeNames={otherNodeNames}
                 promptDataNames={promptDataRows.filter(r => r.name.trim()).map(r => r.name.trim())}
                 promptFileNames={USE_SERVER ? promptFileRows.filter(r => r.name.trim()).map(r => r.name.trim()) : []}
@@ -665,6 +724,10 @@ export default function DAGEditor() {
                 onRename={(newName) => handleRename(selectedNode.id, newName)}
                 onTemplateChange={(value) => {
                   updateNodeData(selectedNode.id, { isTemplate: value });
+                  markDirty();
+                }}
+                onLoopOverChange={(value) => {
+                  updateNodeData(selectedNode.id, { loopOver: value });
                   markDirty();
                 }}
                 onClose={() => setSelectedNodeId(null)}
@@ -701,6 +764,36 @@ export default function DAGEditor() {
           <DialogFooter>
             <Button variant="ghost" onClick={() => setShowAddDialog(false)}>Cancel</Button>
             <Button onClick={confirmAddNode} disabled={!addNodeName.trim()}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add loop node dialog ── */}
+      <Dialog open={showAddLoopDialog} onOpenChange={setShowAddLoopDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add loop node</DialogTitle>
+            <DialogDescription>
+              A loop node iterates over each item in a JSON array from an upstream node and produces a combined JSON array as output.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <label className="block text-sm text-muted-foreground mb-1.5">Model name</label>
+            <Input
+              autoFocus
+              value={addLoopNodeName}
+              onChange={(e) => setAddLoopNodeName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') confirmAddLoopNode(); }}
+              placeholder="e.g. processed_items"
+              className="font-mono"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Lowercase letters, digits, and underscores only.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowAddLoopDialog(false)}>Cancel</Button>
+            <Button onClick={confirmAddLoopNode} disabled={!addLoopNodeName.trim()}>Add</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

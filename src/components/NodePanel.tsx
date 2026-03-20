@@ -17,12 +17,15 @@ interface NodePanelProps {
   isRunDisabled: boolean;
   runDisabledReason?: string;
   isTemplate: boolean;
+  isLoop: boolean;
+  loopOver: string;
   otherNodeNames: string[];
   promptDataNames: string[];
   promptFileNames: string[];
   onPromptChange: (value: string) => void;
   onRename: (newName: string) => void;
   onTemplateChange: (value: boolean) => void;
+  onLoopOverChange: (value: string) => void;
   onClose: () => void;
   onRun: () => void;
 }
@@ -99,12 +102,15 @@ export default function NodePanel({
   isRunDisabled,
   runDisabledReason,
   isTemplate,
+  isLoop,
+  loopOver,
   otherNodeNames,
   promptDataNames,
   promptFileNames,
   onPromptChange,
   onRename,
   onTemplateChange,
+  onLoopOverChange,
   onClose,
   onRun,
 }: NodePanelProps) {
@@ -326,6 +332,31 @@ export default function NodePanel({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Loop mode info */}
+      {isLoop && !isTemplate && (
+        <div className="mx-4 mb-1 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+          <p className="text-[11px] font-semibold text-amber-700 mb-1">Loop mode</p>
+          <p className="text-[11px] text-amber-700 leading-snug mb-2">
+            Iterates over each item in a JSON array from an upstream node. 
+          </p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] text-amber-700 font-medium shrink-0 whitespace-nowrap">
+              Loop over
+              <span className="ml-1 font-normal opacity-70">(optional)</span>:
+            </label>
+            <Input
+              className="h-6 text-xs font-mono py-0 border-amber-300 bg-white"
+              placeholder="key_from_parent_json or blank"
+              value={loopOver}
+              onChange={(e) => onLoopOverChange(e.target.value)}
+            />
+          </div>
+          <p className="text-[10px] text-amber-600 mt-1">
+            Only needed when multiple upstream nodes return lists.
+          </p>
         </div>
       )}
 

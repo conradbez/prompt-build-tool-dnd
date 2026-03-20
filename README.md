@@ -27,6 +27,16 @@ yarn dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
+## Compile (static / no server)
+
+```bash
+yarn build
+```
+
+Outputs to `dist/` — open `dist/index.html` directly in a browser or deploy to any static host (GitHub Pages, S3, Netlify). No backend needed when `USE_SERVER=false` (PyScript mode).
+
+Use `yarn build` instead of `yarn dev` when you want to share or deploy the tool without running a Node dev server.
+
 ## Modes
 
 Set `USE_SERVER` in `src/api.ts`:
