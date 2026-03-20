@@ -204,6 +204,43 @@ export default function DAGEditor() {
     setRunErrors([]);
   }, [setNodes]);
 
+  const handleExportPython = useCallback(async () => {
+    const modelDict: Record<string, string> = {};
+    for (const n of nodes) {
+      const data = n.data as PromptNodeData;
+      let source = nodePrompts[n.id] ?? '';
+      if (data.isLoop) {
+        const loopConfig = data.loopOver.trim()
+          ? `{{ config(model_type="loop", loop_over="${data.loopOver.trim()}") }}\n`
+          : `{{ config(model_type="loop") }}\n`;
+        source = loopConfig + source;
+      } else if (data.isTemplate) {
+        source = `{{ config(is_template=true) }}\n` + source;
+      }
+      modelDict[data.label] = source;
+    }
+    const jsonInline = JSON.stringify(modelDict).replace(/\\/g, '\\\\');
+    const script = `import os
+import json
+import pbt
+from google import genai
+
+
+# This function is automatically picked up by \`pbt\` and used to run .prompt files
+def llm_call(prompt: str) -> str:
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return client.models.generate_content(
+        model="gemini-3.1-flash-lite-preview",
+        contents=prompt,
+    ).text
+
+
+results = pbt.run(models_from_dict=json.loads(\'\'\'${jsonInline}\'\'\'), llm_call=llm_call)
+print(results)
+`;
+    await navigator.clipboard.writeText(script);
+  }, [nodes, nodePrompts]);
+
   const handleExport = useCallback(async () => {
     const state = await buildUserModelState({
       selectedProvider, nodes, nodePrompts, promptDataRows, promptFileRows, nodeOutputs,
@@ -696,6 +733,10 @@ export default function DAGEditor() {
             <DropdownMenuItem onSelect={() => void handleExport()}>
               <DownloadIcon size={13} />
               Export — copy to clipboard
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void handleExportPython()}>
+              <DownloadIcon size={13} />
+              Export to Python — copy to clipboard
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void handleImport()}>
               <UploadIcon size={13} />
