@@ -456,7 +456,7 @@ export default function NodePanel({
               <div className="max-h-32 overflow-y-auto mt-1">
                 {errors.map((e, i) => (
                   <p key={i} className="font-mono text-xs whitespace-pre-wrap">
-                    {e}
+                    {e}{e.includes("Expecting value") ? " (this is ussually when the upstream model didn't provide valid json)" : ""}
                   </p>
                 ))}
               </div>
