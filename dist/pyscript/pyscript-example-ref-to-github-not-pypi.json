@@ -1,0 +1,11 @@
+{
+  "packages": [
+    "jinja2",
+    "networkx",
+    "rich",
+    "click",
+    "python-dotenv",
+    "https://cdn.jsdelivr.net/gh/conradbez/prompt-build-tool-for-LLMs@feat/loop_model/dist/prompt_build_tool-0.1.16-py3-none-any.whl"
+  ],
+  "experimental_create_proxy": "auto"
+}
