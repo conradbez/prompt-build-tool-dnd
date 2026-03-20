@@ -16,13 +16,17 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useMutation } from '@tanstack/react-query';
-import { PlusIcon, DatabaseIcon, FileIcon, KeyIcon, RepeatIcon } from 'lucide-react';
+import { PlusIcon, DatabaseIcon, FileIcon, KeyIcon, RepeatIcon, ChevronDownIcon, UploadIcon, DownloadIcon } from 'lucide-react';
 
 import PromptNode, { type PromptNodeData } from './PromptNode';
 import NodePanel from './NodePanel';
 import PromptDataManager, { type PromptDataRow } from './PromptDataManager';
 import PromptFileManager, { type PromptFileRow } from './PromptFileManager';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
@@ -196,9 +200,23 @@ export default function DAGEditor() {
     setShowAddDialog(false);
     setShowDataManager(false);
     setShowFileManager(false);
-    setNodeOutputs({});
+    setNodeOutputs(hydrated.nodeOutputs);
     setRunErrors([]);
   }, [setNodes]);
+
+  const handleExport = useCallback(async () => {
+    const state = await buildUserModelState({
+      selectedProvider, nodes, nodePrompts, promptDataRows, promptFileRows, nodeOutputs,
+    });
+    await navigator.clipboard.writeText(JSON.stringify(state, null, 2));
+  }, [selectedProvider, nodes, nodePrompts, promptDataRows, promptFileRows, nodeOutputs]);
+
+  const handleImport = useCallback(async () => {
+    const text = await navigator.clipboard.readText();
+    const parsed = JSON.parse(text) as UserModelState;
+    if (parsed.version !== 1) throw new Error('Invalid state version');
+    applyLoadedState(parsed);
+  }, [applyLoadedState]);
 
   useEffect(() => {
     try {
@@ -239,6 +257,7 @@ export default function DAGEditor() {
           nodePrompts,
           promptDataRows,
           promptFileRows,
+          nodeOutputs,
         });
         if (!cancelled) {
           localStorage.setItem(USER_MODEL_STATE_STORAGE_KEY, JSON.stringify(state));
@@ -253,7 +272,7 @@ export default function DAGEditor() {
     return () => {
       cancelled = true;
     };
-  }, [selectedProvider, nodes, nodePrompts, promptDataRows, promptFileRows]);
+  }, [selectedProvider, nodes, nodePrompts, promptDataRows, promptFileRows, nodeOutputs]);
 
   // ── Computed ──────────────────────────────────────────────────────────────
 
@@ -663,6 +682,27 @@ export default function DAGEditor() {
           <RepeatIcon size={13} />
           Loop node
         </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline">
+              Model
+              <ChevronDownIcon size={13} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Model</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void handleExport()}>
+              <DownloadIcon size={13} />
+              Export — copy to clipboard
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void handleImport()}>
+              <UploadIcon size={13} />
+              Import — paste from clipboard
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
       {/* ── Main content ── */}
