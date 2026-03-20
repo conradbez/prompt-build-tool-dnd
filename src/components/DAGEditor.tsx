@@ -234,12 +234,12 @@ def llm_call(prompt: str) -> str:
     ).text
 
 
-def run_pbt():
-    results = pbt.run(models_from_dict=json.loads(model_export_json), llm_call=llm_call)
+async def run_pbt():
+    results = await pbt.async_run(models_from_dict=json.loads(model_export_json), llm_call=llm_call)
     print(results)
 
 
-run_pbt()
+await run_pbt()
 
 
 # where your model definitions live
@@ -772,7 +772,7 @@ ${jsonInline}
             onInit={(instance) => { rfInstance.current = instance; }}
             fitView
             fitViewOptions={{ padding: 0.3 }}
-            deleteKeyCode="Delete"
+            deleteKeyCode={["Delete", "Backspace"]}
             minZoom={0.2}
             maxZoom={3}
           >

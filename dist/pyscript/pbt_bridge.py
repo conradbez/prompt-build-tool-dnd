@@ -184,10 +184,10 @@ async def _run_dag(payload_json: str) -> str:
                 _parse_json_output(output)
             return output
 
-        if not inspect.iscoroutinefunction(getattr(pbt, "run", None)):
-            raise RuntimeError("Loaded prompt-build-tool does not expose async pbt.run().")
+        if not inspect.iscoroutinefunction(getattr(pbt, "async_run", None)):
+            raise RuntimeError("Loaded prompt-build-tool does not expose async pbt.async_run().")
 
-        outputs = await pbt.run(
+        outputs = await pbt.async_run(
             models_from_dict=models_dict,
             select=payload.get("select") or None,
             llm_call=llm_call,

@@ -192,6 +192,20 @@ export default function NodePanel({
     [suggestions, activeSuggestion, insertSuggestion],
   );
 
+  // ── JSON output config toggle ─────────────────────────────────────────────
+
+  const JSON_OUTPUT_RE = /\{\{\s*config\(output_format=["']json["']\)\s*\}\}\n?/;
+
+  const isJsonOutput = useMemo(() => JSON_OUTPUT_RE.test(prompt), [prompt]);
+
+  const toggleJsonOutput = useCallback(() => {
+    if (isJsonOutput) {
+      onPromptChange(prompt.replace(JSON_OUTPUT_RE, ''));
+    } else {
+      onPromptChange(`{{ config(output_format="json") }}\n` + prompt);
+    }
+  }, [prompt, isJsonOutput, onPromptChange]);
+
   // ── Promptfiles config toggle ─────────────────────────────────────────────
 
   const CONFIG_LINE_RE = /\{\{\s*config\(promptfiles=["'][^"']*["']\)\s*\}\}\n?/;
@@ -379,31 +393,58 @@ export default function NodePanel({
           <p className="text-[11px] text-muted-foreground">{runDisabledReason}</p>
         )}
         </div>
-        <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground select-none">
-          <span className="group relative cursor-help">
-            Template
-            <span className="pointer-events-none absolute bottom-full right-0 mb-2 w-52 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
-              Not processed by AI — input is passed directly as output to the next model.
-              <span className="absolute top-full right-4 border-4 border-transparent border-t-slate-800" />
+        <div className="flex items-center gap-4">
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground select-none">
+            <span className="group relative cursor-help">
+              JSON output
+              <span className="pointer-events-none absolute bottom-full right-0 mb-2 w-52 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
+                Adds <code className="font-mono">{'{{ config(output_format="json") }}'}</code> — instructs the LLM to return structured JSON output.
+                <span className="absolute top-full right-4 border-4 border-transparent border-t-slate-800" />
+              </span>
             </span>
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isTemplate}
-            onClick={() => onTemplateChange(!isTemplate)}
-            className={`relative h-5 w-10 rounded-full transition-colors ${
-              isTemplate ? 'bg-primary' : 'bg-slate-300'
-            }`}
-            title="When enabled, this model output is the literal template text and will not call the LLM."
-          >
-            <span
-              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${
-                isTemplate ? 'left-[22px]' : 'left-0.5'
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isJsonOutput}
+              onClick={toggleJsonOutput}
+              className={`relative h-5 w-10 rounded-full transition-colors ${
+                isJsonOutput ? 'bg-primary' : 'bg-slate-300'
               }`}
-            />
-          </button>
-        </label>
+              title='When enabled, prepends {{ config(output_format="json") }} to the prompt.'
+            >
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${
+                  isJsonOutput ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </label>
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground select-none">
+            <span className="group relative cursor-help">
+              Template
+              <span className="pointer-events-none absolute bottom-full right-0 mb-2 w-52 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
+                Not processed by AI — input is passed directly as output to the next model.
+                <span className="absolute top-full right-4 border-4 border-transparent border-t-slate-800" />
+              </span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isTemplate}
+              onClick={() => onTemplateChange(!isTemplate)}
+              className={`relative h-5 w-10 rounded-full transition-colors ${
+                isTemplate ? 'bg-primary' : 'bg-slate-300'
+              }`}
+              title="When enabled, this model output is the literal template text and will not call the LLM."
+            >
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${
+                  isTemplate ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </label>
+        </div>
       </div>
 
       {/* Errors */}

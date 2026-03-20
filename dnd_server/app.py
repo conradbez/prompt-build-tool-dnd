@@ -184,7 +184,7 @@ def _build_run_endpoint(
         output_model = kwargs.pop("output_model", None)
         provided = {k: v for k, v in kwargs.items() if v is not None}
         try:
-            outputs = pbt.run(
+            outputs = pbt.async_run(
                 models_dir=models_dir,
                 promptdata=provided or None,
                 validation_dir=validation_dir,
@@ -370,7 +370,7 @@ def create_app(
         pf = _parse_promptfiles(promptfiles)
 
         try:
-            outputs = pbt.run(
+            outputs = pbt.async_run(
                 models_dir=models_dir,
                 select=select,
                 promptdata=pd,
@@ -524,7 +524,7 @@ def create_app(
         opened_files = [f for f in (pf or {}).values() if hasattr(f, "name")]
 
         try:
-            outputs = pbt.run(
+            outputs = pbt.async_run(
                 models_from_dict=models_dict,
                 select=select or None,
                 promptdata=pd,
