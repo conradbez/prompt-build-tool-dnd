@@ -219,14 +219,13 @@ export default function DAGEditor() {
       }
       modelDict[data.label] = source;
     }
-    const jsonInline = JSON.stringify(modelDict).replace(/\\/g, '\\\\');
+    const jsonInline = JSON.stringify(modelDict, null, 2).replace(/\\/g, '\\\\');
     const script = `import os
 import json
 import pbt
 from google import genai
 
 
-# This function is automatically picked up by \`pbt\` and used to run .prompt files
 def llm_call(prompt: str) -> str:
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     return client.models.generate_content(
@@ -235,8 +234,18 @@ def llm_call(prompt: str) -> str:
     ).text
 
 
-results = pbt.run(models_from_dict=json.loads(\'\'\'${jsonInline}\'\'\'), llm_call=llm_call)
-print(results)
+def run_pbt():
+    results = pbt.run(models_from_dict=json.loads(model_export_json), llm_call=llm_call)
+    print(results)
+
+
+run_pbt()
+
+
+# where your model definitions live
+model_export_json = \'\'\'
+${jsonInline}
+\'\'\'
 `;
     await navigator.clipboard.writeText(script);
   }, [nodes, nodePrompts]);
