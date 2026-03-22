@@ -2,6 +2,15 @@
 
 Drag-and-drop DAG editor for [pbt](https://github.com/conradbez/prompt-build-tool).
 
+Helps build LLM prmompts systematically. One prompts outputs can dynamically be fed to the next prompt using drag-and-drop.
+
+Example: https://conradbez.com/prompt-build-tool-dnd/dist/
+
+![docs/dnd.png](docs/dnd.png)
+
+![docs/dnd.png](docs/dnd1.png)
+
+
 ## Start
 
 **Backend** (from `dnd_server/`):
