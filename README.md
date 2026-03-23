@@ -46,6 +46,13 @@ Outputs to `dist/` — open `dist/index.html` directly in a browser or deploy to
 
 Use `yarn build` instead of `yarn dev` when you want to share or deploy the tool without running a Node dev server.
 
+## Features
+
+- **Loop over JSON responses** — iterate over JSON array outputs and run each item as its own prompt using `loop_model`, enabling batch processing pipelines
+- **Dependency analysis & parallel execution** — automatically analyses dependencies between prompts in the DAG and runs independent prompts in parallel for faster execution
+- **Export to Python file** — export your entire prompt graph to a single self-contained Python script that can be run on a server without the UI
+- **Central data & file management** — shared "data" and "file" stores across the graph so prompts can read and write common state without wiring every connection manually
+
 ## Modes
 
 Set `USE_SERVER` in `src/api.ts`:
