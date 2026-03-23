@@ -9,7 +9,6 @@ const SERVER_URL = '/api';
 export interface DagNodePayload {
   name: string;
   source: string;
-  isTemplate?: boolean;
 }
 
 export type LlmProvider = 'gemini' | 'openai' | 'anthropic';

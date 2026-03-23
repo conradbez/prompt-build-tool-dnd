@@ -16,7 +16,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useMutation } from '@tanstack/react-query';
-import { PlusIcon, DatabaseIcon, FileIcon, KeyIcon, RepeatIcon, ChevronDownIcon, UploadIcon, DownloadIcon } from 'lucide-react';
+import { PlusIcon, DatabaseIcon, FileIcon, KeyIcon, RepeatIcon, ChevronDownIcon, UploadIcon, DownloadIcon, LayoutTemplateIcon } from 'lucide-react';
 
 import PromptNode, { type PromptNodeData } from './PromptNode';
 import NodePanel from './NodePanel';
@@ -149,6 +149,10 @@ export default function DAGEditor() {
   const [showAddLoopDialog, setShowAddLoopDialog] = useState(false);
   const [addLoopNodeName, setAddLoopNodeName] = useState('');
 
+  // Add-template-node dialog
+  const [showAddTemplateDialog, setShowAddTemplateDialog] = useState(false);
+  const [addTemplateNodeName, setAddTemplateNodeName] = useState('');
+
   // Manager dialogs
   const [showDataManager, setShowDataManager] = useState(false);
   const [showFileManager, setShowFileManager] = useState(false);
@@ -215,7 +219,7 @@ export default function DAGEditor() {
           : `{{ config(model_type="loop") }}\n`;
         source = loopConfig + source;
       } else if (data.isTemplate) {
-        source = `{{ config(is_template=true) }}\n` + source;
+        source = `{{ config(model_type="template") }}\n` + source;
       }
       modelDict[data.label] = source;
     }
@@ -463,6 +467,11 @@ ${jsonInline}
     setShowAddLoopDialog(true);
   }, []);
 
+  const openAddTemplateDialog = useCallback(() => {
+    setAddTemplateNodeName('');
+    setShowAddTemplateDialog(true);
+  }, []);
+
   const confirmAddLoopNode = useCallback(() => {
     const name = addLoopNodeName.trim();
     if (!name) return;
@@ -494,6 +503,38 @@ ${jsonInline}
     markDirty();
     setShowAddLoopDialog(false);
   }, [addLoopNodeName, modelNameSet, setNodes, markDirty]);
+
+  const confirmAddTemplateNode = useCallback(() => {
+    const name = addTemplateNodeName.trim();
+    if (!name) return;
+    if (/\s/.test(name)) {
+      alert('Model name cannot contain spaces.');
+      return;
+    }
+    if (modelNameSet.has(name)) {
+      alert(`A model named "${name}" already exists.`);
+      return;
+    }
+    const id = makeNodeId();
+    const rawPos = { x: 200 + Math.random() * 300, y: 150 + Math.random() * 200 };
+    const position = rfInstance.current
+      ? rfInstance.current.screenToFlowPosition(rawPos)
+      : rawPos;
+
+    setNodes((nds) => [
+      ...nds,
+      {
+        id,
+        type: 'promptNode',
+        position,
+        data: { label: name, hasOutput: false, isRunning: false, isTemplate: true, isLoop: false, loopOver: '' } satisfies PromptNodeData,
+      },
+    ]);
+    setNodePrompts((prev) => ({ ...prev, [id]: '' }));
+    setNodeRefs((prev) => ({ ...prev, [id]: [] }));
+    markDirty();
+    setShowAddTemplateDialog(false);
+  }, [addTemplateNodeName, modelNameSet, setNodes, markDirty]);
 
   // ── Node selection (click and double-click share one handler) ─────────────
 
@@ -544,8 +585,10 @@ ${jsonInline}
               ? `{{ config(model_type="loop", loop_over="${data.loopOver.trim()}") }}\n`
               : `{{ config(model_type="loop") }}\n`;
             source = loopConfig + source;
+          } else if (data.isTemplate) {
+            source = `{{ config(model_type="template") }}\n` + source;
           }
-          return { name: data.label, source, isTemplate: data.isTemplate };
+          return { name: data.label, source };
         }),
         [modelName],
         promptDataForApi,
@@ -729,6 +772,11 @@ ${jsonInline}
           Loop node
         </Button>
 
+        <Button size="sm" variant="outline" onClick={openAddTemplateDialog}>
+          <LayoutTemplateIcon size={13} />
+          Template node
+        </Button>
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="sm" variant="outline">
@@ -884,6 +932,36 @@ ${jsonInline}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setShowAddLoopDialog(false)}>Cancel</Button>
             <Button onClick={confirmAddLoopNode} disabled={!addLoopNodeName.trim()}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add template node dialog ── */}
+      <Dialog open={showAddTemplateDialog} onOpenChange={setShowAddTemplateDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add template node</DialogTitle>
+            <DialogDescription>
+              A template node renders its Jinja2 source (resolving refs, promptdata, etc.) and passes the result directly to downstream nodes without calling the LLM.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <label className="block text-sm text-muted-foreground mb-1.5">Model name</label>
+            <Input
+              autoFocus
+              value={addTemplateNodeName}
+              onChange={(e) => setAddTemplateNodeName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') confirmAddTemplateNode(); }}
+              placeholder="e.g. style_guide, prompt_fragment"
+              className="font-mono"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Lowercase letters, digits, and underscores only.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowAddTemplateDialog(false)}>Cancel</Button>
+            <Button onClick={confirmAddTemplateNode} disabled={!addTemplateNodeName.trim()}>Add</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
