@@ -158,10 +158,6 @@ def _parse_promptfiles(uploads: list[UploadFile] | None) -> dict | None:
     return result or None
 
 
-def _inline_template_source(source: str) -> str:
-    return "{{skip_and_set_to_value(" + json.dumps(source) + ")}}"
-
-
 def _build_run_endpoint(
     models_dir: str,
     validation_dir: str,
@@ -485,10 +481,7 @@ def create_app(
 
         try:
             nodes_list = json.loads(nodes)
-            models_dict = {
-                n["name"]: _inline_template_source(n["source"]) if n.get("isTemplate") else n["source"]
-                for n in nodes_list
-            }
+            models_dict = {n["name"]: n["source"] for n in nodes_list}
         except Exception as exc:
             return RunResponse(outputs={}, errors=[f"Invalid nodes payload: {exc}"])
 

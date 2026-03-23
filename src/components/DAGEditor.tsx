@@ -44,6 +44,19 @@ import {
 } from '@/lib/providerKeyState';
 import { buildUserModelState, hydrateUserModelState, type UserModelState } from '@/lib/userModelState';
 
+function buildNodeSource(prompt: string, data: PromptNodeData): string {
+  if (data.isLoop) {
+    const loopConfig = data.loopOver.trim()
+      ? `{{ config(model_type="loop", loop_over="${data.loopOver.trim()}") }}\n`
+      : `{{ config(model_type="loop") }}\n`;
+    return loopConfig + prompt;
+  }
+  if (data.isTemplate) {
+    return `{{ config(model_type="template") }}\n` + prompt;
+  }
+  return prompt;
+}
+
 // ── Module-level constants (stable across renders) ────────────────────────────
 
 const nodeTypes = { promptNode: PromptNode };
@@ -141,17 +154,9 @@ export default function DAGEditor() {
   const [nodeOutputs, setNodeOutputs] = useState<Record<string, string>>({});
   const [runErrors, setRunErrors] = useState<string[]>([]);
 
-  // Add-node dialog
-  const [showAddDialog, setShowAddDialog] = useState(false);
+  // Add-node dialog (shared for prompt / loop / template)
+  const [addDialogType, setAddDialogType] = useState<'prompt' | 'loop' | 'template' | null>(null);
   const [addNodeName, setAddNodeName] = useState('');
-
-  // Add-loop-node dialog
-  const [showAddLoopDialog, setShowAddLoopDialog] = useState(false);
-  const [addLoopNodeName, setAddLoopNodeName] = useState('');
-
-  // Add-template-node dialog
-  const [showAddTemplateDialog, setShowAddTemplateDialog] = useState(false);
-  const [addTemplateNodeName, setAddTemplateNodeName] = useState('');
 
   // Manager dialogs
   const [showDataManager, setShowDataManager] = useState(false);
@@ -201,7 +206,7 @@ export default function DAGEditor() {
     setPromptFileRows(hydrated.promptFileRows);
     setSelectedProvider(hydrated.selectedProvider);
     setSelectedNodeId(null);
-    setShowAddDialog(false);
+    setAddDialogType(null);
     setShowDataManager(false);
     setShowFileManager(false);
     setNodeOutputs(hydrated.nodeOutputs);
@@ -212,16 +217,7 @@ export default function DAGEditor() {
     const modelDict: Record<string, string> = {};
     for (const n of nodes) {
       const data = n.data as PromptNodeData;
-      let source = nodePrompts[n.id] ?? '';
-      if (data.isLoop) {
-        const loopConfig = data.loopOver.trim()
-          ? `{{ config(model_type="loop", loop_over="${data.loopOver.trim()}") }}\n`
-          : `{{ config(model_type="loop") }}\n`;
-        source = loopConfig + source;
-      } else if (data.isTemplate) {
-        source = `{{ config(model_type="template") }}\n` + source;
-      }
-      modelDict[data.label] = source;
+      modelDict[data.label] = buildNodeSource(nodePrompts[n.id] ?? '', data);
     }
     const jsonInline = JSON.stringify(modelDict, null, 2).replace(/\\/g, '\\\\');
     const script = `import os
@@ -425,12 +421,13 @@ ${jsonInline}
 
   // ── Add node ──────────────────────────────────────────────────────────────
 
-  const openAddDialog = useCallback(() => {
+  const openAddDialog = useCallback((type: 'prompt' | 'loop' | 'template') => {
     setAddNodeName('');
-    setShowAddDialog(true);
+    setAddDialogType(type);
   }, []);
 
   const confirmAddNode = useCallback(() => {
+    if (!addDialogType) return;
     const name = addNodeName.trim();
     if (!name) return;
     if (/\s/.test(name)) {
@@ -453,88 +450,19 @@ ${jsonInline}
         id,
         type: 'promptNode',
         position,
-        data: { label: name, hasOutput: false, isRunning: false, isTemplate: false, isLoop: false, loopOver: '' } satisfies PromptNodeData,
+        data: {
+          label: name, hasOutput: false, isRunning: false,
+          isTemplate: addDialogType === 'template',
+          isLoop: addDialogType === 'loop',
+          loopOver: '',
+        } satisfies PromptNodeData,
       },
     ]);
     setNodePrompts((prev) => ({ ...prev, [id]: '' }));
     setNodeRefs((prev) => ({ ...prev, [id]: [] }));
     markDirty();
-    setShowAddDialog(false);
-  }, [addNodeName, modelNameSet, setNodes, markDirty]);
-
-  const openAddLoopDialog = useCallback(() => {
-    setAddLoopNodeName('');
-    setShowAddLoopDialog(true);
-  }, []);
-
-  const openAddTemplateDialog = useCallback(() => {
-    setAddTemplateNodeName('');
-    setShowAddTemplateDialog(true);
-  }, []);
-
-  const confirmAddLoopNode = useCallback(() => {
-    const name = addLoopNodeName.trim();
-    if (!name) return;
-    if (/\s/.test(name)) {
-      alert('Model name cannot contain spaces.');
-      return;
-    }
-    if (modelNameSet.has(name)) {
-      alert(`A model named "${name}" already exists.`);
-      return;
-    }
-    const id = makeNodeId();
-    const rawPos = { x: 200 + Math.random() * 300, y: 150 + Math.random() * 200 };
-    const position = rfInstance.current
-      ? rfInstance.current.screenToFlowPosition(rawPos)
-      : rawPos;
-
-    setNodes((nds) => [
-      ...nds,
-      {
-        id,
-        type: 'promptNode',
-        position,
-        data: { label: name, hasOutput: false, isRunning: false, isTemplate: false, isLoop: true, loopOver: '' } satisfies PromptNodeData,
-      },
-    ]);
-    setNodePrompts((prev) => ({ ...prev, [id]: '' }));
-    setNodeRefs((prev) => ({ ...prev, [id]: [] }));
-    markDirty();
-    setShowAddLoopDialog(false);
-  }, [addLoopNodeName, modelNameSet, setNodes, markDirty]);
-
-  const confirmAddTemplateNode = useCallback(() => {
-    const name = addTemplateNodeName.trim();
-    if (!name) return;
-    if (/\s/.test(name)) {
-      alert('Model name cannot contain spaces.');
-      return;
-    }
-    if (modelNameSet.has(name)) {
-      alert(`A model named "${name}" already exists.`);
-      return;
-    }
-    const id = makeNodeId();
-    const rawPos = { x: 200 + Math.random() * 300, y: 150 + Math.random() * 200 };
-    const position = rfInstance.current
-      ? rfInstance.current.screenToFlowPosition(rawPos)
-      : rawPos;
-
-    setNodes((nds) => [
-      ...nds,
-      {
-        id,
-        type: 'promptNode',
-        position,
-        data: { label: name, hasOutput: false, isRunning: false, isTemplate: true, isLoop: false, loopOver: '' } satisfies PromptNodeData,
-      },
-    ]);
-    setNodePrompts((prev) => ({ ...prev, [id]: '' }));
-    setNodeRefs((prev) => ({ ...prev, [id]: [] }));
-    markDirty();
-    setShowAddTemplateDialog(false);
-  }, [addTemplateNodeName, modelNameSet, setNodes, markDirty]);
+    setAddDialogType(null);
+  }, [addNodeName, addDialogType, modelNameSet, setNodes, markDirty]);
 
   // ── Node selection (click and double-click share one handler) ─────────────
 
@@ -579,16 +507,7 @@ ${jsonInline}
       runDag(
         nodes.map((n) => {
           const data = n.data as PromptNodeData;
-          let source = nodePrompts[n.id] ?? '';
-          if (data.isLoop) {
-            const loopConfig = data.loopOver.trim()
-              ? `{{ config(model_type="loop", loop_over="${data.loopOver.trim()}") }}\n`
-              : `{{ config(model_type="loop") }}\n`;
-            source = loopConfig + source;
-          } else if (data.isTemplate) {
-            source = `{{ config(model_type="template") }}\n` + source;
-          }
-          return { name: data.label, source };
+          return { name: data.label, source: buildNodeSource(nodePrompts[n.id] ?? '', data) };
         }),
         [modelName],
         promptDataForApi,
@@ -762,17 +681,17 @@ ${jsonInline}
           </Button>
         )}
 
-        <Button size="sm" onClick={openAddDialog}>
+        <Button size="sm" onClick={() => openAddDialog('prompt')}>
           <PlusIcon size={13} />
           Add node
         </Button>
 
-        <Button size="sm" variant="outline" onClick={openAddLoopDialog}>
+        <Button size="sm" variant="outline" onClick={() => openAddDialog('loop')}>
           <RepeatIcon size={13} />
           Loop node
         </Button>
 
-        <Button size="sm" variant="outline" onClick={openAddTemplateDialog}>
+        <Button size="sm" variant="outline" onClick={() => openAddDialog('template')}>
           <LayoutTemplateIcon size={13} />
           Template node
         </Button>
@@ -876,13 +795,19 @@ ${jsonInline}
         )}
       </div>
 
-      {/* ── Add node dialog ── */}
-      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+      {/* ── Add node dialog (shared for prompt / loop / template) ── */}
+      <Dialog open={addDialogType !== null} onOpenChange={(open) => { if (!open) setAddDialogType(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Add model node</DialogTitle>
+            <DialogTitle>
+              {addDialogType === 'loop' ? 'Add loop node' : addDialogType === 'template' ? 'Add template node' : 'Add model node'}
+            </DialogTitle>
             <DialogDescription>
-              Create a new inline prompt model in the browser DAG.
+              {addDialogType === 'loop'
+                ? 'A loop node iterates over each item in a JSON array from an upstream node and produces a combined JSON array as output.'
+                : addDialogType === 'template'
+                  ? 'A template node renders its Jinja2 source (resolving refs, promptdata, etc.) and passes the result directly to downstream nodes without calling the LLM.'
+                  : 'Create a new inline prompt model in the browser DAG.'}
             </DialogDescription>
           </DialogHeader>
           <div>
@@ -892,7 +817,11 @@ ${jsonInline}
               value={addNodeName}
               onChange={(e) => setAddNodeName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') confirmAddNode(); }}
-              placeholder="e.g. article, summary, tweet"
+              placeholder={
+                addDialogType === 'loop' ? 'e.g. processed_items' :
+                addDialogType === 'template' ? 'e.g. style_guide, prompt_fragment' :
+                'e.g. article, summary, tweet'
+              }
               className="font-mono"
             />
             <p className="text-xs text-muted-foreground mt-1">
@@ -900,68 +829,8 @@ ${jsonInline}
             </p>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowAddDialog(false)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setAddDialogType(null)}>Cancel</Button>
             <Button onClick={confirmAddNode} disabled={!addNodeName.trim()}>Add</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Add loop node dialog ── */}
-      <Dialog open={showAddLoopDialog} onOpenChange={setShowAddLoopDialog}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Add loop node</DialogTitle>
-            <DialogDescription>
-              A loop node iterates over each item in a JSON array from an upstream node and produces a combined JSON array as output.
-            </DialogDescription>
-          </DialogHeader>
-          <div>
-            <label className="block text-sm text-muted-foreground mb-1.5">Model name</label>
-            <Input
-              autoFocus
-              value={addLoopNodeName}
-              onChange={(e) => setAddLoopNodeName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') confirmAddLoopNode(); }}
-              placeholder="e.g. processed_items"
-              className="font-mono"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Lowercase letters, digits, and underscores only.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowAddLoopDialog(false)}>Cancel</Button>
-            <Button onClick={confirmAddLoopNode} disabled={!addLoopNodeName.trim()}>Add</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Add template node dialog ── */}
-      <Dialog open={showAddTemplateDialog} onOpenChange={setShowAddTemplateDialog}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Add template node</DialogTitle>
-            <DialogDescription>
-              A template node renders its Jinja2 source (resolving refs, promptdata, etc.) and passes the result directly to downstream nodes without calling the LLM.
-            </DialogDescription>
-          </DialogHeader>
-          <div>
-            <label className="block text-sm text-muted-foreground mb-1.5">Model name</label>
-            <Input
-              autoFocus
-              value={addTemplateNodeName}
-              onChange={(e) => setAddTemplateNodeName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') confirmAddTemplateNode(); }}
-              placeholder="e.g. style_guide, prompt_fragment"
-              className="font-mono"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Lowercase letters, digits, and underscores only.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowAddTemplateDialog(false)}>Cancel</Button>
-            <Button onClick={confirmAddTemplateNode} disabled={!addTemplateNodeName.trim()}>Add</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
