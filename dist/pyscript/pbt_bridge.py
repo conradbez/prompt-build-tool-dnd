@@ -198,10 +198,10 @@ async def _run_dag(payload_json: str) -> str:
         )
 
         serialised, errors = _serialise(outputs)
-        return json.dumps({"outputs": serialised, "errors": errors})
+        return json.dumps({"outputs": serialised, "errors": errors}, ensure_ascii=False)
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
-        return json.dumps({"outputs": {}, "errors": [str(exc)]})
+        return json.dumps({"outputs": {}, "errors": [str(exc)]}, ensure_ascii=False)
 
 
 async def _init_runtime() -> None:

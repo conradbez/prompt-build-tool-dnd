@@ -5,7 +5,7 @@
     "rich",
     "click",
     "python-dotenv",
-    "https://cdn.jsdelivr.net/gh/conradbez/prompt-build-tool@3b3d74ea41f95360265893909226a53bf9cd55b6/dist/prompt_build_tool-0.1.19-py3-none-any.whl"
+    "prompt_build_tool==0.1.18"
   ],
   "experimental_create_proxy": "auto"
 }

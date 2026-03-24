@@ -620,14 +620,14 @@ ${jsonInline}
                 type="button"
                 size="sm"
                 variant={selectedProvider === provider ? 'default' : 'ghost'}
-                className="h-7 rounded-[5px] px-2.5 font-mono text-[11px] capitalize"
+                className="h-7 rounded-[5px] px-2.5 font-mono text-[11px] capitalize select-none"
                 onClick={() => setSelectedProvider(provider)}
               >
                 {provider}
               </Button>
             ))}
           </div>
-          <div className="flex items-center gap-1 flex-1 min-w-0 max-w-md">
+          <div className="flex items-center gap-1">
             <KeyIcon size={13} className="text-muted-foreground shrink-0" />
             <Input
               type="password"
@@ -635,13 +635,13 @@ ${jsonInline}
               onChange={(e) =>
                 setProviderKeys((prev) => ({ ...prev, [selectedProvider]: e.target.value }))
               }
-              placeholder={`${selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)} API key`}
-              className="h-7 text-xs font-mono"
+              placeholder="API key"
+              className="h-7 text-xs font-mono w-16"
               spellCheck={false}
             />
           </div>
           <div
-            className="max-w-[220px] truncate text-[11px] text-muted-foreground"
+            className="max-w-[220px] truncate text-[11px] text-muted-foreground select-none"
             title={pyScriptStatusDetail}
           >
             {pyScriptStatusSummary}
@@ -654,6 +654,7 @@ ${jsonInline}
           size="sm"
           onClick={() => setShowDataManager(true)}
           title="Manage promptdata() variables"
+          className="select-none"
         >
           <DatabaseIcon size={13} />
           Prompt Data
@@ -670,6 +671,7 @@ ${jsonInline}
             size="sm"
             onClick={() => setShowFileManager(true)}
             title="Manage promptfiles uploads"
+            className="select-none"
           >
             <FileIcon size={13} />
             Prompt Files
@@ -681,30 +683,41 @@ ${jsonInline}
           </Button>
         )}
 
-        <Button size="sm" onClick={() => openAddDialog('prompt')}>
+        <Button size="sm" className="select-none" onClick={() => openAddDialog('prompt')}>
           <PlusIcon size={13} />
           Add node
         </Button>
 
-        <Button size="sm" variant="outline" onClick={() => openAddDialog('loop')}>
-          <RepeatIcon size={13} />
-          Loop node
-        </Button>
-
-        <Button size="sm" variant="outline" onClick={() => openAddDialog('template')}>
-          <LayoutTemplateIcon size={13} />
-          Template node
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" className="select-none">
+              More nodes
+              <ChevronDownIcon size={13} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuLabel>Node types</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => openAddDialog('loop')}>
+              <RepeatIcon size={13} />
+              Loop node
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => openAddDialog('template')}>
+              <LayoutTemplateIcon size={13} />
+              Template node
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline">
-              Model
+            <Button size="sm" variant="outline" className="select-none">
+              Save
               <ChevronDownIcon size={13} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Model</DropdownMenuLabel>
+            <DropdownMenuLabel>Autosave to browser on ✓</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => void handleExport()}>
               <DownloadIcon size={13} />
@@ -779,10 +792,6 @@ ${jsonInline}
                 promptFileNames={USE_SERVER ? promptFileRows.filter(r => r.name.trim()).map(r => r.name.trim()) : []}
                 onPromptChange={(value) => handlePromptChange(selectedNode.id, value)}
                 onRename={(newName) => handleRename(selectedNode.id, newName)}
-                onTemplateChange={(value) => {
-                  updateNodeData(selectedNode.id, { isTemplate: value });
-                  markDirty();
-                }}
                 onLoopOverChange={(value) => {
                   updateNodeData(selectedNode.id, { loopOver: value });
                   markDirty();

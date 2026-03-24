@@ -24,7 +24,6 @@ interface NodePanelProps {
   promptFileNames: string[];
   onPromptChange: (value: string) => void;
   onRename: (newName: string) => void;
-  onTemplateChange: (value: boolean) => void;
   onLoopOverChange: (value: string) => void;
   onClose: () => void;
   onRun: () => void;
@@ -109,7 +108,6 @@ export default function NodePanel({
   promptFileNames,
   onPromptChange,
   onRename,
-  onTemplateChange,
   onLoopOverChange,
   onClose,
   onRun,
@@ -239,7 +237,7 @@ export default function NodePanel({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide select-none">
             Model
           </span>
           {isEditingName ? (
@@ -273,7 +271,7 @@ export default function NodePanel({
 
       {/* Prompt editor */}
       <div className="px-4 pt-3 pb-0">
-        <label className="block text-xs font-medium text-muted-foreground mb-1">
+        <label className="block text-xs font-medium text-muted-foreground mb-1 select-none">
           Prompt template
           <span className="ml-1 font-normal">
             — use{' '}
@@ -352,12 +350,12 @@ export default function NodePanel({
       {/* Loop mode info */}
       {isLoop && !isTemplate && (
         <div className="mx-4 mb-1 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-          <p className="text-[11px] font-semibold text-amber-700 mb-1">Loop mode</p>
-          <p className="text-[11px] text-amber-700 leading-snug mb-2">
-            Iterates over each item in a JSON array from an upstream node. 
+          <p className="text-[11px] font-semibold text-amber-700 mb-1 select-none">Loop mode</p>
+          <p className="text-[11px] text-amber-700 leading-snug mb-2 select-none">
+            Iterates over each item in a JSON array from an upstream node.
           </p>
           <div className="flex items-center gap-2">
-            <label className="text-[11px] text-amber-700 font-medium shrink-0 whitespace-nowrap">
+            <label className="text-[11px] text-amber-700 font-medium shrink-0 whitespace-nowrap select-none">
               Loop over
               <span className="ml-1 font-normal opacity-70">(optional)</span>:
             </label>
@@ -368,7 +366,7 @@ export default function NodePanel({
               onChange={(e) => onLoopOverChange(e.target.value)}
             />
           </div>
-          <p className="text-[10px] text-amber-600 mt-1">
+          <p className="text-[10px] text-amber-600 mt-1 select-none">
             Only needed when multiple upstream nodes return lists.
           </p>
         </div>
@@ -382,6 +380,7 @@ export default function NodePanel({
           disabled={isRunning || isRunDisabled}
           size="sm"
           title={runDisabledReason}
+          className="select-none"
         >
           {isRunning ? (
             <><RefreshCwIcon size={13} className="animate-spin" /> Running…</>
@@ -390,7 +389,7 @@ export default function NodePanel({
           )}
         </Button>
         {isRunDisabled && runDisabledReason && (
-          <p className="text-[11px] text-muted-foreground">{runDisabledReason}</p>
+          <p className="text-[11px] text-muted-foreground select-none">{runDisabledReason}</p>
         )}
         </div>
         <div className="flex items-center gap-4">
@@ -419,31 +418,6 @@ export default function NodePanel({
               />
             </button>
           </label>
-          <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground select-none">
-            <span className="group relative cursor-help">
-              Template
-              <span className="pointer-events-none absolute bottom-full right-0 mb-2 w-52 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
-                Not processed by AI — input is passed directly as output to the next model.
-                <span className="absolute top-full right-4 border-4 border-transparent border-t-slate-800" />
-              </span>
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={isTemplate}
-              onClick={() => onTemplateChange(!isTemplate)}
-              className={`relative h-5 w-10 rounded-full transition-colors ${
-                isTemplate ? 'bg-primary' : 'bg-slate-300'
-              }`}
-              title="When enabled, this model output is the literal template text and will not call the LLM."
-            >
-              <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${
-                  isTemplate ? 'left-[22px]' : 'left-0.5'
-                }`}
-              />
-            </button>
-          </label>
         </div>
       </div>
 
@@ -468,7 +442,7 @@ export default function NodePanel({
       {/* Output */}
       <div className={`flex-1 overflow-hidden flex flex-col px-4 pb-4 min-h-0 ${isTemplate ? 'hidden' : ''}`}>
         <div className="border-t border-border pt-3 flex-1 flex flex-col min-h-0">
-          <label className="block text-xs font-medium text-muted-foreground mb-2">
+          <label className="block text-xs font-medium text-muted-foreground mb-2 select-none">
             Output
             {output && <span className="ml-2 text-green-600 font-normal">✓ ready</span>}
           </label>
@@ -483,7 +457,7 @@ export default function NodePanel({
             </Card>
           ) : (
             <Card className="flex-1 flex items-center justify-center border-dashed">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground select-none">
                 {isRunning
                   ? 'Running model…'
                   : 'No output yet — run the model to see results here.'}
