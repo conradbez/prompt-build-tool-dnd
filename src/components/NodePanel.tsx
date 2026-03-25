@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
+import { modelTypeConfigLine } from '@/lib/modelTypeConfig';
 
 // Props — nodeId removed; callbacks are pre-bound in DAGEditor so the panel
 // doesn't need to know its own identity.
@@ -18,13 +19,11 @@ interface NodePanelProps {
   runDisabledReason?: string;
   isTemplate: boolean;
   isLoop: boolean;
-  loopOver: string;
   otherNodeNames: string[];
   promptDataNames: string[];
   promptFileNames: string[];
   onPromptChange: (value: string) => void;
   onRename: (newName: string) => void;
-  onLoopOverChange: (value: string) => void;
   onClose: () => void;
   onRun: () => void;
 }
@@ -102,13 +101,11 @@ export default function NodePanel({
   runDisabledReason,
   isTemplate,
   isLoop,
-  loopOver,
   otherNodeNames,
   promptDataNames,
   promptFileNames,
   onPromptChange,
   onRename,
-  onLoopOverChange,
   onClose,
   onRun,
 }: NodePanelProps) {
@@ -140,35 +137,50 @@ export default function NodePanel({
   const [isEditingName, setIsEditingName] = useState(false);
   const [draftName, setDraftName] = useState(nodeName);
 
+  // ── JSON output config ────────────────────────────────────────────────────
+  // Stored in the prompt string but stripped from the textarea display so it
+  // appears as a read-only block (same pattern as model_type config lines).
+
+  const JSON_OUTPUT_RE = /\{\{\s*config\(output_format=["']json["']\)\s*\}\}\n?/;
+  const isJsonOutput = useMemo(() => JSON_OUTPUT_RE.test(prompt), [prompt]);
+  // The prompt the textarea shows and edits — config lines live in their own blocks.
+  const displayPrompt = useMemo(() => prompt.replace(JSON_OUTPUT_RE, ''), [prompt]);
+
+  const toggleJsonOutput = useCallback(() => {
+    const stripped = prompt.replace(JSON_OUTPUT_RE, '');
+    onPromptChange(isJsonOutput ? stripped : `{{ config(output_format="json") }}\n` + stripped);
+  }, [prompt, isJsonOutput, onPromptChange]);
+
   // ── Textarea change + autocomplete detection ──────────────────────────────
 
   const handleTextChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      // e.target.value is the stripped display value; re-prepend json config if active
       const value = e.target.value;
-      onPromptChange(value);
+      onPromptChange(isJsonOutput ? `{{ config(output_format="json") }}\n` + value : value);
       const cursor = e.target.selectionStart ?? value.length;
       const next = getAcSuggestions(value, cursor, otherNodeNames, promptDataNames, promptFileNames);
       setSuggestions(next);
       setActiveSuggestion(0);
     },
-    [onPromptChange, otherNodeNames, promptDataNames, promptFileNames],
+    [isJsonOutput, onPromptChange, otherNodeNames, promptDataNames, promptFileNames],
   );
 
   const insertSuggestion = useCallback(
     (suggestion: AcSuggestion) => {
       const textarea = textareaRef.current;
       if (!textarea) return;
-      const cursorPos = textarea.selectionStart ?? prompt.length;
-      const newText = prompt.slice(0, suggestion.replaceFrom) + suggestion.insert + prompt.slice(cursorPos);
+      const cursorPos = textarea.selectionStart ?? displayPrompt.length;
+      const newDisplay = displayPrompt.slice(0, suggestion.replaceFrom) + suggestion.insert + displayPrompt.slice(cursorPos);
       const newCursor = suggestion.replaceFrom + suggestion.insert.length;
-      onPromptChange(newText);
+      onPromptChange(isJsonOutput ? `{{ config(output_format="json") }}\n` + newDisplay : newDisplay);
       setSuggestions([]);
       setTimeout(() => {
         textarea.focus();
         textarea.selectionStart = textarea.selectionEnd = newCursor;
       }, 0);
     },
-    [prompt, onPromptChange],
+    [displayPrompt, isJsonOutput, onPromptChange],
   );
 
   const handleKeyDown = useCallback(
@@ -189,20 +201,6 @@ export default function NodePanel({
     },
     [suggestions, activeSuggestion, insertSuggestion],
   );
-
-  // ── JSON output config toggle ─────────────────────────────────────────────
-
-  const JSON_OUTPUT_RE = /\{\{\s*config\(output_format=["']json["']\)\s*\}\}\n?/;
-
-  const isJsonOutput = useMemo(() => JSON_OUTPUT_RE.test(prompt), [prompt]);
-
-  const toggleJsonOutput = useCallback(() => {
-    if (isJsonOutput) {
-      onPromptChange(prompt.replace(JSON_OUTPUT_RE, ''));
-    } else {
-      onPromptChange(`{{ config(output_format="json") }}\n` + prompt);
-    }
-  }, [prompt, isJsonOutput, onPromptChange]);
 
   // ── Promptfiles config toggle ─────────────────────────────────────────────
 
@@ -231,6 +229,8 @@ export default function NodePanel({
     if (trimmed && trimmed !== nodeName) onRename(trimmed);
     setIsEditingName(false);
   };
+
+  const injectedConfigLine = modelTypeConfigLine(isTemplate, isLoop);
 
   return (
     <div className="flex flex-col h-full bg-white border-l border-border w-full">
@@ -280,15 +280,28 @@ export default function NodePanel({
           </span>
         </label>
 
+        {/* Read-only config lines pbt prepends at run time — kept out of the
+            editable textarea so they don't clutter the user's prompt content. */}
+        {(injectedConfigLine || isJsonOutput) && (
+          <pre
+            className="font-mono text-xs text-muted-foreground/60 bg-muted/40 border border-border rounded-t px-3 py-1.5 select-none leading-relaxed -mb-px"
+            title="Auto-injected by pbt — not editable"
+          >
+            {[injectedConfigLine, isJsonOutput ? `{{ config(output_format="json") }}` : null]
+              .filter(Boolean)
+              .join('\n')}
+          </pre>
+        )}
+
         <div className="relative">
           <Textarea
             ref={textareaRef}
-            value={prompt}
+            value={displayPrompt}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
             style={{ height: promptHeight }}
             spellCheck={false}
-            className="font-mono text-sm resize-none leading-relaxed"
+            className={`font-mono text-sm resize-none leading-relaxed${(isTemplate || isLoop || isJsonOutput) ? ' rounded-t-none' : ''}`}
             placeholder={`Write a Jinja2 prompt template.\n\nExample:\nWrite an article about {{ promptdata('topic') }}\n\nOr reference another model:\n{{ ref('article') }}`}
           />
 
@@ -347,30 +360,6 @@ export default function NodePanel({
         </div>
       )}
 
-      {/* Loop mode info */}
-      {isLoop && !isTemplate && (
-        <div className="mx-4 mb-1 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-          <p className="text-[11px] font-semibold text-amber-700 mb-1 select-none">Loop mode</p>
-          <p className="text-[11px] text-amber-700 leading-snug mb-2 select-none">
-            Iterates over each item in a JSON array from an upstream node.
-          </p>
-          <div className="flex items-center gap-2">
-            <label className="text-[11px] text-amber-700 font-medium shrink-0 whitespace-nowrap select-none">
-              Loop over
-              <span className="ml-1 font-normal opacity-70">(optional)</span>:
-            </label>
-            <Input
-              className="h-6 text-xs font-mono py-0 border-amber-300 bg-white"
-              placeholder="key_from_parent_json or blank"
-              value={loopOver}
-              onChange={(e) => onLoopOverChange(e.target.value)}
-            />
-          </div>
-          <p className="text-[10px] text-amber-600 mt-1 select-none">
-            Only needed when multiple upstream nodes return lists.
-          </p>
-        </div>
-      )}
 
       {/* Run button */}
       <div className="px-4 py-2 border-t border-border flex items-center gap-3 justify-between">

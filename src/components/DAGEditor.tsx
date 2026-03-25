@@ -43,19 +43,7 @@ import {
   PROVIDER_KEYS_STORAGE_KEY,
 } from '@/lib/providerKeyState';
 import { buildUserModelState, hydrateUserModelState, type UserModelState } from '@/lib/userModelState';
-
-function buildNodeSource(prompt: string, data: PromptNodeData): string {
-  if (data.isLoop) {
-    const loopConfig = data.loopOver.trim()
-      ? `{{ config(model_type="loop", loop_over="${data.loopOver.trim()}") }}\n`
-      : `{{ config(model_type="loop") }}\n`;
-    return loopConfig + prompt;
-  }
-  if (data.isTemplate) {
-    return `{{ config(model_type="template") }}\n` + prompt;
-  }
-  return prompt;
-}
+import { buildNodeSource } from '@/lib/modelTypeConfig';
 
 // ── Module-level constants (stable across renders) ────────────────────────────
 
@@ -217,7 +205,7 @@ export default function DAGEditor() {
     const modelDict: Record<string, string> = {};
     for (const n of nodes) {
       const data = n.data as PromptNodeData;
-      modelDict[data.label] = buildNodeSource(nodePrompts[n.id] ?? '', data);
+      modelDict[data.label] = buildNodeSource(nodePrompts[n.id] ?? '', data.isTemplate, data.isLoop);
     }
     const jsonInline = JSON.stringify(modelDict, null, 2).replace(/\\/g, '\\\\');
     const script = `import os
@@ -454,7 +442,6 @@ ${jsonInline}
           label: name, hasOutput: false, isRunning: false,
           isTemplate: addDialogType === 'template',
           isLoop: addDialogType === 'loop',
-          loopOver: '',
         } satisfies PromptNodeData,
       },
     ]);
@@ -507,7 +494,7 @@ ${jsonInline}
       runDag(
         nodes.map((n) => {
           const data = n.data as PromptNodeData;
-          return { name: data.label, source: buildNodeSource(nodePrompts[n.id] ?? '', data) };
+          return { name: data.label, source: buildNodeSource(nodePrompts[n.id] ?? '', data.isTemplate, data.isLoop) };
         }),
         [modelName],
         promptDataForApi,
@@ -786,16 +773,11 @@ ${jsonInline}
                 runDisabledReason={runDisabledReason}
                 isTemplate={(selectedNode.data as PromptNodeData).isTemplate}
                 isLoop={(selectedNode.data as PromptNodeData).isLoop}
-                loopOver={(selectedNode.data as PromptNodeData).loopOver}
                 otherNodeNames={otherNodeNames}
                 promptDataNames={promptDataRows.filter(r => r.name.trim()).map(r => r.name.trim())}
                 promptFileNames={USE_SERVER ? promptFileRows.filter(r => r.name.trim()).map(r => r.name.trim()) : []}
                 onPromptChange={(value) => handlePromptChange(selectedNode.id, value)}
                 onRename={(newName) => handleRename(selectedNode.id, newName)}
-                onLoopOverChange={(value) => {
-                  updateNodeData(selectedNode.id, { loopOver: value });
-                  markDirty();
-                }}
                 onClose={() => setSelectedNodeId(null)}
                 onRun={handleRunModel}
               />

@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { cn } from '@/lib/utils';
+import { MODEL_TYPE_INFO } from '@/lib/modelTypeConfig';
 
 export type PromptNodeData = {
   label: string;
@@ -8,7 +9,6 @@ export type PromptNodeData = {
   isRunning: boolean;
   isTemplate: boolean;
   isLoop: boolean;
-  loopOver: string;
 };
 
 function PromptNode({ data, selected }: NodeProps) {
@@ -61,7 +61,7 @@ function PromptNode({ data, selected }: NodeProps) {
             <span className="group relative inline-flex items-center rounded-full bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600 cursor-help">
               template
               <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
-                Not processed by AI — input is passed directly as output to the next model.
+                {MODEL_TYPE_INFO.template}
                 <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
               </span>
             </span>
@@ -70,7 +70,7 @@ function PromptNode({ data, selected }: NodeProps) {
             <span className="group relative inline-flex items-center rounded-full bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 cursor-help">
               loop
               <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 rounded-lg bg-slate-800 px-3 py-2 text-[11px] text-white leading-snug shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
-                Iterates over each item from an upstream JSON array. Output is a combined JSON array.
+                {MODEL_TYPE_INFO.loop}
                 <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
               </span>
             </span>
