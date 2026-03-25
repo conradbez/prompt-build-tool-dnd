@@ -16,9 +16,10 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useMutation } from '@tanstack/react-query';
-import { PlusIcon, DatabaseIcon, FileIcon, KeyIcon, RepeatIcon, ChevronDownIcon, UploadIcon, DownloadIcon } from 'lucide-react';
+import { PlusIcon, DatabaseIcon, FileIcon, KeyIcon, RepeatIcon, ChevronDownIcon, UploadIcon, DownloadIcon, ShieldCheckIcon } from 'lucide-react';
 
 import PromptNode, { type PromptNodeData } from './PromptNode';
+import ValidationNode, { type ValidationNodeData, type ValidationProperty } from './ValidationNode';
 import NodePanel from './NodePanel';
 import PromptDataManager, { type PromptDataRow } from './PromptDataManager';
 import PromptFileManager, { type PromptFileRow } from './PromptFileManager';
@@ -46,7 +47,7 @@ import { buildUserModelState, hydrateUserModelState, type UserModelState } from 
 
 // ── Module-level constants (stable across renders) ────────────────────────────
 
-const nodeTypes = { promptNode: PromptNode };
+const nodeTypes = { promptNode: PromptNode, validationNode: ValidationNode };
 const PROVIDERS: LlmProvider[] = ['gemini', 'openai', 'anthropic'];
 const USER_MODEL_STATE_STORAGE_KEY = 'pbt_user_model_state';
 
@@ -80,9 +81,92 @@ function getInitialProviderKeys(): Record<LlmProvider, string> {
   }
 }
 
+// ── Validation code generation ────────────────────────────────────────────────
+
+function toPascalCase(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Generate the contents of a validation/<targetModel>.py file from a ValidationNode's
+ * property definitions, building Pydantic models for nested structures.
+ */
+function generateValidationCode(data: ValidationNodeData): string {
+  const modelName = toPascalCase(data.targetModel);
+  const properties = (data.properties ?? []).filter((p) => p.name.trim());
+
+  if (properties.length === 0) {
+    return [
+      'def validate(prompt: str, result: str) -> bool:',
+      '    return True',
+      '',
+    ].join('\n');
+  }
+
+  interface PropGroup {
+    name: string;
+    type: string;
+    children: { name: string; type: string }[];
+  }
+
+  // Build groups: each depth-0 row is a top-level field; depth-1 rows are children
+  const groups: PropGroup[] = [];
+  let current: PropGroup | null = null;
+  for (const prop of properties) {
+    if (prop.depth === 0) {
+      current = { name: prop.name, type: prop.type, children: [] };
+      groups.push(current);
+    } else if (prop.depth === 1 && current) {
+      current.children.push({ name: prop.name, type: prop.type });
+    }
+  }
+
+  const lines: string[] = ['import json', 'from pydantic import BaseModel, ValidationError', ''];
+
+  // Nested classes first
+  for (const group of groups) {
+    if (group.children.length > 0) {
+      const nestedName = toPascalCase(group.name) + 'Model';
+      lines.push(`class ${nestedName}(BaseModel):`);
+      for (const child of group.children) {
+        lines.push(`    ${child.name}: ${child.type}`);
+      }
+      lines.push('');
+    }
+  }
+
+  // Main model class
+  lines.push(`class ${modelName}(BaseModel):`);
+  for (const group of groups) {
+    if (group.children.length > 0) {
+      lines.push(`    ${group.name}: ${toPascalCase(group.name)}Model`);
+    } else {
+      lines.push(`    ${group.name}: ${group.type}`);
+    }
+  }
+  lines.push('');
+  lines.push('');
+  lines.push('def validate(prompt: str, result: str) -> bool:');
+  lines.push('    try:');
+  lines.push('        data = json.loads(result)');
+  lines.push(`        ${modelName}(**data)`);
+  lines.push('        return True');
+  lines.push('    except (json.JSONDecodeError, ValidationError):');
+  lines.push('        return False');
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+// ── Graph helpers ─────────────────────────────────────────────────────────────
+
 /** Return the IDs of targetLabel's node plus all its transitive ancestors. */
 function getAncestorIds(targetLabel: string, nodes: Node[], edges: Edge[]): Set<string> {
-  const nameToId = new Map(nodes.map((n) => [(n.data as PromptNodeData).label, n.id]));
+  const nameToId = new Map(
+    nodes
+      .filter((n) => n.type !== 'validationNode')
+      .map((n) => [(n.data as PromptNodeData).label, n.id]),
+  );
   const targetId = nameToId.get(targetLabel);
   if (!targetId) return new Set();
 
@@ -104,13 +188,17 @@ function getAncestorIds(targetLabel: string, nodes: Node[], edges: Edge[]): Set<
 }
 
 /**
- * Build React Flow edges from the per-node ref cache.
- * Refs are the single source of truth; edges are derived, never stored separately.
+ * Build React Flow edges from the per-node ref cache plus validation node connections.
+ * Refs are the single source of truth for prompt edges; validation edges come from
+ * each ValidationNode's targetModel field.
  */
 function computeEdges(nodes: Node[], nodeRefs: Record<string, string[]>): Edge[] {
-  const nameToId = new Map(nodes.map((n) => [(n.data as PromptNodeData).label, n.id]));
+  const promptNodes = nodes.filter((n) => n.type !== 'validationNode');
+  const nameToId = new Map(promptNodes.map((n) => [(n.data as PromptNodeData).label, n.id]));
   const edges: Edge[] = [];
-  for (const node of nodes) {
+
+  // Edges derived from ref() calls in prompt templates
+  for (const node of promptNodes) {
     for (const refName of nodeRefs[node.id] ?? []) {
       const sourceId = nameToId.get(refName);
       if (sourceId && sourceId !== node.id) {
@@ -125,6 +213,25 @@ function computeEdges(nodes: Node[], nodeRefs: Record<string, string[]>): Edge[]
       }
     }
   }
+
+  // Edges from prompt nodes → validation nodes
+  for (const node of nodes) {
+    if (node.type !== 'validationNode') continue;
+    const vData = node.data as unknown as ValidationNodeData;
+    if (!vData.targetModel) continue;
+    const sourceId = nameToId.get(vData.targetModel);
+    if (sourceId) {
+      edges.push({
+        id: `${sourceId}→${node.id}_validation`,
+        source: sourceId,
+        target: node.id,
+        animated: false,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#10b981' },
+        style: { stroke: '#10b981', strokeWidth: 1.5, strokeDasharray: '5 3' },
+      });
+    }
+  }
+
   return edges;
 }
 
@@ -148,6 +255,10 @@ export default function DAGEditor() {
   // Add-loop-node dialog
   const [showAddLoopDialog, setShowAddLoopDialog] = useState(false);
   const [addLoopNodeName, setAddLoopNodeName] = useState('');
+
+  // Add-validation-node dialog
+  const [showAddValidationDialog, setShowAddValidationDialog] = useState(false);
+  const [addValidationTargetModel, setAddValidationTargetModel] = useState('');
 
   // Manager dialogs
   const [showDataManager, setShowDataManager] = useState(false);
@@ -205,8 +316,10 @@ export default function DAGEditor() {
   }, [setNodes]);
 
   const handleExportPython = useCallback(async () => {
+    // Build prompt model dict (validation nodes are not prompt models)
     const modelDict: Record<string, string> = {};
     for (const n of nodes) {
+      if (n.type === 'validationNode') continue;
       const data = n.data as PromptNodeData;
       let source = nodePrompts[n.id] ?? '';
       if (data.isLoop) {
@@ -220,6 +333,32 @@ export default function DAGEditor() {
       modelDict[data.label] = source;
     }
     const jsonInline = JSON.stringify(modelDict, null, 2).replace(/\\/g, '\\\\');
+
+    // Build validation section from validation nodes
+    const vNodes = nodes.filter(
+      (n) => n.type === 'validationNode' &&
+        (n.data as unknown as ValidationNodeData).targetModel &&
+        (n.data as unknown as ValidationNodeData).properties?.some((p: ValidationProperty) => p.name.trim()),
+    );
+
+    let validationSection = '';
+    let validationDirArg = '';
+    if (vNodes.length > 0) {
+      const parts = vNodes.map((vn) => {
+        const vData = vn.data as unknown as ValidationNodeData;
+        const code = generateValidationCode(vData);
+        // Escape backslashes and triple-quotes for embedding in a Python triple-quoted string
+        const escaped = code.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+        return (
+          `_VALIDATION_${vData.targetModel} = """\\\n${escaped}"""\n` +
+          `with open("validation/${vData.targetModel}.py", "w") as _f:\n` +
+          `    _f.write(_VALIDATION_${vData.targetModel})\n`
+        );
+      });
+      validationSection = `\nos.makedirs("validation", exist_ok=True)\n${parts.join('\n')}\n`;
+      validationDirArg = '\n        validation_dir="validation",';
+    }
+
     const script = `import os
 import json
 import pbt
@@ -232,10 +371,13 @@ def llm_call(prompt: str) -> str:
         model="gemini-3.1-flash-lite-preview",
         contents=prompt,
     ).text
-
+${validationSection}
 
 async def run_pbt():
-    results = await pbt.async_run(models_from_dict=json.loads(model_export_json), llm_call=llm_call)
+    results = await pbt.async_run(
+        models_from_dict=json.loads(model_export_json),
+        llm_call=llm_call,${validationDirArg}
+    )
     print(results)
 
 
@@ -330,7 +472,10 @@ ${jsonInline}
   );
 
   const allModelNames = useMemo(
-    () => nodes.map((n) => (n.data as PromptNodeData).label),
+    () =>
+      nodes
+        .filter((n) => n.type !== 'validationNode')
+        .map((n) => (n.data as PromptNodeData).label),
     [nodes],
   );
 
@@ -403,20 +548,40 @@ ${jsonInline}
   const handleConnect = useCallback(
     (connection: Connection) => {
       const sourceNode = nodes.find((n) => n.id === connection.source);
-      const targetId = connection.target;
-      if (!sourceNode || !targetId) return;
+      const targetNode = nodes.find((n) => n.id === connection.target);
+      if (!sourceNode || !targetNode) return;
 
+      // Validation nodes are sinks: connecting a prompt node → validation node
+      // sets the targetModel rather than injecting a ref() call.
+      if (targetNode.type === 'validationNode') {
+        if (sourceNode.type === 'validationNode') return; // no val→val connections
+        const sourceLabel = (sourceNode.data as PromptNodeData).label;
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === targetNode.id
+              ? { ...n, data: { ...n.data, targetModel: sourceLabel } }
+              : n,
+          ),
+        );
+        markDirty();
+        return;
+      }
+
+      // Validation nodes cannot be sources
+      if (sourceNode.type === 'validationNode') return;
+
+      // Standard prompt→prompt connection: inject ref() text
       const refText = `{{ ref('${(sourceNode.data as PromptNodeData).label}') }}`;
       setNodePrompts((prev) => {
-        const existing = prev[targetId] ?? '';
+        const existing = prev[targetNode.id] ?? '';
         if (existing.includes(refText)) return prev;
         const updated = existing ? `${existing}\n${refText}` : refText;
-        setNodeRefs((r) => ({ ...r, [targetId]: extractRefs(updated) }));
-        return { ...prev, [targetId]: updated };
+        setNodeRefs((r) => ({ ...r, [targetNode.id]: extractRefs(updated) }));
+        return { ...prev, [targetNode.id]: updated };
       });
       markDirty();
     },
-    [nodes, markDirty],
+    [nodes, markDirty, setNodes],
   );
 
   // ── Add node ──────────────────────────────────────────────────────────────
@@ -495,6 +660,34 @@ ${jsonInline}
     setShowAddLoopDialog(false);
   }, [addLoopNodeName, modelNameSet, setNodes, markDirty]);
 
+  const openAddValidationDialog = useCallback(() => {
+    setAddValidationTargetModel(allModelNames[0] ?? '');
+    setShowAddValidationDialog(true);
+  }, [allModelNames]);
+
+  const confirmAddValidationNode = useCallback(() => {
+    const id = makeNodeId();
+    const rawPos = { x: 200 + Math.random() * 300, y: 150 + Math.random() * 200 };
+    const position = rfInstance.current
+      ? rfInstance.current.screenToFlowPosition(rawPos)
+      : rawPos;
+
+    setNodes((nds) => [
+      ...nds,
+      {
+        id,
+        type: 'validationNode',
+        position,
+        data: {
+          targetModel: addValidationTargetModel,
+          properties: [],
+        } satisfies ValidationNodeData,
+      },
+    ]);
+    markDirty();
+    setShowAddValidationDialog(false);
+  }, [addValidationTargetModel, setNodes, markDirty]);
+
   // ── Node selection (click and double-click share one handler) ─────────────
 
   const handleNodeSelect = useCallback(
@@ -536,17 +729,19 @@ ${jsonInline}
   const runMutation = useMutation({
     mutationFn: ({ modelName }: { modelName: string }) =>
       runDag(
-        nodes.map((n) => {
-          const data = n.data as PromptNodeData;
-          let source = nodePrompts[n.id] ?? '';
-          if (data.isLoop) {
-            const loopConfig = data.loopOver.trim()
-              ? `{{ config(model_type="loop", loop_over="${data.loopOver.trim()}") }}\n`
-              : `{{ config(model_type="loop") }}\n`;
-            source = loopConfig + source;
-          }
-          return { name: data.label, source, isTemplate: data.isTemplate };
-        }),
+        nodes
+          .filter((n) => n.type !== 'validationNode')
+          .map((n) => {
+            const data = n.data as PromptNodeData;
+            let source = nodePrompts[n.id] ?? '';
+            if (data.isLoop) {
+              const loopConfig = data.loopOver.trim()
+                ? `{{ config(model_type="loop", loop_over="${data.loopOver.trim()}") }}\n`
+                : `{{ config(model_type="loop") }}\n`;
+              source = loopConfig + source;
+            }
+            return { name: data.label, source, isTemplate: data.isTemplate };
+          }),
         [modelName],
         promptDataForApi,
         promptFilesForApi,
@@ -617,9 +812,11 @@ ${jsonInline}
 
   // ── Derived panel props ───────────────────────────────────────────────────
 
-  const selectedModelName = selectedNode
-    ? (selectedNode.data as PromptNodeData).label
-    : null;
+  // Validation nodes are self-contained (inline editing); they don't use NodePanel.
+  const selectedModelName =
+    selectedNode && selectedNode.type !== 'validationNode'
+      ? (selectedNode.data as PromptNodeData).label
+      : null;
 
   const isSelectedRunning =
     runMutation.isPending && runMutation.variables?.modelName === selectedModelName;
@@ -727,6 +924,11 @@ ${jsonInline}
         <Button size="sm" variant="outline" onClick={openAddLoopDialog}>
           <RepeatIcon size={13} />
           Loop node
+        </Button>
+
+        <Button size="sm" variant="outline" onClick={openAddValidationDialog}>
+          <ShieldCheckIcon size={13} />
+          Validate
         </Button>
 
         <DropdownMenu>
@@ -884,6 +1086,49 @@ ${jsonInline}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setShowAddLoopDialog(false)}>Cancel</Button>
             <Button onClick={confirmAddLoopNode} disabled={!addLoopNodeName.trim()}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add validation node dialog ── */}
+      <Dialog open={showAddValidationDialog} onOpenChange={setShowAddValidationDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add validation node</DialogTitle>
+            <DialogDescription>
+              Define a Pydantic schema to validate a model's output. You can also connect a
+              model node to an existing validation node after creation.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <label className="block text-sm text-muted-foreground mb-1.5">
+              Model to validate
+            </label>
+            {allModelNames.length > 0 ? (
+              <select
+                value={addValidationTargetModel}
+                onChange={(e) => setAddValidationTargetModel(e.target.value)}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+              >
+                <option value="">— connect after creation —</option>
+                {allModelNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No models yet. Add a model node first, or create the validation node and
+                connect it later by dragging.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowAddValidationDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmAddValidationNode}>Add</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
