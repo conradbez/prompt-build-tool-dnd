@@ -22,10 +22,6 @@ def _dispatch_status(message: str) -> None:
     window.dispatchEvent(event)
 
 
-def _inline_template_source(source: str) -> str:
-    return "{{skip_and_set_to_value(" + json.dumps(source) + ")}}"
-
-
 def _parse_json_output(raw: str):
     stripped = raw.strip()
     match = _JSON_FENCE.match(stripped)
@@ -171,7 +167,7 @@ async def _run_dag(payload_json: str) -> str:
             })
 
         models_dict = {
-            node["name"]: _inline_template_source(node["source"]) if node.get("isTemplate") else node["source"]
+            node["name"]: node["source"]
             for node in (payload.get("nodes") or [])
         }
 
