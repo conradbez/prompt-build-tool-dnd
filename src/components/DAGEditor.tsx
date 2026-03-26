@@ -623,7 +623,7 @@ ${jsonInline}
                 setProviderKeys((prev) => ({ ...prev, [selectedProvider]: e.target.value }))
               }
               placeholder="API key"
-              className="h-7 text-xs font-mono w-16"
+              className="h-7 text-xs font-mono w-32"
               spellCheck={false}
             />
           </div>
