@@ -5,7 +5,7 @@
     "rich",
     "click",
     "python-dotenv",
-    "prompt_build_tool==0.1.18"
+    "prompt_build_tool"
   ],
   "experimental_create_proxy": "auto"
 }
