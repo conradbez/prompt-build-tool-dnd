@@ -595,44 +595,65 @@ ${jsonInline}
     <div className="flex flex-col h-full">
       {/* ── Toolbar ── */}
       <header className="flex items-center gap-2 px-4 py-2 bg-white border-b border-border shadow-sm">
-        <span className="font-bold text-foreground tracking-tight mr-2 text-sm">
-          PBT DAG Editor
-        </span>
+        <a
+          href="https://github.com/conradbez/prompt-build-tool"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-bold text-foreground tracking-tight mr-2 text-sm hover:underline"
+        >
+          pbt-viz
+        </a>
 
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="inline-flex w-fit rounded-md border border-border bg-muted/30 p-0.5">
-            {PROVIDERS.map((provider) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
-                key={provider}
                 type="button"
                 size="sm"
-                variant={selectedProvider === provider ? 'default' : 'ghost'}
-                className="h-7 rounded-[5px] px-2.5 font-mono text-[11px] capitalize select-none"
-                onClick={() => setSelectedProvider(provider)}
+                variant="outline"
+                className="h-7 px-2.5 font-mono text-[11px] capitalize select-none"
               >
-                {provider}
+                {selectedProvider}
+                <ChevronDownIcon size={11} className="ml-1" />
               </Button>
-            ))}
-          </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {PROVIDERS.map((provider) => (
+                <DropdownMenuItem
+                  key={provider}
+                  className="font-mono text-[11px] capitalize"
+                  onClick={() => setSelectedProvider(provider)}
+                >
+                  {provider}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div className="flex items-center gap-1">
-            <KeyIcon size={13} className="text-muted-foreground shrink-0" />
-            <Input
-              type="password"
-              value={activeProviderKey}
-              onChange={(e) =>
-                setProviderKeys((prev) => ({ ...prev, [selectedProvider]: e.target.value }))
-              }
-              placeholder="API key"
-              className="h-7 text-xs font-mono w-32"
-              spellCheck={false}
-            />
+            <div className="flex flex-col items-start gap-0.5">
+              <span className="text-[10px] text-muted-foreground leading-none flex items-center gap-0.5">
+                <KeyIcon size={10} className="shrink-0" />
+                API key
+              </span>
+              <Input
+                type="password"
+                value={activeProviderKey}
+                onChange={(e) =>
+                  setProviderKeys((prev) => ({ ...prev, [selectedProvider]: e.target.value }))
+                }
+                placeholder="API key"
+                className="h-7 text-xs font-mono w-32"
+                spellCheck={false}
+              />
+            </div>
           </div>
-          <div
-            className="max-w-[220px] truncate text-[11px] text-muted-foreground select-none"
-            title={pyScriptStatusDetail}
-          >
-            {pyScriptStatusSummary}
-          </div>
+        </div>
+
+        <div
+          className="text-[11px] text-muted-foreground select-none truncate max-w-[220px]"
+          title={pyScriptStatusDetail}
+        >
+          {pyScriptStatusSummary}
         </div>
 
         {/* Right-side manager + action buttons */}
