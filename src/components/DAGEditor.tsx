@@ -630,11 +630,8 @@ ${jsonInline}
             </DropdownMenuContent>
           </DropdownMenu>
           <div className="flex items-center gap-1">
-            <div className="flex flex-col items-start gap-0.5">
-              <span className="text-[10px] text-muted-foreground leading-none flex items-center gap-0.5">
-                <KeyIcon size={10} className="shrink-0" />
-                API key
-              </span>
+            <div className="relative flex items-center">
+              <KeyIcon size={10} className="absolute left-2 text-muted-foreground shrink-0" />
               <Input
                 type="password"
                 value={activeProviderKey}
@@ -642,7 +639,7 @@ ${jsonInline}
                   setProviderKeys((prev) => ({ ...prev, [selectedProvider]: e.target.value }))
                 }
                 placeholder="API key"
-                className="h-7 text-xs font-mono w-32"
+                className="h-7 text-xs font-mono w-32 pl-6"
                 spellCheck={false}
               />
             </div>
