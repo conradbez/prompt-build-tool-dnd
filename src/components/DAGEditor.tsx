@@ -325,7 +325,7 @@ ${jsonInline}
           .map((edge) => edge.source);
         if (parentIds.length === 0) return;
         const parentNodes = nodes.filter((n) => parentIds.includes(n.id));
-        const target = parentNodes.reduce((best, n) => (n.position.y > best.position.y ? n : best));
+        const target = parentNodes.reduce((best, n) => (n.position.y < best.position.y ? n : best));
         e.preventDefault();
         setSelectedNodeId(target.id);
       } else {
@@ -335,7 +335,7 @@ ${jsonInline}
           .map((edge) => edge.target);
         if (childIds.length === 0) return;
         const childNodes = nodes.filter((n) => childIds.includes(n.id));
-        const target = childNodes.reduce((best, n) => (n.position.y > best.position.y ? n : best));
+        const target = childNodes.reduce((best, n) => (n.position.y < best.position.y ? n : best));
         e.preventDefault();
         setSelectedNodeId(target.id);
       }
