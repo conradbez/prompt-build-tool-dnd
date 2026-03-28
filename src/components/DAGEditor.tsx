@@ -316,20 +316,34 @@ ${jsonInline}
     const handleTabKey = (e: KeyboardEvent) => {
       if (e.key !== 'Tab') return;
       if (!selectedNodeId) return;
-      const tag = (document.activeElement as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (addDialogType !== null || showDataManager || showFileManager) return;
 
-      const children = edges.filter((edge) => edge.source === selectedNodeId);
-      if (children.length === 0) return;
-
-      e.preventDefault();
-      setSelectedNodeId(children[0].target);
+      if (e.shiftKey) {
+        // Navigate to parent with highest Y position
+        const parentIds = edges
+          .filter((edge) => edge.target === selectedNodeId)
+          .map((edge) => edge.source);
+        if (parentIds.length === 0) return;
+        const parentNodes = nodes.filter((n) => parentIds.includes(n.id));
+        const target = parentNodes.reduce((best, n) => (n.position.y > best.position.y ? n : best));
+        e.preventDefault();
+        setSelectedNodeId(target.id);
+      } else {
+        // Navigate to child with highest Y position
+        const childIds = edges
+          .filter((edge) => edge.source === selectedNodeId)
+          .map((edge) => edge.target);
+        if (childIds.length === 0) return;
+        const childNodes = nodes.filter((n) => childIds.includes(n.id));
+        const target = childNodes.reduce((best, n) => (n.position.y > best.position.y ? n : best));
+        e.preventDefault();
+        setSelectedNodeId(target.id);
+      }
     };
 
     document.addEventListener('keydown', handleTabKey);
     return () => document.removeEventListener('keydown', handleTabKey);
-  }, [selectedNodeId, edges, addDialogType, showDataManager, showFileManager]);
+  }, [selectedNodeId, edges, nodes, addDialogType, showDataManager, showFileManager]);
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) ?? null,

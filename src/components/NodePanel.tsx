@@ -192,7 +192,7 @@ export default function NodePanel({
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setActiveSuggestion((i) => Math.max(i - 1, 0));
-      } else if (e.key === 'Enter' || e.key === 'Tab') {
+      } else if (e.key === 'Enter') {
         e.preventDefault();
         insertSuggestion(suggestions[activeSuggestion]);
       } else if (e.key === 'Escape') {
