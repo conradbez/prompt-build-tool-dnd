@@ -308,9 +308,28 @@ ${jsonInline}
     };
   }, [selectedProvider, nodes, nodePrompts, promptDataRows, promptFileRows, nodeOutputs]);
 
-  // ── Computed ──────────────────────────────────────────────────────────────
+  // ── Tab key: navigate to first child node ────────────────────────────────
 
   const edges = useMemo(() => computeEdges(nodes, nodeRefs), [nodes, nodeRefs]);
+
+  useEffect(() => {
+    const handleTabKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      if (!selectedNodeId) return;
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (addDialogType !== null || showDataManager || showFileManager) return;
+
+      const children = edges.filter((edge) => edge.source === selectedNodeId);
+      if (children.length === 0) return;
+
+      e.preventDefault();
+      setSelectedNodeId(children[0].target);
+    };
+
+    document.addEventListener('keydown', handleTabKey);
+    return () => document.removeEventListener('keydown', handleTabKey);
+  }, [selectedNodeId, edges, addDialogType, showDataManager, showFileManager]);
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) ?? null,
