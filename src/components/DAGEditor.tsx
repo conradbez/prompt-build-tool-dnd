@@ -308,9 +308,65 @@ ${jsonInline}
     };
   }, [selectedProvider, nodes, nodePrompts, promptDataRows, promptFileRows, nodeOutputs]);
 
-  // ── Computed ──────────────────────────────────────────────────────────────
+  // ── Arrow key: navigate the DAG (only when not in a text input) ─────────────
 
   const edges = useMemo(() => computeEdges(nodes, nodeRefs), [nodes, nodeRefs]);
+
+  useEffect(() => {
+    const ARROW_KEYS = ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'];
+    const handleArrowKey = (e: KeyboardEvent) => {
+      if (!ARROW_KEYS.includes(e.key)) return;
+      if (!selectedNodeId) return;
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (addDialogType !== null || showDataManager || showFileManager) return;
+
+      if (e.key === 'ArrowRight') {
+        // Child with highest position on canvas (lowest Y)
+        const childIds = edges.filter((edge) => edge.source === selectedNodeId).map((edge) => edge.target);
+        if (childIds.length === 0) return;
+        const target = nodes.filter((n) => childIds.includes(n.id))
+          .reduce((best, n) => (n.position.y < best.position.y ? n : best));
+        e.preventDefault();
+        setSelectedNodeId(target.id);
+      } else if (e.key === 'ArrowLeft') {
+        // Parent with highest position on canvas (lowest Y)
+        const parentIds = edges.filter((edge) => edge.target === selectedNodeId).map((edge) => edge.source);
+        if (parentIds.length === 0) return;
+        const target = nodes.filter((n) => parentIds.includes(n.id))
+          .reduce((best, n) => (n.position.y < best.position.y ? n : best));
+        e.preventDefault();
+        setSelectedNodeId(target.id);
+      } else {
+        // Up/Down: navigate amongst siblings (nodes sharing a parent)
+        const parentIds = edges.filter((edge) => edge.target === selectedNodeId).map((edge) => edge.source);
+        let siblingIds: string[];
+        if (parentIds.length === 0) {
+          // Root nodes: siblings are all nodes with no incoming edges
+          const hasParent = new Set(edges.map((edge) => edge.target));
+          siblingIds = nodes.filter((n) => !hasParent.has(n.id)).map((n) => n.id);
+        } else {
+          const siblingSet = new Set<string>();
+          for (const pid of parentIds) {
+            edges.filter((edge) => edge.source === pid).forEach((edge) => siblingSet.add(edge.target));
+          }
+          siblingIds = [...siblingSet];
+        }
+        const siblings = nodes
+          .filter((n) => siblingIds.includes(n.id))
+          .sort((a, b) => a.position.y - b.position.y);
+        const idx = siblings.findIndex((n) => n.id === selectedNodeId);
+        if (idx === -1) return;
+        const nextIdx = e.key === 'ArrowUp' ? idx - 1 : idx + 1;
+        if (nextIdx < 0 || nextIdx >= siblings.length) return;
+        e.preventDefault();
+        setSelectedNodeId(siblings[nextIdx].id);
+      }
+    };
+
+    document.addEventListener('keydown', handleArrowKey);
+    return () => document.removeEventListener('keydown', handleArrowKey);
+  }, [selectedNodeId, edges, nodes, addDialogType, showDataManager, showFileManager]);
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) ?? null,
