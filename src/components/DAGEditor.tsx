@@ -157,7 +157,7 @@ export default function DAGEditor() {
   const [pyScriptState, setPyScriptState] = useState<PyScriptBridgeState>(getPyScriptBridgeState());
 
   const rfInstance = useRef<ReactFlowInstance | null>(null);
-  const [panelWidth, setPanelWidth] = useState(420);
+  const [panelWidth, setPanelWidth] = useState(() => Math.round(window.innerWidth * 0.6));
   const panelDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const handlePanelDragStart = useCallback((e: React.MouseEvent) => {
@@ -165,7 +165,7 @@ export default function DAGEditor() {
     const onMove = (ev: MouseEvent) => {
       if (!panelDragRef.current) return;
       const delta = panelDragRef.current.startX - ev.clientX;
-      setPanelWidth(Math.max(280, Math.min(800, panelDragRef.current.startWidth + delta)));
+      setPanelWidth(Math.max(280, Math.min(window.innerWidth * 0.9, panelDragRef.current.startWidth + delta)));
     };
     const onUp = () => {
       panelDragRef.current = null;
@@ -227,13 +227,13 @@ async def run_pbt():
     print(results)
 
 
-await run_pbt()
-
-
 # where your model definitions live
 model_export_json = \'\'\'
 ${jsonInline}
 \'\'\'
+
+
+run_pbt()
 `;
     await navigator.clipboard.writeText(script);
   }, [nodes, nodePrompts]);
