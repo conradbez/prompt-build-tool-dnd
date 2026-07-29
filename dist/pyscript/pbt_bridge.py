@@ -110,6 +110,28 @@ async def _ensure_local_engine(model: str):
     return engine
 
 
+def _is_template(config) -> bool:
+    """True for nodes the editor marked as ``model_type="template"``.
+
+    pbt itself has no model_type semantics — it parses the directive into
+    ``model.config`` and otherwise treats the node like any other prompt — so
+    every runner has to honour it in its own ``llm_call``. Without this a
+    template node is sent to the LLM and its output is a generated answer
+    rather than the text the user typed.
+    """
+    return bool(config) and config.get("model_type") == "template"
+
+
+def _template_output(prompt: str) -> str:
+    """Output for a template node: its rendered prompt, no LLM call.
+
+    ref()/promptdata() substitutions have already been applied by the time
+    llm_call is reached. Stripped because the injected ``{{ config(...) }}``
+    line renders to an empty first line.
+    """
+    return prompt.strip()
+
+
 def _parse_json_output(raw: str):
     stripped = raw.strip()
     match = _JSON_FENCE.match(stripped)
@@ -311,6 +333,9 @@ async def _run_dag(payload_json: str) -> str:
         }
 
         async def llm_call(prompt: str, files=None, config=None) -> str:
+            if _is_template(config):
+                return _template_output(prompt)
+
             if files:
                 raise ValueError("Promptfiles are not supported by the browser pbt runner yet.")
 
