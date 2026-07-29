@@ -17,7 +17,21 @@ _ANTHROPIC_VERSION = "2023-06-01"
 
 # In-browser local inference via WebLLM (WebGPU). No API key or network round
 # trip once the quantised weights are cached in the browser's Cache API.
-_LOCAL_DEFAULT_MODEL = "Llama-3.2-3B-Instruct-q4f16_1-MLC"
+#
+# Three size tiers, chosen against an 8 GB Apple-silicon budget: Chrome caps a
+# single WebGPU buffer at ~4.29 GB there, and the OS plus the browser itself
+# want several GB, so ~3.4 GB of weights is the practical ceiling. Download
+# figures assume roughly 3 MB/s.
+_LOCAL_MODELS = {
+    # ~195 MB download, 376 MB VRAM. Loads in under a minute; output quality is
+    # poor, so this tier is for checking that a DAG is wired up, not for results.
+    "local-small": "SmolLM2-360M-Instruct-q4f16_1-MLC",
+    # ~1.9 GB download (5-10 min), 2.3 GB VRAM. The general-purpose default.
+    "local-medium": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+    # ~2.4 GB download, 3.4 GB VRAM — the largest that still fits comfortably
+    # under the 8 GB M1 ceiling.
+    "local-large": "Phi-4-mini-instruct-q4f16_1-MLC",
+}
 _local_engine = None
 _local_model = None
 # WebLLM shares a single GPU context, so serialise concurrent DAG nodes rather
@@ -124,8 +138,14 @@ def _model_for_provider(provider: str) -> str:
         return window.localStorage.getItem("pbt.openaiModel") or _OPENAI_DEFAULT_MODEL
     if provider == "anthropic":
         return window.localStorage.getItem("pbt.anthropicModel") or _ANTHROPIC_DEFAULT_MODEL
-    if provider == "local":
-        return window.localStorage.getItem("pbt.localModel") or _LOCAL_DEFAULT_MODEL
+    if provider in _LOCAL_MODELS:
+        # Per-tier override, e.g. pbt.localModel.local-large, then a blanket
+        # pbt.localModel override, then the tier's built-in default.
+        return (
+            window.localStorage.getItem(f"pbt.localModel.{provider}")
+            or window.localStorage.getItem("pbt.localModel")
+            or _LOCAL_MODELS[provider]
+        )
     raise ValueError(f"Unsupported browser provider: {provider}.")
 
 
@@ -152,7 +172,7 @@ async def _send_json_request(url: str, headers: dict[str, str], body: dict) -> d
 
 
 async def _call_llm(provider: str, prompt: str, api_key: str) -> str:
-    if provider == "local":
+    if provider in _LOCAL_MODELS:
         model = _model_for_provider(provider)
         async with _local_lock:
             engine = await _ensure_local_engine(model)
@@ -245,11 +265,11 @@ async def _run_dag(payload_json: str) -> str:
         payload = json.loads(payload_json)
         provider = payload.get("provider") or "gemini"
         api_key = payload.get("apiKey")
-        if provider not in {"gemini", "openai", "anthropic", "local"}:
+        if provider not in {"gemini", "openai", "anthropic"} | set(_LOCAL_MODELS):
             raise ValueError(
                 "The PyScript runtime currently supports Gemini, OpenAI, Anthropic, and local models."
             )
-        if provider != "local" and not api_key:
+        if provider not in _LOCAL_MODELS and not api_key:
             raise ValueError(f"An API key is required for the {provider} PyScript runner.")
         if payload.get("promptfiles"):
             return json.dumps({

@@ -11,10 +11,25 @@ export interface DagNodePayload {
   source: string;
 }
 
-export type LlmProvider = 'gemini' | 'openai' | 'anthropic' | 'local';
+export type LlmProvider =
+  | 'gemini'
+  | 'openai'
+  | 'anthropic'
+  | 'local-small'
+  | 'local-medium'
+  | 'local-large';
 
 /** Providers that run entirely in the browser and need no API key. */
-export const KEYLESS_PROVIDERS: readonly LlmProvider[] = ['local'];
+export const KEYLESS_PROVIDERS: readonly LlmProvider[] = [
+  'local-small',
+  'local-medium',
+  'local-large',
+];
+
+/** True for the in-browser WebLLM tiers, which never touch a hosted API. */
+export function isLocalProvider(provider: LlmProvider): boolean {
+  return provider.startsWith('local-');
+}
 
 export function providerNeedsKey(provider: LlmProvider): boolean {
   return !KEYLESS_PROVIDERS.includes(provider);
@@ -86,7 +101,7 @@ export async function runDag(
 ): Promise<RunResponse> {
   // Local models run in the browser via WebLLM, so they always use the
   // PyScript runner even when the app is otherwise in server mode.
-  if (USE_SERVER && provider !== 'local') {
+  if (USE_SERVER && !isLocalProvider(provider)) {
     return runDagOnServer(nodes, select, promptdata, provider, apiKey);
   }
   return runDagInPyScript({ nodes, select, promptdata, promptfiles, provider, apiKey });

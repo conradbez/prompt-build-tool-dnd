@@ -48,7 +48,43 @@ import { buildNodeSource } from '@/lib/modelTypeConfig';
 // ── Module-level constants (stable across renders) ────────────────────────────
 
 const nodeTypes = { promptNode: PromptNode };
-const PROVIDERS: LlmProvider[] = ['gemini', 'openai', 'anthropic', 'local'];
+const PROVIDERS: LlmProvider[] = [
+  'gemini',
+  'openai',
+  'anthropic',
+  'local-small',
+  'local-medium',
+  'local-large',
+];
+
+const PROVIDER_LABELS: Record<LlmProvider, string> = {
+  gemini: 'gemini',
+  openai: 'openai',
+  anthropic: 'anthropic',
+  'local-small': 'local (small)',
+  'local-medium': 'local (medium)',
+  'local-large': 'local (large)',
+};
+
+/**
+ * Normalise a persisted provider, or return null if it is unrecognised.
+ * The single `local` tier predates the small/medium/large split and used the
+ * same model that `local-medium` now maps to.
+ */
+function migrateProvider(provider: LlmProvider | 'local'): LlmProvider | null {
+  if (provider === 'local') return 'local-medium';
+  return PROVIDERS.includes(provider) ? provider : null;
+}
+
+/** Tooltip shown on the keyless-provider hint, per local tier. */
+const PROVIDER_HINTS: Record<string, string> = {
+  'local-small':
+    'SmolLM2 360M — runs entirely in your browser via WebGPU, no API key or server. ~195 MB first download. Fast to load but low quality; good for checking a DAG is wired up.',
+  'local-medium':
+    'Llama 3.2 3B — runs entirely in your browser via WebGPU, no API key or server. ~1.9 GB first download (5-10 min), then cached.',
+  'local-large':
+    'Phi-4 mini — runs entirely in your browser via WebGPU, no API key or server. ~2.4 GB first download, ~3.4 GB of GPU memory. The largest tier that fits an 8 GB Apple-silicon machine.',
+};
 const USER_MODEL_STATE_STORAGE_KEY = 'pbt_user_model_state';
 
 // Stable no-op; only needed to satisfy ReactFlow's onConnectEnd prop type
@@ -274,8 +310,11 @@ run_pbt()
 
       const parsed = JSON.parse(raw) as UserModelState;
       if (parsed.version !== 1) return;
-      if (!PROVIDERS.includes(parsed.selectedProvider)) return;
-      applyLoadedState(parsed);
+      const selectedProvider = migrateProvider(parsed.selectedProvider);
+      // Only the provider is recoverable here; an unrecognised one would
+      // otherwise discard the whole saved DAG.
+      if (!selectedProvider) return;
+      applyLoadedState({ ...parsed, selectedProvider });
     } catch {
       localStorage.removeItem(USER_MODEL_STATE_STORAGE_KEY);
     }
@@ -682,9 +721,9 @@ run_pbt()
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-7 px-2.5 font-mono text-[11px] capitalize select-none"
+                className="h-7 px-2.5 font-mono text-[11px] capitalize select-none whitespace-nowrap"
               >
-                {selectedProvider}
+                {PROVIDER_LABELS[selectedProvider]}
                 <ChevronDownIcon size={11} className="ml-1" />
               </Button>
             </DropdownMenuTrigger>
@@ -694,8 +733,9 @@ run_pbt()
                   key={provider}
                   className="font-mono text-[11px] capitalize"
                   onClick={() => setSelectedProvider(provider)}
+                  title={PROVIDER_HINTS[provider]}
                 >
-                  {provider}
+                  {PROVIDER_LABELS[provider]}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -717,9 +757,12 @@ run_pbt()
               </div>
             </div>
           ) : (
+            // Progress strings from WebLLM are long ("Fetching param cache[13/58]:
+            // 355MB fetched. 20% completed, 117 secs elapsed. It can take a while…"),
+            // so clip to an ellipsis here and put the full text in the tooltip.
             <span
-              className="text-[11px] text-muted-foreground select-none whitespace-nowrap"
-              title="Runs entirely in your browser via WebGPU. No API key or server needed. First run downloads the model (~2 GB) into the browser cache."
+              className="text-[11px] text-muted-foreground select-none truncate min-w-0"
+              title={localProgress ?? PROVIDER_HINTS[selectedProvider]}
             >
               {localProgress ?? 'Runs in-browser · no key needed'}
             </span>
