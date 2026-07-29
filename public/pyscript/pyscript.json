@@ -7,5 +7,10 @@
     "python-dotenv",
     "prompt_build_tool"
   ],
+  "js_modules": {
+    "main": {
+      "https://esm.run/@mlc-ai/web-llm": "webllm"
+    }
+  },
   "experimental_create_proxy": "auto"
 }

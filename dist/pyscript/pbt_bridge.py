@@ -10,16 +10,104 @@ from pyscript import ffi, window
 
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 _storage_backend = None
+# (provider, model) used by the previous run — see _invalidate_cache_on_model_change.
+_last_llm_identity = None
 _GEMINI_DEFAULT_MODEL = "gemini-3-flash-preview"
 _OPENAI_DEFAULT_MODEL = "gpt-5.4-mini"
 _ANTHROPIC_DEFAULT_MODEL = "claude-4-6-sonnet"
 _ANTHROPIC_VERSION = "2023-06-01"
+
+# In-browser local inference via WebLLM (WebGPU). No API key or network round
+# trip once the quantised weights are cached in the browser's Cache API.
+#
+# Three size tiers, chosen against an 8 GB Apple-silicon budget: Chrome caps a
+# single WebGPU buffer at ~4.29 GB there, and the OS plus the browser itself
+# want several GB, so ~3.4 GB of weights is the practical ceiling. Download
+# figures assume roughly 3 MB/s.
+_LOCAL_MODELS = {
+    # ~195 MB download, 376 MB VRAM. Loads in under a minute; output quality is
+    # poor, so this tier is for checking that a DAG is wired up, not for results.
+    "local-small": "SmolLM2-360M-Instruct-q4f16_1-MLC",
+    # ~1.9 GB download (5-10 min), 2.3 GB VRAM. The general-purpose default.
+    "local-medium": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+    # ~2.4 GB download, 3.4 GB VRAM — the largest that still fits comfortably
+    # under the 8 GB M1 ceiling.
+    "local-large": "Phi-4-mini-instruct-q4f16_1-MLC",
+}
+_local_engine = None
+_local_model = None
+# WebLLM shares a single GPU context, so serialise concurrent DAG nodes rather
+# than firing overlapping completions at one engine.
+_local_lock = asyncio.Lock()
+
+
+def _to_js(obj):
+    """Convert a (possibly nested) Python dict to a real JS object.
+
+    A plain ``to_js`` turns dicts into ``Map``s, whose keys WebLLM cannot read
+    as properties; ``Object.fromEntries`` gives it ``{...}`` instead.
+    """
+    return ffi.to_js(obj, dict_converter=Object.fromEntries)
 
 
 def _dispatch_status(message: str) -> None:
     detail = ffi.to_js({"detail": {"message": message}})
     event = CustomEvent.new("pbt:pyscript-status", detail)
     window.dispatchEvent(event)
+
+
+def _dispatch_local_progress(message: str, progress: float) -> None:
+    """Report local-model download/load progress to the UI.
+
+    Emitted on its own event so the toolbar can show it even after the
+    PyScript bridge itself has finished initialising.
+    """
+    detail = ffi.to_js({"detail": {"message": message, "progress": progress}})
+    event = CustomEvent.new("pbt:local-progress", detail)
+    window.dispatchEvent(event)
+
+
+async def _ensure_local_engine(model: str):
+    """Lazily create (and cache) a WebLLM engine for ``model``.
+
+    First use downloads 1-4 GB of quantised weights from the HuggingFace CDN
+    into the browser cache; subsequent uses are instant unless the cache was
+    evicted under storage pressure.
+    """
+    global _local_engine, _local_model
+
+    if _local_engine is not None and _local_model == model:
+        return _local_engine
+
+    if not hasattr(window.navigator, "gpu"):
+        raise RuntimeError(
+            "WebGPU is unavailable in this browser, so local models can't run. "
+            "Use a WebGPU-enabled browser (Chrome/Edge, recent Firefox/Safari) "
+            "or pick a hosted provider."
+        )
+
+    from pyscript.js_modules import webllm
+
+    def on_progress(report):
+        # report.text is a human-readable status; report.progress is 0..1.
+        try:
+            text = report.text
+        except Exception:
+            text = "Loading local model…"
+        try:
+            progress = float(report.progress)
+        except Exception:
+            progress = 0.0
+        _dispatch_local_progress(text, progress)
+
+    _dispatch_local_progress(f"Preparing local model {model}…", 0.0)
+    cfg = _to_js({"initProgressCallback": ffi.create_proxy(on_progress)})
+    engine = await webllm.CreateMLCEngine(model, cfg)
+
+    _local_engine = engine
+    _local_model = model
+    _dispatch_local_progress(f"Local model {model} ready.", 1.0)
+    return engine
 
 
 def _parse_json_output(raw: str):
@@ -52,6 +140,14 @@ def _model_for_provider(provider: str) -> str:
         return window.localStorage.getItem("pbt.openaiModel") or _OPENAI_DEFAULT_MODEL
     if provider == "anthropic":
         return window.localStorage.getItem("pbt.anthropicModel") or _ANTHROPIC_DEFAULT_MODEL
+    if provider in _LOCAL_MODELS:
+        # Per-tier override, e.g. pbt.localModel.local-large, then a blanket
+        # pbt.localModel override, then the tier's built-in default.
+        return (
+            window.localStorage.getItem(f"pbt.localModel.{provider}")
+            or window.localStorage.getItem("pbt.localModel")
+            or _LOCAL_MODELS[provider]
+        )
     raise ValueError(f"Unsupported browser provider: {provider}.")
 
 
@@ -78,6 +174,21 @@ async def _send_json_request(url: str, headers: dict[str, str], body: dict) -> d
 
 
 async def _call_llm(provider: str, prompt: str, api_key: str) -> str:
+    if provider in _LOCAL_MODELS:
+        model = _model_for_provider(provider)
+        async with _local_lock:
+            engine = await _ensure_local_engine(model)
+            request = _to_js(
+                {"messages": [{"role": "user", "content": prompt}]}
+            )
+            reply = await engine.chat.completions.create(request)
+        # Returns are JsProxy objects — attribute access works, subscripting
+        # by string does not.
+        text = reply.choices[0].message.content
+        if text:
+            return text
+        raise RuntimeError("Local model returned an empty response.")
+
     if provider == "gemini":
         payload = await _send_json_request(
             f"https://generativelanguage.googleapis.com/v1beta/models/{_model_for_provider(provider)}:generateContent?key={api_key}",
@@ -149,6 +260,30 @@ async def _call_llm(provider: str, prompt: str, api_key: str) -> str:
     raise ValueError(f"Unsupported browser provider: {provider}.")
 
 
+def _invalidate_cache_on_model_change(provider: str) -> None:
+    """Drop pbt's prompt cache when the model behind it changes.
+
+    pbt keys cached LLM output on the rendered prompt alone (tester.py's
+    ``get_cached_llm_output(rendered)``), so an unchanged prompt returns the
+    previous model's answer. That is invisible and wrong once switching model
+    is a dropdown away: picking local (large) would replay local (small)'s
+    output. Nothing here changes pbt's key, so invalidate on model change.
+    """
+    global _last_llm_identity
+
+    try:
+        identity = (provider, _model_for_provider(provider))
+    except ValueError:
+        return
+
+    if _last_llm_identity is not None and _last_llm_identity != identity:
+        cache = getattr(_storage_backend, "_cache", None)
+        if cache is not None:
+            cache.clear()
+
+    _last_llm_identity = identity
+
+
 async def _run_dag(payload_json: str) -> str:
     try:
         import pbt
@@ -156,15 +291,19 @@ async def _run_dag(payload_json: str) -> str:
         payload = json.loads(payload_json)
         provider = payload.get("provider") or "gemini"
         api_key = payload.get("apiKey")
-        if provider not in {"gemini", "openai", "anthropic"}:
-            raise ValueError("The PyScript runtime currently supports Gemini, OpenAI, and Anthropic.")
-        if not api_key:
+        if provider not in {"gemini", "openai", "anthropic"} | set(_LOCAL_MODELS):
+            raise ValueError(
+                "The PyScript runtime currently supports Gemini, OpenAI, Anthropic, and local models."
+            )
+        if provider not in _LOCAL_MODELS and not api_key:
             raise ValueError(f"An API key is required for the {provider} PyScript runner.")
         if payload.get("promptfiles"):
             return json.dumps({
                 "outputs": {},
                 "errors": ["Promptfiles are not supported by the browser pbt runner yet."],
             })
+
+        _invalidate_cache_on_model_change(provider)
 
         models_dict = {
             node["name"]: node["source"]

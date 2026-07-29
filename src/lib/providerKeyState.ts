@@ -8,6 +8,9 @@ export const DEFAULT_PROVIDER_KEYS: ProviderKeyState = {
   gemini: '',
   openai: '',
   anthropic: '',
+  'local-small': '',
+  'local-medium': '',
+  'local-large': '',
 };
 
 function isProviderKeyState(value: unknown): value is Partial<ProviderKeyState> {
@@ -26,5 +29,9 @@ export function hydrateProviderKeyState(raw: string | null): ProviderKeyState {
     gemini: typeof parsed.gemini === 'string' ? parsed.gemini : '',
     openai: typeof parsed.openai === 'string' ? parsed.openai : '',
     anthropic: typeof parsed.anthropic === 'string' ? parsed.anthropic : '',
+    // Local tiers never hold a key, but they are part of the record shape.
+    'local-small': '',
+    'local-medium': '',
+    'local-large': '',
   };
 }
