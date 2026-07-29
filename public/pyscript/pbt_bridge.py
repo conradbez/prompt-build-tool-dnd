@@ -10,6 +10,8 @@ from pyscript import ffi, window
 
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 _storage_backend = None
+# (provider, model) used by the previous run — see _invalidate_cache_on_model_change.
+_last_llm_identity = None
 _GEMINI_DEFAULT_MODEL = "gemini-3-flash-preview"
 _OPENAI_DEFAULT_MODEL = "gpt-5.4-mini"
 _ANTHROPIC_DEFAULT_MODEL = "claude-4-6-sonnet"
@@ -258,6 +260,30 @@ async def _call_llm(provider: str, prompt: str, api_key: str) -> str:
     raise ValueError(f"Unsupported browser provider: {provider}.")
 
 
+def _invalidate_cache_on_model_change(provider: str) -> None:
+    """Drop pbt's prompt cache when the model behind it changes.
+
+    pbt keys cached LLM output on the rendered prompt alone (tester.py's
+    ``get_cached_llm_output(rendered)``), so an unchanged prompt returns the
+    previous model's answer. That is invisible and wrong once switching model
+    is a dropdown away: picking local (large) would replay local (small)'s
+    output. Nothing here changes pbt's key, so invalidate on model change.
+    """
+    global _last_llm_identity
+
+    try:
+        identity = (provider, _model_for_provider(provider))
+    except ValueError:
+        return
+
+    if _last_llm_identity is not None and _last_llm_identity != identity:
+        cache = getattr(_storage_backend, "_cache", None)
+        if cache is not None:
+            cache.clear()
+
+    _last_llm_identity = identity
+
+
 async def _run_dag(payload_json: str) -> str:
     try:
         import pbt
@@ -276,6 +302,8 @@ async def _run_dag(payload_json: str) -> str:
                 "outputs": {},
                 "errors": ["Promptfiles are not supported by the browser pbt runner yet."],
             })
+
+        _invalidate_cache_on_model_change(provider)
 
         models_dict = {
             node["name"]: node["source"]
