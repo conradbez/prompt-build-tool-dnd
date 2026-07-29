@@ -15,11 +15,83 @@ _OPENAI_DEFAULT_MODEL = "gpt-5.4-mini"
 _ANTHROPIC_DEFAULT_MODEL = "claude-4-6-sonnet"
 _ANTHROPIC_VERSION = "2023-06-01"
 
+# In-browser local inference via WebLLM (WebGPU). No API key or network round
+# trip once the quantised weights are cached in the browser's Cache API.
+_LOCAL_DEFAULT_MODEL = "Llama-3.2-3B-Instruct-q4f16_1-MLC"
+_local_engine = None
+_local_model = None
+# WebLLM shares a single GPU context, so serialise concurrent DAG nodes rather
+# than firing overlapping completions at one engine.
+_local_lock = asyncio.Lock()
+
+
+def _to_js(obj):
+    """Convert a (possibly nested) Python dict to a real JS object.
+
+    A plain ``to_js`` turns dicts into ``Map``s, whose keys WebLLM cannot read
+    as properties; ``Object.fromEntries`` gives it ``{...}`` instead.
+    """
+    return ffi.to_js(obj, dict_converter=Object.fromEntries)
+
 
 def _dispatch_status(message: str) -> None:
     detail = ffi.to_js({"detail": {"message": message}})
     event = CustomEvent.new("pbt:pyscript-status", detail)
     window.dispatchEvent(event)
+
+
+def _dispatch_local_progress(message: str, progress: float) -> None:
+    """Report local-model download/load progress to the UI.
+
+    Emitted on its own event so the toolbar can show it even after the
+    PyScript bridge itself has finished initialising.
+    """
+    detail = ffi.to_js({"detail": {"message": message, "progress": progress}})
+    event = CustomEvent.new("pbt:local-progress", detail)
+    window.dispatchEvent(event)
+
+
+async def _ensure_local_engine(model: str):
+    """Lazily create (and cache) a WebLLM engine for ``model``.
+
+    First use downloads 1-4 GB of quantised weights from the HuggingFace CDN
+    into the browser cache; subsequent uses are instant unless the cache was
+    evicted under storage pressure.
+    """
+    global _local_engine, _local_model
+
+    if _local_engine is not None and _local_model == model:
+        return _local_engine
+
+    if not hasattr(window.navigator, "gpu"):
+        raise RuntimeError(
+            "WebGPU is unavailable in this browser, so local models can't run. "
+            "Use a WebGPU-enabled browser (Chrome/Edge, recent Firefox/Safari) "
+            "or pick a hosted provider."
+        )
+
+    from pyscript.js_modules import webllm
+
+    def on_progress(report):
+        # report.text is a human-readable status; report.progress is 0..1.
+        try:
+            text = report.text
+        except Exception:
+            text = "Loading local model…"
+        try:
+            progress = float(report.progress)
+        except Exception:
+            progress = 0.0
+        _dispatch_local_progress(text, progress)
+
+    _dispatch_local_progress(f"Preparing local model {model}…", 0.0)
+    cfg = _to_js({"initProgressCallback": ffi.create_proxy(on_progress)})
+    engine = await webllm.CreateMLCEngine(model, cfg)
+
+    _local_engine = engine
+    _local_model = model
+    _dispatch_local_progress(f"Local model {model} ready.", 1.0)
+    return engine
 
 
 def _parse_json_output(raw: str):
@@ -52,6 +124,8 @@ def _model_for_provider(provider: str) -> str:
         return window.localStorage.getItem("pbt.openaiModel") or _OPENAI_DEFAULT_MODEL
     if provider == "anthropic":
         return window.localStorage.getItem("pbt.anthropicModel") or _ANTHROPIC_DEFAULT_MODEL
+    if provider == "local":
+        return window.localStorage.getItem("pbt.localModel") or _LOCAL_DEFAULT_MODEL
     raise ValueError(f"Unsupported browser provider: {provider}.")
 
 
@@ -78,6 +152,21 @@ async def _send_json_request(url: str, headers: dict[str, str], body: dict) -> d
 
 
 async def _call_llm(provider: str, prompt: str, api_key: str) -> str:
+    if provider == "local":
+        model = _model_for_provider(provider)
+        async with _local_lock:
+            engine = await _ensure_local_engine(model)
+            request = _to_js(
+                {"messages": [{"role": "user", "content": prompt}]}
+            )
+            reply = await engine.chat.completions.create(request)
+        # Returns are JsProxy objects — attribute access works, subscripting
+        # by string does not.
+        text = reply.choices[0].message.content
+        if text:
+            return text
+        raise RuntimeError("Local model returned an empty response.")
+
     if provider == "gemini":
         payload = await _send_json_request(
             f"https://generativelanguage.googleapis.com/v1beta/models/{_model_for_provider(provider)}:generateContent?key={api_key}",
@@ -156,9 +245,11 @@ async def _run_dag(payload_json: str) -> str:
         payload = json.loads(payload_json)
         provider = payload.get("provider") or "gemini"
         api_key = payload.get("apiKey")
-        if provider not in {"gemini", "openai", "anthropic"}:
-            raise ValueError("The PyScript runtime currently supports Gemini, OpenAI, and Anthropic.")
-        if not api_key:
+        if provider not in {"gemini", "openai", "anthropic", "local"}:
+            raise ValueError(
+                "The PyScript runtime currently supports Gemini, OpenAI, Anthropic, and local models."
+            )
+        if provider != "local" and not api_key:
             raise ValueError(f"An API key is required for the {provider} PyScript runner.")
         if payload.get("promptfiles"):
             return json.dumps({

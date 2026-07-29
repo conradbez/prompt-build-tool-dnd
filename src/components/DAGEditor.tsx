@@ -31,7 +31,7 @@ import { Input } from '@/components/ui/input';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { runDag, uploadFileToServer, USE_SERVER, type LlmProvider } from '../api';
+import { runDag, uploadFileToServer, USE_SERVER, providerNeedsKey, type LlmProvider } from '../api';
 import {
   getPyScriptBridgeState,
   subscribePyScriptBridgeState,
@@ -48,7 +48,7 @@ import { buildNodeSource } from '@/lib/modelTypeConfig';
 // ── Module-level constants (stable across renders) ────────────────────────────
 
 const nodeTypes = { promptNode: PromptNode };
-const PROVIDERS: LlmProvider[] = ['gemini', 'openai', 'anthropic'];
+const PROVIDERS: LlmProvider[] = ['gemini', 'openai', 'anthropic', 'local'];
 const USER_MODEL_STATE_STORAGE_KEY = 'pbt_user_model_state';
 
 // Stable no-op; only needed to satisfy ReactFlow's onConnectEnd prop type
@@ -155,6 +155,7 @@ export default function DAGEditor() {
   const [selectedProvider, setSelectedProvider] = useState<LlmProvider>('gemini');
   const [providerKeys, setProviderKeys] = useState<Record<LlmProvider, string>>(getInitialProviderKeys);
   const [pyScriptState, setPyScriptState] = useState<PyScriptBridgeState>(getPyScriptBridgeState());
+  const [localProgress, setLocalProgress] = useState<string | null>(null);
 
   const rfInstance = useRef<ReactFlowInstance | null>(null);
   const [panelWidth, setPanelWidth] = useState(() => Math.round(window.innerWidth * 0.6));
@@ -177,6 +178,20 @@ export default function DAGEditor() {
   }, [panelWidth]);
 
   useEffect(() => subscribePyScriptBridgeState(setPyScriptState), []);
+
+  // Local (WebLLM) model download/load progress. Emitted by the PyScript
+  // bridge and shown in the toolbar; cleared once the model is ready.
+  useEffect(() => {
+    const onProgress = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string; progress?: number }>).detail;
+      const message = detail?.message;
+      if (!message) return;
+      const done = (detail?.progress ?? 0) >= 1;
+      setLocalProgress(done ? null : message);
+    };
+    window.addEventListener('pbt:local-progress', onProgress as EventListener);
+    return () => window.removeEventListener('pbt:local-progress', onProgress as EventListener);
+  }, []);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -685,21 +700,30 @@ run_pbt()
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
-          <div className="flex items-center gap-1">
-            <div className="relative flex items-center">
-              <KeyIcon size={10} className="absolute left-2 text-muted-foreground shrink-0" />
-              <Input
-                type="password"
-                value={activeProviderKey}
-                onChange={(e) =>
-                  setProviderKeys((prev) => ({ ...prev, [selectedProvider]: e.target.value }))
-                }
-                placeholder="API key"
-                className="h-7 text-xs font-mono w-32 pl-6"
-                spellCheck={false}
-              />
+          {providerNeedsKey(selectedProvider) ? (
+            <div className="flex items-center gap-1">
+              <div className="relative flex items-center">
+                <KeyIcon size={10} className="absolute left-2 text-muted-foreground shrink-0" />
+                <Input
+                  type="password"
+                  value={activeProviderKey}
+                  onChange={(e) =>
+                    setProviderKeys((prev) => ({ ...prev, [selectedProvider]: e.target.value }))
+                  }
+                  placeholder="API key"
+                  className="h-7 text-xs font-mono w-32 pl-6"
+                  spellCheck={false}
+                />
+              </div>
             </div>
-          </div>
+          ) : (
+            <span
+              className="text-[11px] text-muted-foreground select-none whitespace-nowrap"
+              title="Runs entirely in your browser via WebGPU. No API key or server needed. First run downloads the model (~2 GB) into the browser cache."
+            >
+              {localProgress ?? 'Runs in-browser · no key needed'}
+            </span>
+          )}
         </div>
 
         <div

@@ -26,8 +26,28 @@ Use the env var matching your provider:
 | Gemini    | `GEMINI_API_KEY`    |
 | OpenAI    | `OPENAI_API_KEY`    |
 | Anthropic | `ANTHROPIC_API_KEY` |
+| Local     | _none_              |
 
 The server uses the env var automatically — no need to enter the key in the UI. You can still override it per-run by entering a key in the UI.
+
+## Local models (no key, no server)
+
+Pick **`local`** in the provider dropdown to run a model entirely in the browser
+via [WebLLM](https://github.com/mlc-ai/web-llm) — no API key and no network round
+trip once the weights are cached. Local always runs in-browser, even in server
+mode.
+
+- **Requires WebGPU** (Chrome/Edge, and recent Firefox/Safari). If WebGPU is
+  unavailable the run fails with a clear message — switch to a hosted provider.
+- **First run downloads the model** (~2 GB for the default
+  `Llama-3.2-3B-Instruct-q4f16_1-MLC`) into the browser's Cache API. Progress is
+  shown in the toolbar; later runs are instant unless the cache is evicted.
+- **Override the model** by setting `localStorage['pbt.localModel']` to any
+  [WebLLM prebuilt model id](https://github.com/mlc-ai/web-llm#built-in-models).
+
+Small local models are best for classification, rewriting, extraction, and
+summarisation; heavy reasoning and long-context tasks are better on a hosted
+provider.
 
 **Frontend** (from repo root):
 ```bash
