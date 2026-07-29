@@ -22,6 +22,7 @@ import PromptNode, { type PromptNodeData } from './PromptNode';
 import NodePanel from './NodePanel';
 import PromptDataManager, { type PromptDataRow } from './PromptDataManager';
 import PromptFileManager, { type PromptFileRow } from './PromptFileManager';
+import { TruncatedStatus } from './TruncatedStatus';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
@@ -759,22 +760,21 @@ run_pbt()
           ) : (
             // Progress strings from WebLLM are long ("Fetching param cache[13/58]:
             // 355MB fetched. 20% completed, 117 secs elapsed. It can take a while…"),
-            // so clip to an ellipsis here and put the full text in the tooltip.
-            <span
-              className="text-[11px] text-muted-foreground select-none truncate min-w-0"
-              title={localProgress ?? PROVIDER_HINTS[selectedProvider]}
-            >
-              {localProgress ?? 'Runs in-browser · no key needed'}
-            </span>
+            // so clip to an ellipsis here and reveal the full text on hover.
+            <TruncatedStatus
+              text={localProgress ?? 'Runs in-browser · no key needed'}
+              full={localProgress ?? PROVIDER_HINTS[selectedProvider]}
+              className="text-[11px] text-muted-foreground select-none"
+            />
           )}
         </div>
 
-        <div
-          className="text-[11px] text-muted-foreground select-none truncate max-w-[220px]"
-          title={pyScriptStatusDetail}
-        >
-          {pyScriptStatusSummary}
-        </div>
+        <TruncatedStatus
+          text={pyScriptStatusSummary}
+          full={pyScriptStatusDetail}
+          align="end"
+          className="text-[11px] text-muted-foreground select-none max-w-[220px]"
+        />
 
         {/* Right-side manager + action buttons */}
         <Button

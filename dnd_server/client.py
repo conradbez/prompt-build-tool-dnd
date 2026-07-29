@@ -29,9 +29,28 @@ def _read_files(files) -> list[tuple[bytes, str]]:
     return result
 
 
+def _is_template(config) -> bool:
+    """True for nodes the editor marked as ``model_type="template"``.
+
+    pbt has no model_type semantics of its own — it parses the directive into
+    ``model.config`` and otherwise runs the node like any other prompt — so
+    each runner honours it in its own ``llm_call``. Without this a template
+    node is sent to the LLM and outputs a generated answer instead of the
+    text the user typed.
+    """
+    return bool(config) and config.get("model_type") == "template"
+
+
 def make_llm_call(api_key: str | None = None, provider: str = "gemini"):
     """Return a llm_call function bound to the given provider and API key."""
     def llm_call(prompt: str, files=None, config=None) -> str:
+        if _is_template(config):
+            # ref()/promptdata() are already substituted; the rendered prompt
+            # *is* the output. Stripped because the injected {{ config(...) }}
+            # line renders to an empty first line.
+            print(f"[llm_call] template passthrough (no LLM call):\n{prompt[:500]}\n")
+            return prompt.strip()
+
         print(f"[llm_call] prompt sent to {provider}:\n{prompt[:500]}\n")
         print(f"[llm_call] files: {files}")
         resolved_api_key = api_key or os.environ[_env_key_name(provider)]

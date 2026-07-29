@@ -257,7 +257,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135.1" },
     { name = "google-genai", specifier = ">=1.66.0" },
     { name = "openai", specifier = ">=2.26.0" },
-    { name = "prompt-build-tool", directory = "../../Documents/prompt-build-tool-for-LLMs" },
+    { name = "prompt-build-tool" },
     { name = "python-multipart", specifier = ">=0.0.22" },
     { name = "uvicorn", specifier = ">=0.41.0" },
 ]
@@ -558,34 +558,18 @@ wheels = [
 
 [[package]]
 name = "prompt-build-tool"
-version = "0.1.7"
-source = { directory = "../../Documents/prompt-build-tool-for-LLMs" }
+version = "0.1.22"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "jinja2" },
     { name = "networkx" },
-    { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "rich" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1" },
-    { name = "jinja2", specifier = ">=3.1" },
-    { name = "networkx", specifier = ">=3.0" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "rich", specifier = ">=13.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "fastapi", specifier = ">=0.135.1" },
-    { name = "openai", specifier = ">=2.26.0" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "python-multipart", specifier = ">=0.0.22" },
-    { name = "uvicorn", specifier = ">=0.41.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/d6/f0/3b15ba56e584a1d062b45b96656360ffcae53b63c7f124bde4e99762cbca/prompt_build_tool-0.1.22.tar.gz", hash = "sha256:13cb072dcaaac19148cdc11fa5fa470f867d245e27985edb6acdeab66381b84f", size = 61236, upload-time = "2026-03-27T08:46:37.109Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/ce/19e8ab61dcb5d6b5736f838aafb7da3f27f5cb1002b7e51a3acb56c77420/prompt_build_tool-0.1.22-py3-none-any.whl", hash = "sha256:93ee35c3b38251914b328d65f96350c0ddf4e19081700e39b050b4d877d83a6a", size = 64266, upload-time = "2026-03-27T08:46:35.449Z" },
 ]
 
 [[package]]
