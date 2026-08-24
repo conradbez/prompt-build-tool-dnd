@@ -111,7 +111,7 @@ def run(req: RunRequest) -> RunResponse:
 
     try:
         llm = make_llm_call(api_key=req.apiKey, provider=req.provider)
-        outputs = pbt.async_run(models_from_dict=models, llm_call=llm, verbose=False)
+        outputs = pbt.run(models_from_dict=models, llm_call=llm, verbose=False)
     except Exception as exc:  # noqa: BLE001 — surface any failure to the client
         return RunResponse(errors=[str(exc)])
 

@@ -39,7 +39,7 @@ def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Ca
 
             client = genai.Client(api_key=key)
             resp = client.models.generate_content(
-                model=os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
+                model=os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"),
                 contents=[prompt],
             )
             return resp.text or ""

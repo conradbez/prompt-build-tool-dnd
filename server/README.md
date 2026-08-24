@@ -61,6 +61,6 @@ No state is stored between requests, so a single instance scales trivially.
 
 | Provider  | Key env var         | Model env var (default)             |
 |-----------|---------------------|-------------------------------------|
-| Gemini    | `GEMINI_API_KEY`    | `GEMINI_MODEL` (`gemini-2.0-flash`) |
+| Gemini    | `GEMINI_API_KEY`    | `GEMINI_MODEL` (`gemini-3.6-flash`) |
 | OpenAI    | `OPENAI_API_KEY`    | `OPENAI_MODEL` (`gpt-4o-mini`)      |
 | Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` (`claude-sonnet-4-5`) |
