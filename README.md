@@ -73,7 +73,9 @@ Each bullet becomes one pbt model; a bullet's `@` references become
 bullets that reference it. The API key is remembered per provider in this
 browser's `localStorage` and sent with the request.
 
-- **Server + Railway deploy:** see [`server/README.md`](server/README.md).
+- **Server + Railway deploy:** see [`server/README.md`](server/README.md). The
+  repo-root `Dockerfile` deploys **one service** that serves the app and the API
+  together, so the deployed URL works with no extra config (recommended).
 - **Dev:** the Vite dev server proxies `/api/*` → `http://localhost:8000`, so
   running the server locally needs no extra config.
 - **Deployed frontend:** the server URL is resolved in JavaScript, so you have

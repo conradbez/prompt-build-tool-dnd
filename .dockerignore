@@ -1,0 +1,8 @@
+.git
+node_modules
+dist
+.venv
+server/.venv
+server/.pbt
+**/__pycache__
+*.log

@@ -29,7 +29,9 @@ Each bullet becomes a pbt model; a bullet's `@` references (`refs`) become
 `{{ ref('…') }}` dependencies, so upstream outputs flow into the bullets that
 reference them. pbt resolves ordering and runs independent branches in parallel.
 
-`GET /` is a health check.
+`GET /healthz` is a health check. `GET /` serves the built frontend when a
+`dist/` folder sits next to `server/` (see Docker below); otherwise it 404s and
+the server is API-only.
 
 ## Run locally
 
@@ -43,17 +45,31 @@ ANTHROPIC_API_KEY=sk-... uvicorn main:app --port 8000 --reload
 The Vite dev server proxies `/api/*` → `http://localhost:8000`, so the frontend
 works against a local server with no extra config.
 
-## Deploy on Railway
+## Deploy on Railway (one service, app + API)
 
-1. New project → Deploy from repo.
-2. Set the service **Root Directory** to `server`.
-3. Railway installs `requirements.txt` and starts the `Procfile`
-   (`uvicorn main:app --host 0.0.0.0 --port $PORT`).
-4. Optionally set `GEMINI_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
+The repo root has a **Dockerfile** that builds the frontend and runs this
+server, serving the app at `/` and the API at `/run` on the **same origin** —
+so the deployed URL is the whole thing, no separate frontend host and no
+`VITE_SERVER_URL` to set.
+
+1. New project → Deploy from repo. Leave the service **Root Directory** at the
+   repo root (the default) so Railway uses the Dockerfile.
+2. Railway builds the image and runs
+   `uvicorn main:app --host 0.0.0.0 --port $PORT`.
+3. Optionally set `GEMINI_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
    (and `*_MODEL` overrides) as service variables — otherwise the key entered
    in the UI is used.
-5. Point the frontend at the public URL by building it with
-   `VITE_SERVER_URL=https://your-app.up.railway.app`.
+4. Open the public URL — the app loads and Run works out of the box.
+
+> If Railway is serving the **static site** instead (`POST /run` → 405,
+> `GET /run` returns HTML), the service is using Node static detection rather
+> than the Dockerfile. Make sure the service Root Directory is the repo root and
+> redeploy; Railway prefers the Dockerfile.
+
+**API-only** (no bundled frontend): set Root Directory to `server`; Railway then
+installs `requirements.txt` and runs the `Procfile`. Point a separately-hosted
+frontend at it with `VITE_SERVER_URL=…`, the toolbar ⚙ field, or a `?server=…`
+link.
 
 No state is stored between requests, so a single instance scales trivially.
 

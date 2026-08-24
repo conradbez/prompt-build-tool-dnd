@@ -13,16 +13,23 @@ branches in parallel.
 
 from __future__ import annotations
 
+import pathlib
 import re
 from typing import Any, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import pbt
 
 from llm import make_llm_call
+
+# The built frontend (repo-root `dist/`), if it was shipped alongside the
+# server. When present it is served at `/`, so one deployment hosts both the
+# app and the API and same-origin `/run` works with no configuration.
+DIST_DIR = pathlib.Path(__file__).resolve().parent.parent / "dist"
 
 PROVIDERS = {"gemini", "openai", "anthropic"}
 
@@ -89,9 +96,9 @@ app.add_middleware(
 )
 
 
-@app.get("/")
+@app.get("/healthz")
 def health() -> dict:
-    """Lightweight health check (also used by Railway)."""
+    """Lightweight health check."""
     return {"status": "ok", "pbt_version": pbt.__version__}
 
 
@@ -118,3 +125,9 @@ def run(req: RunRequest) -> RunResponse:
     results, errors = _serialise(outputs)
     by_id = {slug_to_id.get(name, name): value for name, value in results.items()}
     return RunResponse(outputs=by_id, errors=errors)
+
+
+# Serve the built frontend last, so `/run` and `/healthz` take precedence.
+# `html=True` serves index.html at `/`. Absent in dev (no dist/) — skipped.
+if DIST_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="frontend")
