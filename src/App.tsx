@@ -21,7 +21,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const move = (e: MouseEvent) => {
+    // Pointer Events cover mouse, touch and pen with one code path.
+    const move = (e: PointerEvent) => {
       if (!dragging.current) return;
       e.preventDefault();
       onMove(e.clientX);
@@ -31,15 +32,18 @@ export default function App() {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
     return () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
     };
   }, [onMove]);
 
-  const startDrag = () => {
+  const startDrag = (e: React.PointerEvent) => {
+    e.preventDefault();
     dragging.current = true;
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
@@ -52,7 +56,12 @@ export default function App() {
         <MindMap />
       </div>
 
-      <div className="app__divider" onMouseDown={startDrag} role="separator" aria-orientation="vertical">
+      <div
+        className="app__divider"
+        onPointerDown={startDrag}
+        role="separator"
+        aria-orientation="vertical"
+      >
         <div className="app__divider-grip" />
       </div>
 

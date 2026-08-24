@@ -10,22 +10,27 @@ export interface LaidOutNode {
 export const NODE_WIDTH = 190;
 export const NODE_HEIGHT = 56;
 const H_GAP = 28; // horizontal gap between sibling subtrees
-const V_GAP = 90; // vertical gap between depth levels (room for run results)
+const V_GAP = 44; // vertical gap between depth levels
+const RESULT_HEIGHT = 168; // extra room a node needs when it shows a run result
 
 /**
  * Simple top-down tidy tree: leaves are packed left-to-right, each parent is
  * centred over its children, and depth maps to the vertical axis. Multiple
  * roots are laid out side by side. Collapsed bullets render as leaves.
+ *
+ * Row heights adapt per depth: a level that shows run results is given extra
+ * vertical room so tall output cards don't overlap the level below.
  */
 export function layout(state: OutlineState): LaidOutNode[] {
-  const nodes: LaidOutNode[] = [];
+  const placed: { id: string; x: number; depth: number }[] = [];
   let cursor = 0; // next free leaf slot (in node-width units)
-
   const slot = NODE_WIDTH + H_GAP;
+  let maxDepth = 0;
 
   const place = (id: string, depth: number): number => {
     const b = state.bullets[id];
     if (!b) return cursor * slot;
+    maxDepth = Math.max(maxDepth, depth);
     const kids = b.collapsed ? [] : b.children.filter((c) => state.bullets[c]);
 
     let x: number;
@@ -36,10 +41,24 @@ export function layout(state: OutlineState): LaidOutNode[] {
       const childXs = kids.map((c) => place(c, depth + 1));
       x = (childXs[0] + childXs[childXs.length - 1]) / 2;
     }
-    nodes.push({ id, x, y: depth * (NODE_HEIGHT + V_GAP), depth });
+    placed.push({ id, x, depth });
     return x;
   };
 
   for (const rootId of state.rootIds) place(rootId, 0);
-  return nodes;
+
+  // Height of each depth = base node height, plus result room if any node on
+  // that level currently has a result.
+  const rowHeight: number[] = new Array(maxDepth + 1).fill(NODE_HEIGHT);
+  for (const p of placed) {
+    if (state.results[p.id]) rowHeight[p.depth] = NODE_HEIGHT + RESULT_HEIGHT;
+  }
+
+  // Cumulative y offset per depth.
+  const yOffset: number[] = new Array(maxDepth + 1).fill(0);
+  for (let d = 1; d <= maxDepth; d++) {
+    yOffset[d] = yOffset[d - 1] + rowHeight[d - 1] + V_GAP;
+  }
+
+  return placed.map((p) => ({ id: p.id, x: p.x, y: yOffset[p.depth], depth: p.depth }));
 }

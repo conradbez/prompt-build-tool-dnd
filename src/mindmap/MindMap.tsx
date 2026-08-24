@@ -40,6 +40,7 @@ export function MindMap() {
         position: { x: p.x, y: p.y },
         data,
         selected: state.selectedId === p.id,
+        deletable: false,
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
       };
@@ -75,6 +76,21 @@ export function MindMap() {
     actions.setFocus({ id: node.id, field: 'title', caret: 'end' });
   };
 
+  // Deleting a parent→child link makes the child a top-level node; deleting a
+  // reference (dashed) link just drops the reference.
+  const deleteEdge = (e: Edge) => {
+    if (e.id.startsWith('r-')) actions.removeRef(e.source, e.target);
+    else actions.reparent(e.target, null);
+  };
+  const onEdgesDelete = (deleted: Edge[]) => deleted.forEach(deleteEdge);
+
+  // Tap-to-delete a link (touch-friendly; Delete/Backspace also works).
+  const onEdgeClick = (_: unknown, edge: Edge) => {
+    const isRef = edge.id.startsWith('r-');
+    const msg = isRef ? 'Remove this reference?' : 'Detach this node to the top level?';
+    if (window.confirm(msg)) deleteEdge(edge);
+  };
+
   return (
     <div className="h-full w-full">
       <ReactFlow
@@ -82,9 +98,15 @@ export function MindMap() {
         edges={edges}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
+        onEdgeClick={onEdgeClick}
+        onEdgesDelete={onEdgesDelete}
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
         nodesDraggable={false}
+        deleteKeyCode={['Backspace', 'Delete']}
+        panOnScroll
+        zoomOnPinch
+        panOnDrag
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} color="#e5e7eb" />

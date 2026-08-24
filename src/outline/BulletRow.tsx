@@ -122,6 +122,14 @@ export function BulletRow({ bullet, depth, selected }: Props) {
       return;
     }
 
+    // ---- Alt+Shift+Up/Down: reorder the bullet (Workflowy) ----
+    if (e.altKey && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      if (e.key === 'ArrowUp') actions.moveUp(id);
+      else actions.moveDown(id);
+      return;
+    }
+
     // ---- Vertical navigation across bullets and fields ----
     if (e.key === 'ArrowUp' && caretOnFirstLine(el)) {
       e.preventDefault();

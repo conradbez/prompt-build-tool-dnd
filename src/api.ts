@@ -23,24 +23,50 @@ export interface RunResponse {
   errors: string[];
 }
 
+export const SERVER_URL_STORAGE = 'wm.serverUrl';
+
 /**
- * Base URL for the server. In dev, Vite proxies `/api` → localhost:8000.
- * For a deployed build, set `VITE_SERVER_URL` to the Railway URL.
+ * Where the runner lives. Priority:
+ *   1. a URL saved in the toolbar (localStorage) — lets a deployed/preview
+ *      build point at Railway with no rebuild;
+ *   2. the `VITE_SERVER_URL` build-time env;
+ *   3. `/api`, which the Vite dev server proxies to localhost:8000.
+ *
+ * A 405 usually means requests hit a static host (GitHub Pages, `vite preview`)
+ * instead of the server — set the URL here to fix it.
  */
-const SERVER_URL = (import.meta as any).env?.VITE_SERVER_URL || '/api';
+export function getServerUrl(): string {
+  const saved = (typeof localStorage !== 'undefined' && localStorage.getItem(SERVER_URL_STORAGE)) || '';
+  const envUrl = (import.meta as any).env?.VITE_SERVER_URL || '';
+  return (saved || envUrl || '/api').replace(/\/+$/, '');
+}
 
 export async function runGraph(
   nodes: NodePayload[],
   provider: Provider,
   apiKey: string | undefined,
 ): Promise<RunResponse> {
-  const res = await fetch(`${SERVER_URL}/run`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nodes, provider, apiKey: apiKey || undefined }),
-  });
+  const url = `${getServerUrl()}/run`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodes, provider, apiKey: apiKey || undefined }),
+    });
+  } catch (err) {
+    throw new Error(
+      `Could not reach the server at ${url} (${err instanceof Error ? err.message : String(err)}). ` +
+        `Set the server URL from the ⚙ toolbar button.`,
+    );
+  }
   if (!res.ok) {
-    throw new Error(`Server error: ${res.status} ${res.statusText}`);
+    const body = await res.text().catch(() => '');
+    const hint =
+      res.status === 405
+        ? ' — that URL is not the runner (a static host answered). Set the server URL from the ⚙ toolbar button.'
+        : '';
+    throw new Error(`Server ${res.status} ${res.statusText} at ${url}${hint} ${body.slice(0, 200)}`.trim());
   }
   return res.json();
 }

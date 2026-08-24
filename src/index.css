@@ -263,15 +263,34 @@ body,
 }
 
 .mm-node__result {
-  margin-top: 5px;
-  padding-top: 5px;
-  border-top: 1px dashed var(--border);
-  color: #047857;
-  font-size: 11px;
-  line-height: 1.35;
+  position: relative;
+  margin-top: 7px;
+  padding: 7px 8px 20px;
+  border-radius: 8px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  font-size: 12.5px;
+  line-height: 1.4;
   white-space: pre-wrap;
-  max-height: 66px;
-  overflow: hidden;
+  max-height: 150px;
+  overflow-y: auto;
+  cursor: pointer;
+}
+
+.mm-node__result:hover {
+  border-color: #34d399;
+}
+
+.mm-node__branch {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #059669;
+  background: #ecfdf5;
+  padding-left: 6px;
 }
 
 /* ------------------------------------------------------------------ toolbar */
@@ -338,6 +357,36 @@ body,
   cursor: default;
 }
 
+.tb__gear {
+  height: 30px;
+  width: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 15px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.tb__row--settings {
+  margin-top: 6px;
+}
+
+.tb__server {
+  width: 420px;
+  max-width: 78vw;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.tb__server:focus {
+  border-color: var(--accent);
+}
+
 .tb__errors {
   margin-top: 6px;
   padding: 8px 10px;
@@ -354,4 +403,45 @@ body,
 .tb__error {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* -------------------------------------------------------------- touch tweaks */
+
+.app__divider {
+  touch-action: none; /* the divider drags, never scrolls */
+}
+
+/* Coarse pointers (touch): bigger hit targets, no reliance on hover. */
+@media (pointer: coarse) {
+  .app__divider {
+    width: 16px;
+    flex-basis: 16px;
+  }
+  .ol-gutter {
+    height: 26px;
+  }
+  .ol-caret {
+    width: 26px;
+    font-size: 14px;
+  }
+  .ol-dot {
+    width: 12px;
+    height: 12px;
+  }
+  .ol-scroll {
+    padding-left: 12px;
+  }
+  .tb__select,
+  .tb__key,
+  .tb__run,
+  .tb__gear,
+  .tb__server {
+    height: 40px;
+  }
+  .tb__run {
+    padding: 0 20px;
+  }
+  .mm-node__branch {
+    font-size: 12px;
+  }
 }

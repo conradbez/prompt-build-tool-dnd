@@ -38,11 +38,27 @@ consistently.
 | `Shift+Enter` | — | Insert a newline |
 | `Tab` | Indent (nest under previous sibling) | Indent |
 | `Shift+Tab` | Outdent | Outdent |
+| `Alt+Shift+↑` / `Alt+Shift+↓` | Reorder the bullet up / down | Same |
 | `↑` / `↓` | Move focus to the previous / next editor | Same, at line boundaries |
 | `Backspace` (empty bullet, at start) | Delete the bullet | Jump up to the title |
 
 So from a bullet's first line, one `Enter` drops into the body, and a second
 `Enter` (from the body) creates the bullet underneath — the Workflowy flow.
+
+**Reorder** works like Workflowy: `Alt+Shift+↑`/`↓` moves a bullet among its
+siblings, and past the first/last sibling it hops above/below the parent.
+Indent/outdent stay on `Tab`/`Shift+Tab`.
+
+## Mind-map interactions
+
+- **Click a node** → focus that bullet in the outline (and vice-versa).
+- **Run results** show as a card under each node. **Tap a result card** to
+  branch a new child node off that bullet.
+- **Delete a link** — tap a link (or select it and press `Delete`/`Backspace`).
+  Deleting a parent→child link makes the child a **new top-level node**;
+  deleting a dashed reference link just removes the `@` reference.
+- **Touch-friendly**: the divider drags with touch, the map pans/pinch-zooms,
+  and tap targets grow on touch devices.
 
 ## Running the graph (prompt-build-tool)
 
@@ -59,8 +75,11 @@ browser's `localStorage` and sent with the request.
 
 - **Server + Railway deploy:** see [`server/README.md`](server/README.md).
 - **Dev:** the Vite dev server proxies `/api/*` → `http://localhost:8000`, so
-  running the server locally needs no extra config. For a deployed frontend,
-  build with `VITE_SERVER_URL=https://your-app.up.railway.app`.
+  running the server locally needs no extra config.
+- **Deployed frontend:** point it at your server either at build time
+  (`VITE_SERVER_URL=https://your-app.up.railway.app`) or at runtime via the **⚙**
+  button in the toolbar (saved in `localStorage`). If Run returns **405**, the
+  request is hitting a static host instead of the server — set the URL with ⚙.
 
 ### Deliberately left out
 

@@ -88,6 +88,12 @@ export function buildNodePayloads(s: OutlineState = state) {
   }));
 }
 
+/** Keep the caret in the same field on `id` (used when reordering). */
+function focusFor(s: OutlineState, id: string): Focus {
+  const field = s.focus && s.focus.id === id ? s.focus.field : 'title';
+  return { id, field, caret: 'end' };
+}
+
 function siblingsOf(s: OutlineState, id: string): { list: string[]; index: number; parentId: string | null } {
   const b = s.bullets[id];
   const list = b.parentId ? s.bullets[b.parentId].children : s.rootIds;
@@ -161,6 +167,84 @@ export const actions = {
     if (!b || sourceId === targetId || b.refs.includes(targetId)) return;
     const next = clone(state);
     next.bullets[sourceId] = { ...b, refs: [...b.refs, targetId] };
+    emit(next);
+  },
+
+  removeRef(sourceId: string, targetId: string) {
+    const b = state.bullets[sourceId];
+    if (!b || !b.refs.includes(targetId)) return;
+    const next = clone(state);
+    next.bullets[sourceId] = { ...b, refs: b.refs.filter((r) => r !== targetId) };
+    emit(next);
+  },
+
+  /** Create a new empty child under `parentId`; focus its title. */
+  addChild(parentId: string): string {
+    const parent = state.bullets[parentId];
+    if (!parent) return '';
+    const next = clone(state);
+    const nb = makeBullet({ id: nanoid(), parentId });
+    next.bullets[nb.id] = nb;
+    next.bullets[parentId] = { ...parent, collapsed: false, children: [...parent.children, nb.id] };
+    next.focus = { id: nb.id, field: 'title', caret: 'end' };
+    next.selectedId = nb.id;
+    emit(next);
+    return nb.id;
+  },
+
+  /** Workflowy-style move up: swap with previous sibling, or rise above the parent. */
+  moveUp(id: string) {
+    const b = state.bullets[id];
+    if (!b) return;
+    const { list, index } = siblingsOf(state, id);
+    const next = clone(state);
+    if (index > 0) {
+      const newList = [...list];
+      newList.splice(index, 1);
+      newList.splice(index - 1, 0, id);
+      setChildren(next, b.parentId, newList);
+    } else if (b.parentId) {
+      const parent = next.bullets[b.parentId];
+      const grandId = parent.parentId;
+      setChildren(next, parent.id, parent.children.filter((x) => x !== id));
+      const gList = grandId ? next.bullets[grandId].children : next.rootIds;
+      const pIndex = gList.indexOf(parent.id);
+      const newG = [...gList];
+      newG.splice(pIndex, 0, id);
+      setChildren(next, grandId, newG);
+      next.bullets[id] = { ...next.bullets[id], parentId: grandId };
+    } else {
+      return; // already the very first top-level bullet
+    }
+    next.focus = focusFor(state, id);
+    emit(next);
+  },
+
+  /** Workflowy-style move down: swap with next sibling, or drop below the parent. */
+  moveDown(id: string) {
+    const b = state.bullets[id];
+    if (!b) return;
+    const { list, index } = siblingsOf(state, id);
+    const next = clone(state);
+    if (index < list.length - 1) {
+      const newList = [...list];
+      newList.splice(index, 1);
+      newList.splice(index + 1, 0, id);
+      setChildren(next, b.parentId, newList);
+    } else if (b.parentId) {
+      const parent = next.bullets[b.parentId];
+      const grandId = parent.parentId;
+      setChildren(next, parent.id, parent.children.filter((x) => x !== id));
+      const gList = grandId ? next.bullets[grandId].children : next.rootIds;
+      const pIndex = gList.indexOf(parent.id);
+      const newG = [...gList];
+      newG.splice(pIndex + 1, 0, id);
+      setChildren(next, grandId, newG);
+      next.bullets[id] = { ...next.bullets[id], parentId: grandId };
+    } else {
+      return; // already the very last top-level bullet
+    }
+    next.focus = focusFor(state, id);
     emit(next);
   },
 
