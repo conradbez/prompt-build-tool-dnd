@@ -24,12 +24,14 @@ interface AutocompleteState {
 interface Props {
   bullet: Bullet;
   depth: number;
+  /** True when this bullet is the one highlighted in the mind map. */
+  selected: boolean;
 }
 
 const MAX_MATCHES = 8;
 
 /** A single outline bullet: a bold title line and a body underneath. */
-export function BulletRow({ bullet, depth }: Props) {
+export function BulletRow({ bullet, depth, selected }: Props) {
   const [ac, setAc] = useState<AutocompleteState | null>(null);
   const { id } = bullet;
 
@@ -168,7 +170,7 @@ export function BulletRow({ bullet, depth }: Props) {
           {bullet.collapsed ? '▸' : '▾'}
         </button>
         <button
-          className={`ol-dot ${hasChildren && bullet.collapsed ? 'ol-dot--full' : ''}`}
+          className={`ol-dot ${selected ? 'ol-dot--selected' : hasChildren && bullet.collapsed ? 'ol-dot--full' : ''}`}
           onClick={() => actions.setFocus({ id, field: 'title', caret: 'end' })}
           tabIndex={-1}
           aria-label="Focus bullet"

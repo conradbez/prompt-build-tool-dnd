@@ -28,7 +28,12 @@ export function Outline() {
     <div className="ol-root">
       <div className="ol-scroll">
         {rows.map(({ id, depth }) => (
-          <BulletRow key={id} bullet={state.bullets[id]} depth={depth} />
+          <BulletRow
+            key={id}
+            bullet={state.bullets[id]}
+            depth={depth}
+            selected={state.selectedId === id}
+          />
         ))}
       </div>
     </div>
