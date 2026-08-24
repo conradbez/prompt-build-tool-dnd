@@ -26,19 +26,37 @@ export interface RunResponse {
 export const SERVER_URL_STORAGE = 'wm.serverUrl';
 
 /**
- * Where the runner lives. Priority:
- *   1. a URL saved in the toolbar (localStorage) — lets a deployed/preview
- *      build point at Railway with no rebuild;
+ * Grab a server URL from the page's own address, e.g.
+ * `https://my-frontend/?server=https://app.up.railway.app`, and remember it.
+ * Call once at startup — this is the "grab the URL through JavaScript" path, so
+ * a deployed frontend can be pointed at its server with just a link, no typing.
+ */
+export function initServerUrlFromQuery(): void {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const url = q.get('server') || q.get('api');
+    if (url) localStorage.setItem(SERVER_URL_STORAGE, url.trim());
+  } catch {
+    /* no window / blocked storage — ignore */
+  }
+}
+
+/**
+ * Where the runner lives, resolved in JavaScript. Priority:
+ *   1. a URL saved in the toolbar or grabbed from `?server=` (localStorage);
  *   2. the `VITE_SERVER_URL` build-time env;
- *   3. `/api`, which the Vite dev server proxies to localhost:8000.
+ *   3. dev → `/api` (Vite proxies it to localhost:8000);
+ *   4. production → same origin, so a frontend served by the server just
+ *      calls `/run` with no configuration.
  *
  * A 405 usually means requests hit a static host (GitHub Pages, `vite preview`)
- * instead of the server — set the URL here to fix it.
+ * that isn't the server — grab the URL with `?server=…` or the ⚙ button.
  */
 export function getServerUrl(): string {
   const saved = (typeof localStorage !== 'undefined' && localStorage.getItem(SERVER_URL_STORAGE)) || '';
   const envUrl = (import.meta as any).env?.VITE_SERVER_URL || '';
-  return (saved || envUrl || '/api').replace(/\/+$/, '');
+  const fallback = (import.meta as any).env?.DEV ? '/api' : '';
+  return (saved || envUrl || fallback).replace(/\/+$/, '');
 }
 
 export async function runGraph(

@@ -76,10 +76,18 @@ browser's `localStorage` and sent with the request.
 - **Server + Railway deploy:** see [`server/README.md`](server/README.md).
 - **Dev:** the Vite dev server proxies `/api/*` → `http://localhost:8000`, so
   running the server locally needs no extra config.
-- **Deployed frontend:** point it at your server either at build time
-  (`VITE_SERVER_URL=https://your-app.up.railway.app`) or at runtime via the **⚙**
-  button in the toolbar (saved in `localStorage`). If Run returns **405**, the
-  request is hitting a static host instead of the server — set the URL with ⚙.
+- **Deployed frontend:** the server URL is resolved in JavaScript, so you have
+  three no-rebuild options (any of which wins over the build-time
+  `VITE_SERVER_URL`):
+  - a **`?server=` link** — open the app as
+    `https://your-frontend/?server=https://your-app.up.railway.app` and it grabs
+    and remembers the URL;
+  - the **⚙** button in the toolbar (saved in `localStorage`);
+  - **same origin** — if the server also serves the built frontend, the app just
+    calls `/run` with no configuration.
+
+  If Run returns **405**, the request is hitting a static host instead of the
+  server — use a `?server=` link or ⚙.
 
 ### Deliberately left out
 
