@@ -44,6 +44,34 @@ consistently.
 So from a bullet's first line, one `Enter` drops into the body, and a second
 `Enter` (from the body) creates the bullet underneath — the Workflowy flow.
 
+## Running the graph (prompt-build-tool)
+
+Top-left there's a small toolbar: pick a **provider** (Gemini / OpenAI /
+Anthropic), paste an **API key**, and hit **Run**. The bullet graph is sent to a
+tiny stateless FastAPI server (`server/`) that flows it through
+[prompt-build-tool](https://github.com/conradbez/prompt-build-tool) and returns
+each bullet's result, which is shown under its node on the mind map.
+
+Each bullet becomes one pbt model; a bullet's `@` references become
+`{{ ref('…') }}` dependencies, so an upstream bullet's output flows into the
+bullets that reference it. The API key is remembered per provider in this
+browser's `localStorage` and sent with the request.
+
+- **Server + Railway deploy:** see [`server/README.md`](server/README.md).
+- **Dev:** the Vite dev server proxies `/api/*` → `http://localhost:8000`, so
+  running the server locally needs no extra config. For a deployed frontend,
+  build with `VITE_SERVER_URL=https://your-app.up.railway.app`.
+
+### Deliberately left out
+
+To keep this simple, several main-branch features are **not** implemented:
+
+- **Different node types** — every bullet is a basic prompt node (no
+  template/loop types).
+- **In-browser execution** (PyScript) and **in-browser LLMs** (WebLLM) — running
+  always goes through the server.
+- File uploads / promptfiles, per-session storage, and parallel-loop map/reduce.
+
 ## References
 
 Type `@` in any title or body to mention another bullet. An autocomplete list of

@@ -29,6 +29,12 @@ export interface OutlineState {
   focus: Focus | null;
   /** Highlighted bullet, shared between the outline and the mind map. */
   selectedId: string | null;
+  /** Latest run results, keyed by bullet id. */
+  results: Record<string, string>;
+  /** Errors from the latest run. */
+  runErrors: string[];
+  /** True while a run is in flight. */
+  running: boolean;
 }
 
 /** A single entry in the flattened, depth-first view of visible bullets. */

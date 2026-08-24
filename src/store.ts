@@ -32,6 +32,9 @@ function seed(): OutlineState {
     rootIds: [root.id],
     focus: { id: root.id, field: 'title', caret: 'end' },
     selectedId: root.id,
+    results: {},
+    runErrors: [],
+    running: false,
   };
 }
 
@@ -73,6 +76,16 @@ export function focusOrder(s: OutlineState = state): Focus[] {
     { id, field: 'title' },
     { id, field: 'body' },
   ]);
+}
+
+/** All bullets as flat run payloads (id, title, body, refs) for the server. */
+export function buildNodePayloads(s: OutlineState = state) {
+  return Object.values(s.bullets).map((b) => ({
+    id: b.id,
+    title: b.title,
+    body: b.body,
+    refs: b.refs.filter((r) => s.bullets[r]),
+  }));
 }
 
 function siblingsOf(s: OutlineState, id: string): { list: string[]; index: number; parentId: string | null } {
@@ -226,6 +239,14 @@ export const actions = {
     next.focus = target;
     next.selectedId = target ? target.id : null;
     emit(next);
+  },
+
+  setRunning(running: boolean) {
+    emit({ ...state, running, ...(running ? { runErrors: [] } : {}) });
+  },
+
+  setRunResult(outputs: Record<string, string>, errors: string[]) {
+    emit({ ...state, results: outputs, runErrors: errors, running: false });
   },
 
   /** Reparent `id` under `newParentId` (used by mind-map / future drag ops). */

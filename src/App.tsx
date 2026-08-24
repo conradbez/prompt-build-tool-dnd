@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MindMap } from './mindmap/MindMap';
 import { Outline } from './outline/Outline';
+import { Toolbar } from './Toolbar';
 
 const MIN_PCT = 20;
 const MAX_PCT = 70;
@@ -47,6 +48,7 @@ export default function App() {
   return (
     <div className="app" ref={containerRef}>
       <div className="app__left" style={{ width: `${100 - rightPct}%` }}>
+        <Toolbar />
         <MindMap />
       </div>
 

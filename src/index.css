@@ -36,6 +36,7 @@ body,
 }
 
 .app__left {
+  position: relative;
   height: 100%;
   min-width: 0;
   background: var(--panel);
@@ -259,4 +260,98 @@ body,
   height: 6px;
   background: var(--muted);
   border: none;
+}
+
+.mm-node__result {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px dashed var(--border);
+  color: #047857;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  max-height: 66px;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ toolbar */
+
+.tb {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  max-width: calc(100% - 24px);
+}
+
+.tb__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.tb__select {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 13px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.tb__key {
+  height: 30px;
+  width: 190px;
+  max-width: 40vw;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.tb__key:focus {
+  border-color: var(--accent);
+}
+
+.tb__run {
+  height: 30px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tb__run:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.tb__errors {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.4;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.tb__error {
+  white-space: pre-wrap;
+  word-break: break-word;
 }

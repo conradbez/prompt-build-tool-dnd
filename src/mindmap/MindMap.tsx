@@ -32,6 +32,7 @@ export function MindMap() {
         body: b.body,
         hasChildren: b.children.length > 0,
         collapsed: b.collapsed,
+        result: state.results[p.id],
       };
       return {
         id: p.id,

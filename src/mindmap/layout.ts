@@ -10,7 +10,7 @@ export interface LaidOutNode {
 export const NODE_WIDTH = 190;
 export const NODE_HEIGHT = 56;
 const H_GAP = 28; // horizontal gap between sibling subtrees
-const V_GAP = 60; // vertical gap between depth levels
+const V_GAP = 90; // vertical gap between depth levels (room for run results)
 
 /**
  * Simple top-down tidy tree: leaves are packed left-to-right, each parent is
