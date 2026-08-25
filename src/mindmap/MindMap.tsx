@@ -103,7 +103,14 @@ export function MindMap() {
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
         nodesDraggable={false}
-        deleteKeyCode={['Backspace', 'Delete']}
+        // Disable the canvas's global keyboard shortcuts so typing in the
+        // outline is never intercepted — Space (default pan key) was swallowing
+        // spacebar, and Backspace/Delete could eat edits. Links delete by tap.
+        panActivationKeyCode={null}
+        deleteKeyCode={null}
+        selectionKeyCode={null}
+        multiSelectionKeyCode={null}
+        zoomActivationKeyCode={null}
         panOnScroll
         zoomOnPinch
         panOnDrag
