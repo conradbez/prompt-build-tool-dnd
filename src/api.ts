@@ -15,6 +15,7 @@ export interface NodePayload {
   id: string;
   title: string;
   body: string;
+  parentId: string | null;
   refs: string[];
 }
 

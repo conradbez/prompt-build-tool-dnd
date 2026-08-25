@@ -38,6 +38,7 @@ class Node(BaseModel):
     id: str
     title: str = ""
     body: str = ""
+    parentId: Optional[str] = None
     refs: list[str] = []
 
 
@@ -59,12 +60,21 @@ def _slug(node_id: str) -> str:
 
 
 def _build_source(node: Node, id_to_slug: dict[str, str]) -> str:
-    """Compose a bullet's pbt prompt: ref() lines for its dependencies, then its text."""
-    ref_lines = [
-        "{{ ref('%s') }}" % id_to_slug[r]
-        for r in node.refs
-        if r in id_to_slug
-    ]
+    """Compose a bullet's pbt prompt.
+
+    Dependencies become `{{ ref('...') }}` lines prepended to the text so the
+    referenced outputs flow in. A node's **parent is auto-included** (children
+    build on their parent's output), plus any explicit `@` references. The
+    parent is not duplicated if it is also referenced explicitly.
+    """
+    dep_ids: list[str] = []
+    if node.parentId and node.parentId in id_to_slug:
+        dep_ids.append(node.parentId)
+    for r in node.refs:
+        if r in id_to_slug and r not in dep_ids:
+            dep_ids.append(r)
+
+    ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids]
     if node.title.strip() and node.body.strip():
         prompt = f"{node.title.strip()}\n{node.body.strip()}"
     else:

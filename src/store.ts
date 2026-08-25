@@ -20,18 +20,60 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
   };
 }
 
-function seed(): OutlineState {
+const DOC_KEY = 'wm.doc.v1';
+
+function fresh(): { bullets: Record<string, Bullet>; rootIds: string[] } {
   const root = makeBullet({ id: nanoid(), title: 'Welcome', body: 'Edit me — this is the body. Press Enter here to add a bullet below.' });
   const a = makeBullet({ id: nanoid(), title: 'Left is a mind map', body: 'Top bullets flow down to their children.', parentId: root.id });
   const b = makeBullet({ id: nanoid(), title: 'Right is an outline', body: 'Workflowy-style bullets. Drag the divider to resize.', parentId: root.id });
-  const b1 = makeBullet({ id: nanoid(), title: 'Reference bullets', body: 'Type @ to mention another bullet — a dashed link appears on the map.', parentId: b.id });
+  const b1 = makeBullet({ id: nanoid(), title: 'Reference bullets', body: 'Type @ to mention another (non-child) bullet — a dashed link appears on the map.', parentId: b.id });
   root.children = [a.id, b.id];
   b.children = [b1.id];
+  return { bullets: { [root.id]: root, [a.id]: a, [b.id]: b, [b1.id]: b1 }, rootIds: [root.id] };
+}
+
+/** Load a saved document, tolerating older/partial shapes; null if none/invalid. */
+function loadDoc(): { bullets: Record<string, Bullet>; rootIds: string[] } | null {
+  try {
+    const raw = localStorage.getItem(DOC_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!d || typeof d !== 'object' || !d.bullets || !Array.isArray(d.rootIds) || d.rootIds.length === 0) {
+      return null;
+    }
+    const bullets: Record<string, Bullet> = {};
+    for (const [id, raw] of Object.entries(d.bullets as Record<string, Partial<Bullet>>)) {
+      bullets[id] = makeBullet({
+        id,
+        title: typeof raw.title === 'string' ? raw.title : '',
+        body: typeof raw.body === 'string' ? raw.body : '',
+        children: Array.isArray(raw.children) ? raw.children : [],
+        parentId: typeof raw.parentId === 'string' ? raw.parentId : null,
+        collapsed: !!raw.collapsed,
+        refs: Array.isArray(raw.refs) ? raw.refs : [],
+      });
+    }
+    return { bullets, rootIds: d.rootIds.filter((id: string) => bullets[id]) };
+  } catch {
+    return null;
+  }
+}
+
+function saveDoc(s: OutlineState) {
+  try {
+    localStorage.setItem(DOC_KEY, JSON.stringify({ bullets: s.bullets, rootIds: s.rootIds }));
+  } catch {
+    /* storage full / unavailable — keep working in-memory */
+  }
+}
+
+function seed(): OutlineState {
+  const doc = loadDoc() ?? fresh();
+  const firstId = doc.rootIds[0];
   return {
-    bullets: { [root.id]: root, [a.id]: a, [b.id]: b, [b1.id]: b1 },
-    rootIds: [root.id],
-    focus: { id: root.id, field: 'title', caret: 'end' },
-    selectedId: root.id,
+    ...doc,
+    focus: { id: firstId, field: 'title', caret: 'end' },
+    selectedId: firstId,
     results: {},
     runErrors: [],
     running: false,
@@ -43,6 +85,7 @@ const listeners = new Set<() => void>();
 
 function emit(next: OutlineState) {
   state = next;
+  saveDoc(next);
   listeners.forEach((l) => l());
 }
 
@@ -78,12 +121,14 @@ export function focusOrder(s: OutlineState = state): Focus[] {
   ]);
 }
 
-/** All bullets as flat run payloads (id, title, body, refs) for the server. */
+/** All bullets as flat run payloads for the server (parentId lets the child
+ * auto-include its parent's output; refs are extra @-references). */
 export function buildNodePayloads(s: OutlineState = state) {
   return Object.values(s.bullets).map((b) => ({
     id: b.id,
     title: b.title,
     body: b.body,
+    parentId: b.parentId,
     refs: b.refs.filter((r) => s.bullets[r]),
   }));
 }

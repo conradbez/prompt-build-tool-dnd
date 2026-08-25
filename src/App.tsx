@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MindMap } from './mindmap/MindMap';
 import { Outline } from './outline/Outline';
 import { Toolbar } from './Toolbar';
+import { Help } from './Help';
 
 const MIN_PCT = 20;
 const MAX_PCT = 70;
@@ -68,6 +69,8 @@ export default function App() {
       <div className="app__right" style={{ width: `${rightPct}%` }}>
         <Outline />
       </div>
+
+      <Help />
     </div>
   );
 }

@@ -31,6 +31,17 @@ export function BulletNode({ id, data, selected }: NodeProps) {
         </div>
       )}
       {d.hasChildren && d.collapsed && <div className="mm-node__badge">▸</div>}
+      <button
+        className="mm-node__add"
+        title="Add a child node"
+        aria-label="Add a child node"
+        onClick={(e) => {
+          e.stopPropagation();
+          actions.addChild(id);
+        }}
+      >
+        ＋
+      </button>
       <Handle type="source" position={Position.Bottom} className="mm-handle" />
     </div>
   );
