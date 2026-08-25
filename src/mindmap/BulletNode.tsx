@@ -17,19 +17,7 @@ export function BulletNode({ id, data, selected }: NodeProps) {
       <Handle type="target" position={Position.Top} className="mm-handle" />
       <div className="mm-node__title">{d.title || 'Untitled'}</div>
       {d.body && <div className="mm-node__body">{d.body}</div>}
-      {d.result && (
-        <div
-          className="mm-node__result"
-          title="Tap to branch a new node from this output"
-          onClick={(e) => {
-            e.stopPropagation();
-            actions.addChild(id);
-          }}
-        >
-          {d.result}
-          <span className="mm-node__branch">＋ branch</span>
-        </div>
-      )}
+      {d.result && <div className="mm-node__result">{d.result}</div>}
       {d.hasChildren && d.collapsed && <div className="mm-node__badge">▸</div>}
       <button
         className="mm-node__add"

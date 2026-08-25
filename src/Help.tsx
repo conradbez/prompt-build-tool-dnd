@@ -16,7 +16,7 @@ const EDITING: Row[] = [
 
 const MAP: Row[] = [
   { keys: 'Click a node', desc: 'Focus that bullet in the outline (and vice-versa)' },
-  { keys: '＋ on a node', desc: 'Add a child; tapping a run result does the same (branch from output)' },
+  { keys: '＋ on a node', desc: 'Add a child node — a child feeds its output up into this node' },
   { keys: 'Tap a link', desc: 'Solid link → detach the child to top level; dashed link → remove the reference' },
   { keys: 'Drag / scroll / pinch', desc: 'Pan and zoom the map' },
 ];

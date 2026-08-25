@@ -289,9 +289,8 @@ body,
 }
 
 .mm-node__result {
-  position: relative;
   margin-top: 7px;
-  padding: 7px 8px 20px;
+  padding: 7px 8px;
   border-radius: 8px;
   background: #ecfdf5;
   border: 1px solid #a7f3d0;
@@ -301,22 +300,6 @@ body,
   white-space: pre-wrap;
   max-height: 150px;
   overflow-y: auto;
-  cursor: pointer;
-}
-
-.mm-node__result:hover {
-  border-color: #34d399;
-}
-
-.mm-node__branch {
-  position: absolute;
-  right: 6px;
-  bottom: 4px;
-  font-size: 10px;
-  font-weight: 700;
-  color: #059669;
-  background: #ecfdf5;
-  padding-left: 6px;
 }
 
 /* ------------------------------------------------------------------ toolbar */
@@ -431,9 +414,6 @@ body,
   }
   .tb__run {
     padding: 0 20px;
-  }
-  .mm-node__branch {
-    font-size: 12px;
   }
   /* No hover on touch — keep the add-child button visible. */
   .mm-node__add {
