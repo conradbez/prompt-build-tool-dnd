@@ -25,9 +25,10 @@ bullet graph as JSON and returns each bullet's result after flowing through
 { "outputs": { "a": "…", "b": "…" }, "errors": [] }
 ```
 
-Each bullet becomes a pbt model; a bullet's `@` references (`refs`) become
-`{{ ref('…') }}` dependencies, so upstream outputs flow into the bullets that
-reference them. pbt resolves ordering and runs independent branches in parallel.
+Each bullet becomes a pbt model. A node **auto-includes its children's outputs**
+(children feed up into the parent) plus any explicit `@` references (`refs`) —
+both become `{{ ref('…') }}` dependencies. pbt resolves ordering and runs
+independent branches in parallel.
 
 `GET /healthz` is a health check. `GET /` serves the built frontend when a
 `dist/` folder sits next to `server/` (see Docker below); otherwise it 404s and

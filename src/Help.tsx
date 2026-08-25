@@ -23,8 +23,8 @@ const MAP: Row[] = [
 
 const RUNNING: Row[] = [
   { keys: 'Provider + key + Run', desc: 'Runs the graph through prompt-build-tool and shows each result under its node' },
-  { keys: '@Title', desc: 'Reference another node — its output is included in this prompt (a dashed link appears)' },
-  { keys: 'Children', desc: "Auto-include their parent's output — no @ needed for the parent link" },
+  { keys: '@Title', desc: 'Reference another (non-child) node — its output is included in this prompt (a dashed link appears)' },
+  { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed" },
 ];
 
 function Section({ title, rows }: { title: string; rows: Row[] }) {

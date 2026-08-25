@@ -59,17 +59,18 @@ def _slug(node_id: str) -> str:
     return "n_" + re.sub(r"[^0-9a-zA-Z]", "_", node_id)
 
 
-def _build_source(node: Node, id_to_slug: dict[str, str]) -> str:
+def _build_source(node: Node, child_ids: list[str], id_to_slug: dict[str, str]) -> str:
     """Compose a bullet's pbt prompt.
 
     Dependencies become `{{ ref('...') }}` lines prepended to the text so the
-    referenced outputs flow in. A node's **parent is auto-included** (children
-    build on their parent's output), plus any explicit `@` references. The
-    parent is not duplicated if it is also referenced explicitly.
+    referenced outputs flow in. A node's **children are auto-included** — their
+    outputs feed up into the parent — plus any explicit `@` references. A child
+    is not duplicated if it is also referenced explicitly.
     """
     dep_ids: list[str] = []
-    if node.parentId and node.parentId in id_to_slug:
-        dep_ids.append(node.parentId)
+    for c in child_ids:
+        if c in id_to_slug:
+            dep_ids.append(c)
     for r in node.refs:
         if r in id_to_slug and r not in dep_ids:
             dep_ids.append(r)
@@ -124,7 +125,14 @@ def run(req: RunRequest) -> RunResponse:
 
     id_to_slug = {n.id: _slug(n.id) for n in nodes}
     slug_to_id = {v: k for k, v in id_to_slug.items()}
-    models = {id_to_slug[n.id]: _build_source(n, id_to_slug) for n in nodes}
+
+    # Children feed their parent: build the parent → child-ids map from parentId.
+    children: dict[str, list[str]] = {n.id: [] for n in nodes}
+    for n in nodes:
+        if n.parentId in children:
+            children[n.parentId].append(n.id)
+
+    models = {id_to_slug[n.id]: _build_source(n, children[n.id], id_to_slug) for n in nodes}
 
     try:
         llm = make_llm_call(api_key=req.apiKey, provider=req.provider)

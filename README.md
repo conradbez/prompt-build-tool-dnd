@@ -68,10 +68,12 @@ tiny stateless FastAPI server (`server/`) that flows it through
 [prompt-build-tool](https://github.com/conradbez/prompt-build-tool) and returns
 each bullet's result, which is shown under its node on the mind map.
 
-Each bullet becomes one pbt model; a bullet's `@` references become
-`{{ ref('…') }}` dependencies, so an upstream bullet's output flows into the
-bullets that reference it. The API key is remembered per provider in this
-browser's `localStorage` and sent with the request.
+Each bullet becomes one pbt model. A node **auto-includes its children's
+outputs** — children run first and feed up into the parent — and any `@`
+references you add. These become `{{ ref('…') }}` dependencies that pbt resolves
+(running independent branches in parallel). So `@` is only needed to reference a
+*non-child* node. The API key is remembered per provider in this browser's
+`localStorage` and sent with the request.
 
 - **Server + Railway deploy:** see [`server/README.md`](server/README.md). The
   repo-root `Dockerfile` deploys **one service** that serves the app and the API
