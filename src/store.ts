@@ -45,7 +45,8 @@ function loadDoc(): { bullets: Record<string, Bullet>; rootIds: string[] } | nul
     for (const [id, raw] of Object.entries(d.bullets as Record<string, Partial<Bullet>>)) {
       bullets[id] = makeBullet({
         id,
-        title: typeof raw.title === 'string' ? raw.title : '',
+        // Titles are single-line; collapse any stray newline from older data.
+        title: typeof raw.title === 'string' ? raw.title.replace(/\n/g, ' ') : '',
         body: typeof raw.body === 'string' ? raw.body : '',
         children: Array.isArray(raw.children) ? raw.children : [],
         parentId: typeof raw.parentId === 'string' ? raw.parentId : null,

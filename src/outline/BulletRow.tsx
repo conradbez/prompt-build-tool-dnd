@@ -74,7 +74,23 @@ export function BulletRow({ bullet, depth, selected }: Props) {
   }
 
   function onChange(e: React.ChangeEvent<HTMLTextAreaElement>, field: Field) {
-    actions.setText(id, field, e.currentTarget.value);
+    const value = e.currentTarget.value;
+
+    // The title is a single bold line. A newline can still land here on iOS,
+    // where the Return key doesn't fire a normal Enter keydown — so treat any
+    // newline in the title as "move to the body" (carrying trailing text over).
+    if (field === 'title' && value.includes('\n')) {
+      const nl = value.indexOf('\n');
+      const before = value.slice(0, nl);
+      const after = value.slice(nl + 1).replace(/\n/g, ' ');
+      actions.setText(id, 'title', before);
+      if (after) actions.setText(id, 'body', after + bullet.body);
+      actions.setFocus({ id, field: 'body', caret: 'end' });
+      setAc(null);
+      return;
+    }
+
+    actions.setText(id, field, value);
     refreshMention(e.currentTarget, field);
   }
 
