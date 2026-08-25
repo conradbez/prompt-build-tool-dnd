@@ -68,8 +68,7 @@ so the deployed URL is the whole thing, no separate frontend host and no
 
 **API-only** (no bundled frontend): set Root Directory to `server`; Railway then
 installs `requirements.txt` and runs the `Procfile`. Point a separately-hosted
-frontend at it with `VITE_SERVER_URL=…`, the toolbar ⚙ field, or a `?server=…`
-link.
+frontend at it with `VITE_SERVER_URL=…` or a `?server=…` link.
 
 No state is stored between requests, so a single instance scales trivially.
 

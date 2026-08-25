@@ -357,36 +357,6 @@ body,
   cursor: default;
 }
 
-.tb__gear {
-  height: 30px;
-  width: 32px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-  font-size: 15px;
-  cursor: pointer;
-  line-height: 1;
-}
-
-.tb__row--settings {
-  margin-top: 6px;
-}
-
-.tb__server {
-  width: 420px;
-  max-width: 78vw;
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 0 10px;
-  font-size: 13px;
-  outline: none;
-}
-
-.tb__server:focus {
-  border-color: var(--accent);
-}
-
 .tb__errors {
   margin-top: 6px;
   padding: 8px 10px;
@@ -433,9 +403,7 @@ body,
   }
   .tb__select,
   .tb__key,
-  .tb__run,
-  .tb__gear,
-  .tb__server {
+  .tb__run {
     height: 40px;
   }
   .tb__run {

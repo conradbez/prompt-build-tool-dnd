@@ -50,7 +50,7 @@ export function initServerUrlFromQuery(): void {
  *      server posts to that same URL with no configuration.
  *
  * A 405 usually means requests hit a static host (GitHub Pages, `vite preview`)
- * that isn't the server — grab the URL with `?server=…` or the ⚙ button.
+ * that isn't the server — override with `?server=…` or `VITE_SERVER_URL`.
  */
 export function getServerUrl(): string {
   const saved = (typeof localStorage !== 'undefined' && localStorage.getItem(SERVER_URL_STORAGE)) || '';
@@ -75,16 +75,13 @@ export async function runGraph(
     });
   } catch (err) {
     throw new Error(
-      `Could not reach the server at ${url} (${err instanceof Error ? err.message : String(err)}). ` +
-        `Set the server URL from the ⚙ toolbar button.`,
+      `Could not reach the server at ${url} (${err instanceof Error ? err.message : String(err)}).`,
     );
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     const hint =
-      res.status === 405
-        ? ' — that URL is not the runner (a static host answered). Set the server URL from the ⚙ toolbar button.'
-        : '';
+      res.status === 405 ? ' — that URL is not the runner (a static host answered).' : '';
     throw new Error(`Server ${res.status} ${res.statusText} at ${url}${hint} ${body.slice(0, 200)}`.trim());
   }
   return res.json();
