@@ -255,6 +255,40 @@ export const actions = {
     emit(next);
   },
 
+  /**
+   * Move a bullet (with its whole subtree) to a new parent and position —
+   * what a drag-and-drop in the outline commits.
+   */
+  moveTo(id: string, newParentId: string | null, index: number) {
+    const b = state.bullets[id];
+    if (!b || id === newParentId) return;
+    if (newParentId) {
+      const desc: string[] = [id];
+      collectDescendants(state, id, desc);
+      if (desc.includes(newParentId)) return; // can't drop inside itself
+    }
+    const next = clone(state);
+    const { list: oldList, index: oldIndex } = siblingsOf(next, id);
+    const sameParent = b.parentId === newParentId;
+    setChildren(next, b.parentId, oldList.filter((x) => x !== id));
+
+    const targetList = [...(newParentId ? next.bullets[newParentId].children : next.rootIds)];
+    // Removing the bullet first shifts everything after it up by one.
+    let at = sameParent && oldIndex < index ? index - 1 : index;
+    at = Math.max(0, Math.min(at, targetList.length));
+    targetList.splice(at, 0, id);
+    setChildren(next, newParentId, targetList);
+
+    next.bullets[id] = { ...next.bullets[id], parentId: newParentId };
+    // Dropping into a collapsed parent would hide the bullet you just moved.
+    if (newParentId) {
+      next.bullets[newParentId] = { ...next.bullets[newParentId], collapsed: false };
+    }
+    next.focus = { id, caret: 'end' };
+    next.selectedId = id;
+    emit(next);
+  },
+
   /** Remember where a node was dragged to on the mind map. */
   setPos(id: string, pos: { x: number; y: number }) {
     const b = state.bullets[id];

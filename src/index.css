@@ -74,9 +74,56 @@ body,
 }
 
 .ol-scroll {
+  position: relative; /* the drop indicator is positioned against this */
   height: 100%;
   overflow-y: auto;
   padding: 28px 28px 40vh 20px;
+}
+
+/* --------------------------------------------------------- drag and drop */
+
+/* While a drag is in flight: one cursor everywhere, no text selection, and
+   the row menus get out of the way (Workflowy hides them the same way). */
+.ol-root--dragging,
+.ol-root--dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.ol-root--dragging .ol-menu__btn {
+  display: none;
+}
+
+/* The row being dragged stays in place, marked with a soft highlight. */
+.ol-row--dragging {
+  background: #f0f2f5;
+  border-radius: 6px;
+}
+
+.ol-row--dragging .ol-dot {
+  opacity: 0.25;
+}
+
+/* Where it will land. The left edge is the nesting level being chosen. */
+.ol-drop {
+  position: absolute;
+  right: 28px;
+  height: 4px;
+  margin-left: 20px;
+  border-radius: 2px;
+  background: #cbd2d9;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.ol-drop__dot {
+  position: absolute;
+  left: -9px;
+  top: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #9aa5b1;
 }
 
 .ol-row {
@@ -185,6 +232,9 @@ body,
 }
 
 .ol-dot {
+  /* Also the drag handle — `touch-action` keeps a drag from scrolling. */
+  cursor: grab;
+  touch-action: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;

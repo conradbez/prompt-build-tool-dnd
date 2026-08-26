@@ -13,6 +13,7 @@ import {
   type TitleMap,
 } from '../lib/mentions';
 import { renderMarkdown } from '../lib/markdown';
+import { INDENT } from './dragDrop';
 import { caretAtStart, caretOnFirstLine, caretOnLastLine } from '../lib/caret';
 
 interface Match {
@@ -39,6 +40,10 @@ interface Props {
   depth: number;
   /** True when this bullet is the one highlighted in the mind map. */
   selected: boolean;
+  /** True while this row (or an ancestor of it) is being dragged. */
+  dragging: boolean;
+  /** Press on the bullet dot — the drag handle. */
+  onDragStart: (id: string, e: React.PointerEvent) => void;
 }
 
 const MAX_MATCHES = 8;
@@ -48,7 +53,7 @@ const MAX_MATCHES = 8;
  * you edit the raw markdown; the moment it loses focus the text is rendered,
  * so the outline reads as formatted prose.
  */
-export function BulletRow({ bullet, depth, selected }: Props) {
+export function BulletRow({ bullet, depth, selected, dragging, onDragStart }: Props) {
   const [ac, setAc] = useState<AutocompleteState | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   const { id } = bullet;
@@ -214,8 +219,9 @@ export function BulletRow({ bullet, depth, selected }: Props) {
 
   return (
     <div
-      className={`ol-row ${bullet.template ? 'ol-row--template' : ''}`}
-      style={{ marginLeft: depth * 22 }}
+      className={`ol-row ${bullet.template ? 'ol-row--template' : ''} ${dragging ? 'ol-row--dragging' : ''}`}
+      data-row={id}
+      style={{ marginLeft: depth * INDENT }}
       onMouseMove={onMouseMove}
       onMouseLeave={() => setTip(null)}
     >
@@ -230,11 +236,16 @@ export function BulletRow({ bullet, depth, selected }: Props) {
         >
           {bullet.collapsed ? '▸' : '▾'}
         </button>
+        {/* The dot doubles as the drag handle, as in Workflowy: press and move
+            to drag the bullet (and its subtree), click to focus it. */}
         <button
           className={`ol-dot ${selected ? 'ol-dot--selected' : hasChildren && bullet.collapsed ? 'ol-dot--full' : ''}`}
+          onPointerDown={(e) => {
+            if (e.button === 0 || e.pointerType !== 'mouse') onDragStart(id, e);
+          }}
           onClick={() => actions.setFocus({ id, caret: 'end' })}
           tabIndex={-1}
-          aria-label="Focus bullet"
+          aria-label="Focus bullet, or drag to move it"
         />
       </div>
 
