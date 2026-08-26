@@ -14,8 +14,8 @@ bullet graph as JSON and returns each bullet's result after flowing through
   "provider": "anthropic",          // gemini | openai | anthropic
   "apiKey": "sk-...",               // optional; falls back to server env var
   "nodes": [
-    { "id": "a", "title": "Topic", "body": "Pick a topic", "refs": [] },
-    { "id": "b", "title": "Tweet", "body": "Write a tweet about it", "refs": ["a"] }
+    { "id": "a", "text": "# Topic\nPick a topic", "refs": [] },
+    { "id": "b", "text": "# Tweet\nWrite a tweet about it", "refs": ["a"] }
   ]
 }
 ```

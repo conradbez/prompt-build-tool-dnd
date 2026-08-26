@@ -13,10 +13,12 @@ export const PROVIDERS: { id: Provider; label: string }[] = [
 
 export interface NodePayload {
   id: string;
-  title: string;
-  body: string;
+  /** The bullet's markdown text, with `@` mentions expanded to full titles. */
+  text: string;
   parentId: string | null;
   refs: string[];
+  /** True for a template node: passed through instead of sent to the LLM. */
+  template: boolean;
 }
 
 export interface RunResponse {

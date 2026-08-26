@@ -33,13 +33,20 @@ DIST_DIR = pathlib.Path(__file__).resolve().parent.parent / "dist"
 
 PROVIDERS = {"gemini", "openai", "anthropic"}
 
+# pbt has no model_type semantics of its own: it parses this directive into
+# `model.config` and passes it to `llm_call(config=...)`, which is where the
+# passthrough happens (see `llm.py`). Prepended to a template node's source.
+TEMPLATE_CONFIG_LINE = '{{ config(model_type="template") }}'
+
 
 class Node(BaseModel):
     id: str
-    title: str = ""
-    body: str = ""
+    # One markdown text field per bullet; `@` mentions arrive already expanded.
+    text: str = ""
     parentId: Optional[str] = None
     refs: list[str] = []
+    # Template nodes are not sent to the LLM — see `_build_source` / `llm.py`.
+    template: bool = False
 
 
 class RunRequest(BaseModel):
@@ -66,6 +73,10 @@ def _build_source(node: Node, child_ids: list[str], id_to_slug: dict[str, str]) 
     referenced outputs flow in. A node's **children are auto-included** — their
     outputs feed up into the parent — plus any explicit `@` references. A child
     is not duplicated if it is also referenced explicitly.
+
+    A template node additionally gets a `{{ config(model_type="template") }}`
+    line, which pbt parses into `model.config` and hands to `llm_call`, where
+    it short-circuits into a passthrough instead of an LLM call.
     """
     dep_ids: list[str] = []
     for c in child_ids:
@@ -76,11 +87,11 @@ def _build_source(node: Node, child_ids: list[str], id_to_slug: dict[str, str]) 
             dep_ids.append(r)
 
     ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids]
-    if node.title.strip() and node.body.strip():
-        prompt = f"{node.title.strip()}\n{node.body.strip()}"
-    else:
-        prompt = (node.body or node.title).strip()
-    return ("\n".join(ref_lines) + "\n" + prompt) if ref_lines else prompt
+    prompt = node.text.strip()
+    source = ("\n".join(ref_lines) + "\n" + prompt) if ref_lines else prompt
+    if node.template:
+        source = TEMPLATE_CONFIG_LINE + "\n" + source
+    return source
 
 
 def _serialise(outputs: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
@@ -114,12 +125,12 @@ def health() -> dict:
 
 
 @app.post("/run", response_model=RunResponse)
-def run(req: RunRequest) -> RunResponse:
+async def run(req: RunRequest) -> RunResponse:
     if req.provider not in PROVIDERS:
         return RunResponse(errors=[f"Unsupported provider: {req.provider}"])
 
     # Only run bullets that actually have content.
-    nodes = [n for n in req.nodes if (n.body.strip() or n.title.strip())]
+    nodes = [n for n in req.nodes if n.text.strip()]
     if not nodes:
         return RunResponse(errors=["No non-empty bullets to run."])
 
@@ -136,7 +147,7 @@ def run(req: RunRequest) -> RunResponse:
 
     try:
         llm = make_llm_call(api_key=req.apiKey, provider=req.provider)
-        outputs = pbt.run(models_from_dict=models, llm_call=llm, verbose=False)
+        outputs = await pbt.async_run(models_from_dict=models, llm_call=llm, verbose=False)
     except Exception as exc:  # noqa: BLE001 — surface any failure to the client
         return RunResponse(errors=[str(exc)])
 

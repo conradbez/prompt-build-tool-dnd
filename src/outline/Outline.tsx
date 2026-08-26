@@ -16,7 +16,7 @@ export function Outline() {
   useLayoutEffect(() => {
     const f = state.focus;
     if (!f) return;
-    const el = getEditor(f.id, f.field);
+    const el = getEditor(f.id);
     if (!el) return;
     el.focus();
     placeCaret(el, f.caret ?? 'end');

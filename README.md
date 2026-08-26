@@ -5,6 +5,9 @@ the same tree. Edit bullets on the right; watch them flow as a node graph on the
 left. The two views share one state, so a change (or a click) on either side is
 reflected on the other.
 
+Each bullet is a single markdown text field — rendered when you're not editing
+it, raw while you are.
+
 The mind map is rendered with [`@xyflow/react`](https://reactflow.dev) (React
 Flow) — the node-graph library already used by this project.
 
@@ -12,53 +15,65 @@ Flow) — the node-graph library already used by this project.
 
 ```
 ┌───────────────────────────┬──────┬──────────────────────┐
-│                           │      │  • Welcome           │
-│        Mind map           │ drag │      body…           │
-│   (React Flow, top → down)│  ⇄   │    • Left is a map   │
-│                           │      │    • Right is outline│
+│                           │      │  • # Find best fruit │
+│        Mind map           │ drag │    Using the list…   │
+│   (React Flow, top → down)│  ⇄   │    • List 10 fruits  │
+│                           │      │    • Assess fruits…  │
 └───────────────────────────┴──────┴──────────────────────┘
         left panel          divider     right panel
 ```
 
-- **Right — outline.** Workflowy-style bullets. Each bullet has a **bold title**
-  (first line) and a body underneath. Resize the panel by dragging the divider
-  (20–70 % of the screen).
+- **Right — outline.** Workflowy-style bullets. Each bullet is **one markdown
+  text field** — there is no separate title, so anything that should stand out
+  says so in markdown (`# heading`, `**bold**`). The bullet you have the caret
+  in shows its raw markdown; every other bullet shows it rendered. Resize the
+  panel by dragging the divider (20–70 % of the screen).
 - **Left — mind map.** Top-level bullets sit at the top and flow down to their
   children (many children to one parent). Parent→child links are solid; `@`
   references are dashed. Clicking a node focuses that bullet in the outline.
 
 ## Keyboard shortcuts
 
-Focus is shared across both panels — arrow navigation and clicks move the caret
-consistently.
-
-| Key | In the title | In the body |
-|-----|--------------|-------------|
-| `Enter` | Move to the body | Create a new bullet below |
-| `Shift+Enter` | — | Insert a newline |
-| `Tab` | Indent (nest under previous sibling) | Indent |
-| `Shift+Tab` | Outdent | Outdent |
-| `Alt+Shift+↑` / `Alt+Shift+↓` | Reorder the bullet up / down | Same |
-| `↑` / `↓` | Move focus to the previous / next editor | Same, at line boundaries |
-| `Backspace` (empty bullet, at start) | Delete the bullet | Jump up to the title |
-
-So from a bullet's first line, one `Enter` drops into the body, and a second
-`Enter` (from the body) creates the bullet underneath — the Workflowy flow.
+| Key | Does |
+|-----|------|
+| `Enter` | Create a new bullet below |
+| `Shift+Enter` | Insert a newline in this bullet |
+| `Tab` / `Shift+Tab` | Indent (nest under previous sibling) / outdent |
+| `Alt+Shift+↑` / `Alt+Shift+↓` | Reorder the bullet up / down |
+| `↑` / `↓` | Move focus to the previous / next bullet, at line boundaries |
+| `Backspace` (empty bullet, at start) | Delete the bullet |
 
 **Reorder** works like Workflowy: `Alt+Shift+↑`/`↓` moves a bullet among its
 siblings, and past the first/last sibling it hops above/below the parent.
-Indent/outdent stay on `Tab`/`Shift+Tab`.
 
 ## Mind-map interactions
 
-- **Click a node** → focus that bullet in the outline (and vice-versa).
-- **Run results** show as a card under each node. **Tap a result card** to
-  branch a new child node off that bullet.
-- **Delete a link** — tap a link (or select it and press `Delete`/`Backspace`).
-  Deleting a parent→child link makes the child a **new top-level node**;
-  deleting a dashed reference link just removes the `@` reference.
-- **Touch-friendly**: the divider drags with touch, the map pans/pinch-zooms,
-  and tap targets grow on touch devices.
+**Mouse**
+
+| Gesture | Does |
+|---------|------|
+| Click a node | Focus that bullet in the outline (and vice-versa) |
+| Drag a node | Move it — the node keeps that spot instead of following the auto-layout |
+| Drag from the `+` circle | Start a link from that node |
+| Drop the link on a node | Link them — see *child vs reference* below |
+| Drop the link on empty canvas | Create a new node there, as a child |
+| Click the `+` circle | Create a child node, no drag needed |
+| Click a link | Delete it (confirms first) |
+| Scroll / pinch | Pan and zoom |
+
+**Touch** — the same gestures, sized for fingers: tap a node to focus it, drag
+a node to move it, drag from the `+` circle (always visible on touch, 26 px
+across) to start a link, tap a link to delete it, one finger pans and two
+fingers pinch to zoom.
+
+**Child vs reference.** Dropping a link on a node that has **no parent** makes
+it a *child* of the source — dragging a loose node under another one is how you
+build the tree. If the target already sits in the tree, you get an `@`
+reference instead (a dashed link), leaving its existing parent alone.
+
+**Deleting a link.** Deleting a parent→child link makes the child a **new
+top-level node**; deleting a dashed reference link just removes the `@`
+reference from the source bullet's text.
 
 ## Running the graph (prompt-build-tool)
 
@@ -89,18 +104,23 @@ references you add. These become `{{ ref('…') }}` dependencies that pbt resolv
 
 To keep this simple, several main-branch features are **not** implemented:
 
-- **Different node types** — every bullet is a basic prompt node (no
-  template/loop types).
+- **Loop nodes** — a bullet is either a prompt or a template (`•••` → *Convert
+  to template*), with no map/reduce loop type.
 - **In-browser execution** (PyScript) and **in-browser LLMs** (WebLLM) — running
   always goes through the server.
 - File uploads / promptfiles, per-session storage, and parallel-loop map/reduce.
 
 ## References
 
-Type `@` in any title or body to mention another bullet. An autocomplete list of
-matching bullets appears; pick one with the arrow keys and `Enter`/`Tab` (or
-click). This inserts the bullet's title and draws a **dashed link** from the
-current bullet to the referenced one on the mind map.
+Type `@` in any bullet to mention another one. An autocomplete list of matching
+bullets appears; pick one with the arrow keys and `Enter`/`Tab` (or click). This
+draws a **dashed link** from the current bullet to the referenced one.
+
+What gets stored is the target's **id**, not its text — a mention survives the
+target being retyped, reordered or re-parented. The editor shows the first 10
+characters of the target's first line in a different colour; hover it for the
+full line. Because the text owns the reference, deleting the mention deletes the
+link, and cutting the link on the map deletes the mention.
 
 ## Develop
 
@@ -122,8 +142,8 @@ Open `dist/index.html` directly or deploy the folder to any static host.
 | Path | Responsibility |
 |------|----------------|
 | `src/store.ts` | Shared bullet-tree state + actions (the single source of truth) |
-| `src/types.ts` | `Bullet`, `Focus`, `OutlineState` types |
+| `src/types.ts` | `Bullet` (one `text` field), `Focus`, `OutlineState` types |
 | `src/outline/` | Right panel — outline, bullet rows, `@` autocomplete, focus registry |
 | `src/mindmap/` | Left panel — React Flow map, custom node, tree layout |
-| `src/lib/` | `mentions` (parse `@`), `caret` (textarea caret helpers) |
+| `src/lib/` | `mentions` (`@` tokens ⇄ labels), `markdown` (tiny md → HTML), `caret` (textarea caret helpers) |
 | `src/App.tsx` | Split layout + resizable divider |

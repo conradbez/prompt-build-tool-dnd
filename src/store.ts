@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { nanoid } from 'nanoid';
-import type { Bullet, Field, Focus, OutlineState, FlatBullet } from './types';
+import type { Bullet, Focus, OutlineState, FlatBullet } from './types';
+import { mentionIds, mentionToken, resolveMentions, stripMention } from './lib/mentions';
 
 /**
  * A tiny external store shared by the outline (right) and the mind map (left).
@@ -10,31 +11,51 @@ import type { Bullet, Field, Focus, OutlineState, FlatBullet } from './types';
 
 function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
   return {
-    title: '',
-    body: '',
+    text: '',
     children: [],
     parentId: null,
     collapsed: false,
     refs: [],
+    pos: null,
+    template: false,
     ...partial,
   };
 }
 
-const DOC_KEY = 'wm.doc.v1';
+const DOC_KEY = 'wm.doc.v4';
+// Shapes this prototype has outgrown. They are wiped on load, not migrated.
+const STALE_KEYS = ['wm.doc.v1', 'wm.doc.v2', 'wm.doc.v3'];
 
 function fresh(): { bullets: Record<string, Bullet>; rootIds: string[] } {
-  const root = makeBullet({ id: nanoid(), title: 'Welcome', body: 'Edit me — this is the body. Press Enter here to add a bullet below.' });
-  const a = makeBullet({ id: nanoid(), title: 'Left is a mind map', body: 'Top bullets flow down to their children.', parentId: root.id });
-  const b = makeBullet({ id: nanoid(), title: 'Right is an outline', body: 'Workflowy-style bullets. Drag the divider to resize.', parentId: root.id });
-  const b1 = makeBullet({ id: nanoid(), title: 'Reference bullets', body: 'Type @ to mention another (non-child) bullet — a dashed link appears on the map.', parentId: b.id });
+  const root = makeBullet({
+    id: nanoid(),
+    text:
+      '# Find best fruit\nUsing the fruit list and the country assessment below, name the ' +
+      '**single best** fruit and justify it in two sentences.',
+  });
+  const a = makeBullet({
+    id: nanoid(),
+    text: '## List 10 fruits\nList 10 fruits, one per line, no commentary.',
+    parentId: root.id,
+  });
+  const b = makeBullet({
+    id: nanoid(),
+    text:
+      '## Assess fruits for a random country\n' +
+      `Pick a random country. For each fruit in ${mentionToken(a.id)}, assess the metrics ` +
+      'for that fruit\u2019s growth there and its nutritional suitability for maximising ' +
+      'calories with minimal variance. Score each out of 10 in a short table.',
+    parentId: root.id,
+    refs: [a.id],
+  });
   root.children = [a.id, b.id];
-  b.children = [b1.id];
-  return { bullets: { [root.id]: root, [a.id]: a, [b.id]: b, [b1.id]: b1 }, rootIds: [root.id] };
+  return { bullets: { [root.id]: root, [a.id]: a, [b.id]: b }, rootIds: [root.id] };
 }
 
 /** Load a saved document, tolerating older/partial shapes; null if none/invalid. */
 function loadDoc(): { bullets: Record<string, Bullet>; rootIds: string[] } | null {
   try {
+    for (const k of STALE_KEYS) localStorage.removeItem(k);
     const raw = localStorage.getItem(DOC_KEY);
     if (!raw) return null;
     const d = JSON.parse(raw);
@@ -42,22 +63,26 @@ function loadDoc(): { bullets: Record<string, Bullet>; rootIds: string[] } | nul
       return null;
     }
     const bullets: Record<string, Bullet> = {};
-    for (const [id, raw] of Object.entries(d.bullets as Record<string, Partial<Bullet>>)) {
+    for (const [id, raw] of Object.entries(d.bullets as Record<string, Record<string, unknown>>)) {
       bullets[id] = makeBullet({
         id,
-        // Titles are single-line; collapse any stray newline from older data.
-        title: typeof raw.title === 'string' ? raw.title.replace(/\n/g, ' ') : '',
-        body: typeof raw.body === 'string' ? raw.body : '',
-        children: Array.isArray(raw.children) ? raw.children : [],
+        text: typeof raw.text === 'string' ? raw.text : '',
+        children: Array.isArray(raw.children) ? (raw.children as string[]) : [],
         parentId: typeof raw.parentId === 'string' ? raw.parentId : null,
         collapsed: !!raw.collapsed,
-        refs: Array.isArray(raw.refs) ? raw.refs : [],
+        refs: Array.isArray(raw.refs) ? (raw.refs as string[]) : [],
+        pos: isPos(raw.pos) ? raw.pos : null,
+        template: !!raw.template,
       });
     }
     return { bullets, rootIds: d.rootIds.filter((id: string) => bullets[id]) };
   } catch {
     return null;
   }
+}
+
+function isPos(v: unknown): v is { x: number; y: number } {
+  return !!v && typeof v === 'object' && typeof (v as any).x === 'number' && typeof (v as any).y === 'number';
 }
 
 function saveDoc(s: OutlineState) {
@@ -73,7 +98,7 @@ function seed(): OutlineState {
   const firstId = doc.rootIds[0];
   return {
     ...doc,
-    focus: { id: firstId, field: 'title', caret: 'end' },
+    focus: { id: firstId, caret: 'end' },
     selectedId: firstId,
     results: {},
     runErrors: [],
@@ -114,30 +139,48 @@ export function flatten(s: OutlineState = state): FlatBullet[] {
   return out;
 }
 
-/** Ordered list of focus targets: each visible bullet contributes title then body. */
+/** Ordered list of focus targets — one editor per visible bullet. */
 export function focusOrder(s: OutlineState = state): Focus[] {
-  return flatten(s).flatMap(({ id }): Focus[] => [
-    { id, field: 'title' },
-    { id, field: 'body' },
-  ]);
+  return flatten(s).map(({ id }): Focus => ({ id }));
 }
 
 /** All bullets as flat run payloads for the server (parentId lets the child
  * auto-include its parent's output; refs are extra @-references). */
 export function buildNodePayloads(s: OutlineState = state) {
+  const titles = titleMap(s);
   return Object.values(s.bullets).map((b) => ({
     id: b.id,
-    title: b.title,
-    body: b.body,
+    text: resolveMentions(b.text, titles),
     parentId: b.parentId,
     refs: b.refs.filter((r) => s.bullets[r]),
+    template: b.template,
   }));
 }
 
-/** Keep the caret in the same field on `id` (used when reordering). */
-function focusFor(s: OutlineState, id: string): Focus {
-  const field = s.focus && s.focus.id === id ? s.focus.field : 'title';
-  return { id, field, caret: 'end' };
+/**
+ * What a mention shows, keyed by id: the bullet's first line with any markdown
+ * heading marks dropped, since that line is how people name a bullet.
+ */
+export function titleMap(s: OutlineState = state): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const b of Object.values(s.bullets)) out[b.id] = firstLine(b.text);
+  return out;
+}
+
+/** A bullet's opening line, stripped of heading marks and list bullets. */
+export function firstLine(text: string): string {
+  const line = text.split('\n', 1)[0] ?? '';
+  return line.replace(/^\s*(#{1,6}\s+|[-*+]\s+|>\s+)/, '').trim();
+}
+
+/** The bullets a bullet mentions, read straight out of its text. */
+function refsFromText(b: Bullet, selfId: string): string[] {
+  return mentionIds(b.text).filter((r, i, all) => r !== selfId && all.indexOf(r) === i);
+}
+
+/** Keep the caret on `id` (used when reordering). */
+function focusFor(_s: OutlineState, id: string): Focus {
+  return { id, caret: 'end' };
 }
 
 function siblingsOf(s: OutlineState, id: string): { list: string[]; index: number; parentId: string | null } {
@@ -185,18 +228,39 @@ export const actions = {
   /** Move focus to the previous (-1) or next (+1) editor in reading order. */
   moveFocus(from: Focus, dir: -1 | 1) {
     const order = focusOrder(state);
-    const idx = order.findIndex((f) => f.id === from.id && f.field === from.field);
+    const idx = order.findIndex((f) => f.id === from.id);
     if (idx === -1) return;
     const target = order[idx + dir];
     if (!target) return;
     actions.setFocus({ ...target, caret: dir === 1 ? 'start' : 'end' });
   },
 
-  setText(id: string, field: Field, value: string) {
+  setText(id: string, value: string) {
     const b = state.bullets[id];
-    if (!b || b[field] === value) return;
+    if (!b || b.text === value) return;
     const next = clone(state);
-    next.bullets[id] = { ...b, [field]: value };
+    const updated = { ...b, text: value };
+    // `@` mentions live in the text as id tokens, so the reference list — and
+    // with it the dashed edges — is derived from it rather than tracked apart.
+    next.bullets[id] = { ...updated, refs: refsFromText(updated, id) };
+    emit(next);
+  },
+
+  /** Flip a bullet between a prompt (sent to the LLM) and a template (not). */
+  toggleTemplate(id: string) {
+    const b = state.bullets[id];
+    if (!b) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, template: !b.template };
+    emit(next);
+  },
+
+  /** Remember where a node was dragged to on the mind map. */
+  setPos(id: string, pos: { x: number; y: number }) {
+    const b = state.bullets[id];
+    if (!b) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, pos };
     emit(next);
   },
 
@@ -208,23 +272,31 @@ export const actions = {
     emit(next);
   },
 
+  /** Link two bullets (used by the mind map). The token joins the text, which
+   *  is what owns references — the refs list is derived from it. */
   addRef(sourceId: string, targetId: string) {
     const b = state.bullets[sourceId];
-    if (!b || sourceId === targetId || b.refs.includes(targetId)) return;
+    if (!b || !state.bullets[targetId] || sourceId === targetId || b.refs.includes(targetId)) return;
     const next = clone(state);
-    next.bullets[sourceId] = { ...b, refs: [...b.refs, targetId] };
+    const text = b.text.replace(/\s*$/, '') + ' ' + mentionToken(targetId);
+    next.bullets[sourceId] = { ...b, text: text.trimStart(), refs: [...b.refs, targetId] };
     emit(next);
   },
 
+  /** Cut a reference: the mention token goes too, since the text owns it. */
   removeRef(sourceId: string, targetId: string) {
     const b = state.bullets[sourceId];
     if (!b || !b.refs.includes(targetId)) return;
     const next = clone(state);
-    next.bullets[sourceId] = { ...b, refs: b.refs.filter((r) => r !== targetId) };
+    next.bullets[sourceId] = {
+      ...b,
+      text: stripMention(b.text, targetId),
+      refs: b.refs.filter((r) => r !== targetId),
+    };
     emit(next);
   },
 
-  /** Create a new empty child under `parentId`; focus its title. */
+  /** Create a new empty child under `parentId`; focus it. */
   addChild(parentId: string): string {
     const parent = state.bullets[parentId];
     if (!parent) return '';
@@ -232,7 +304,7 @@ export const actions = {
     const nb = makeBullet({ id: nanoid(), parentId });
     next.bullets[nb.id] = nb;
     next.bullets[parentId] = { ...parent, collapsed: false, children: [...parent.children, nb.id] };
-    next.focus = { id: nb.id, field: 'title', caret: 'end' };
+    next.focus = { id: nb.id, caret: 'end' };
     next.selectedId = nb.id;
     emit(next);
     return nb.id;
@@ -294,7 +366,7 @@ export const actions = {
     emit(next);
   },
 
-  /** Create a new empty sibling directly after `id`; focus its title. */
+  /** Create a new empty sibling directly after `id`; focus it. */
   addSiblingAfter(id: string): string {
     const next = clone(state);
     const { list, index, parentId } = siblingsOf(next, id);
@@ -303,14 +375,14 @@ export const actions = {
     const newList = [...list];
     newList.splice(index + 1, 0, nb.id);
     setChildren(next, parentId, newList);
-    next.focus = { id: nb.id, field: 'title', caret: 'end' };
+    next.focus = { id: nb.id, caret: 'end' };
     next.selectedId = nb.id;
     emit(next);
     return nb.id;
   },
 
   /** Make `id` a child of its previous sibling. */
-  indent(id: string, field: Field) {
+  indent(id: string) {
     const { list, index } = siblingsOf(state, id);
     if (index <= 0) return; // no previous sibling to nest under
     const next = clone(state);
@@ -324,12 +396,12 @@ export const actions = {
     prev.children = [...prev.children, id];
     next.bullets[prevId] = prev;
     next.bullets[id] = { ...b, parentId: prevId };
-    next.focus = { id, field, caret: 'end' };
+    next.focus = { id, caret: 'end' };
     emit(next);
   },
 
   /** Move `id` up to become a sibling of its parent, just after it. */
-  outdent(id: string, field: Field) {
+  outdent(id: string) {
     const b = state.bullets[id];
     if (!b.parentId) return; // already at top level
     const next = clone(state);
@@ -344,7 +416,7 @@ export const actions = {
     newG.splice(pIndex + 1, 0, id);
     setChildren(next, grandParentId, newG);
     next.bullets[id] = { ...next.bullets[id], parentId: grandParentId };
-    next.focus = { id, field, caret: 'end' };
+    next.focus = { id, caret: 'end' };
     emit(next);
   },
 
@@ -353,15 +425,19 @@ export const actions = {
     const b = state.bullets[id];
     if (!b || b.children.length > 0) return;
     const order = focusOrder(state);
-    const idx = order.findIndex((f) => f.id === id && f.field === 'title');
+    const idx = order.findIndex((f) => f.id === id);
     const prev = idx > 0 ? order[idx - 1] : null;
     const next = clone(state);
     const { list } = siblingsOf(next, id);
     setChildren(next, b.parentId, list.filter((x) => x !== id));
-    // scrub references to the deleted bullet
+    // scrub references to the deleted bullet, tokens included
     for (const other of Object.values(next.bullets)) {
       if (other.refs.includes(id)) {
-        next.bullets[other.id] = { ...other, refs: other.refs.filter((r) => r !== id) };
+        next.bullets[other.id] = {
+          ...other,
+          text: stripMention(other.text, id),
+          refs: other.refs.filter((r) => r !== id),
+        };
       }
     }
     delete next.bullets[id];

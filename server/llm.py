@@ -2,9 +2,8 @@
 Minimal LLM client for the mind-map runner.
 
 One function, ``make_llm_call``, returns a callable bound to a provider and an
-optional API key. It is deliberately small: text prompts only — no file inputs,
-no template node types, no in-browser models. Those main-branch features are
-intentionally left out.
+optional API key. It is deliberately small: text prompts only — no file inputs
+and no in-browser models. Those main-branch features are intentionally left out.
 """
 
 from __future__ import annotations
@@ -19,6 +18,17 @@ ENV_KEYS = {
 }
 
 
+def _is_template(config: Any) -> bool:
+    """True for nodes the editor marked as ``model_type="template"``.
+
+    pbt has no model_type semantics of its own — it parses the directive into
+    ``model.config`` and otherwise runs the node like any other prompt — so
+    each runner honours it in its own ``llm_call``. Without this a template
+    node would be sent to the LLM and answer the text instead of passing it on.
+    """
+    return bool(config) and config.get("model_type") == "template"
+
+
 def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Callable[..., str]:
     """Return an ``llm_call(prompt, files=None, config=None)`` bound to a provider.
 
@@ -27,6 +37,12 @@ def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Ca
     """
 
     def llm_call(prompt: str, files: Any = None, config: Any = None) -> str:
+        if _is_template(config):
+            # ref()/promptdata() are already substituted, so the rendered
+            # prompt *is* the output. Stripped because the injected
+            # {{ config(...) }} line renders to an empty first line.
+            return prompt.strip()
+
         key = api_key or os.environ.get(ENV_KEYS[provider])
         if not key:
             raise RuntimeError(
