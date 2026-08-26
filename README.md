@@ -48,7 +48,8 @@ siblings, and past the first/last sibling it hops above/below the parent.
 
 ## Mind-map interactions
 
-**Mouse**
+**Mouse** — React Flow's own defaults, keybindings included, with one
+exception: the `+` circle.
 
 | Gesture | Does |
 |---------|------|
@@ -57,14 +58,19 @@ siblings, and past the first/last sibling it hops above/below the parent.
 | Drag from the `+` circle | Start a link from that node |
 | Drop the link on a node | Link them — see *child vs reference* below |
 | Drop the link on empty canvas | Create a new node there, as a child |
-| Click the `+` circle | Create a child node, no drag needed |
-| Click a link | Delete it (confirms first) |
-| Scroll / pinch | Pan and zoom |
+| Click the `+` circle | Create a child node — **the exception**: React Flow would start a click-connection here |
+| Click a link, then `Backspace` | Remove it — React Flow's own selection and its default delete key (`Backspace`; `Delete` is not bound) |
+| Space-drag, scroll, ctrl-scroll | Pan and zoom, per React Flow's defaults |
 
-**Touch** — the same gestures, sized for fingers: tap a node to focus it, drag
-a node to move it, drag from the `+` circle (always visible on touch, 26 px
-across) to start a link, tap a link to delete it, one finger pans and two
-fingers pinch to zoom.
+That `Backspace` never eats an edit: React Flow ignores keypresses while a
+textarea has focus — and clicking the canvas takes the caret out of the outline,
+which is what lets the binding fire at all.
+
+**Touch** has no keyboard and no hover, so it gets its own set: tap a node to
+focus it, drag a node to move it, drag from the `+` circle (always visible on
+touch, 26 px across) to start a link — which may end anywhere on the target
+node, not just its dot — **tap a link to delete it** (standing in for the
+`Backspace` binding), one finger pans and two fingers pinch to zoom.
 
 **Child vs reference.** Dropping a link on a node that has **no parent** makes
 it a *child* of the source — dragging a loose node under another one is how you
