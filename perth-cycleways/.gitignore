@@ -1,0 +1,5 @@
+# Generated outputs
+*.duckdb
+*.duckdb.wal
+*.geojson
+__pycache__/
