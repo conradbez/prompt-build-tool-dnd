@@ -16,7 +16,7 @@ import '@xyflow/react/dist/style.css';
 
 import { actions, getState, useOutline, titleMap } from '../store';
 import { renderMarkdown } from '../lib/markdown';
-import { layout, snapToGrid, NODE_WIDTH, NODE_HEIGHT, SNAP_GRID } from './layout';
+import { layout, snapToGrid, NODE_WIDTH, NODE_HEIGHT } from './layout';
 import { BulletNode, type BulletNodeData } from './BulletNode';
 
 const nodeTypes = { bullet: BulletNode };
@@ -211,9 +211,15 @@ export function MindMap() {
     actions.setPos(id, snapToGrid({ x: conn.to.x - NODE_WIDTH / 2, y }));
   };
 
-  /** A dragged node stops following the auto-layout. */
+  /**
+   * A dragged node stops following the auto-layout, and lands on the grid.
+   *
+   * The snap happens here rather than through React Flow's own `snapToGrid`,
+   * which quantises the node *during* the drag: it follows the pointer freely,
+   * then settles onto the lattice when you let go.
+   */
   const onNodeDragStop: OnNodeDrag = (_, node) => {
-    actions.setPos(node.id, node.position);
+    actions.setPos(node.id, snapToGrid(node.position));
   };
 
   const onNodeClick: NodeMouseHandler = (_, node) => {
@@ -277,10 +283,6 @@ export function MindMap() {
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
         proOptions={{ hideAttribution: true }}
-        // Dragged nodes land on the same lattice the auto-layout uses, so a
-        // hand-placed node still lines up with its neighbours.
-        snapToGrid
-        snapGrid={SNAP_GRID}
         // The one place a pointer device departs from React Flow's defaults:
         // click-to-connect would swallow the click on the `+` circle, and that
         // click is how you add a child node.

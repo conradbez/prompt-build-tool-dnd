@@ -18,10 +18,12 @@ export const SLOT_X = NODE_WIDTH + H_GAP;
 export const SLOT_Y = NODE_HEIGHT + V_GAP;
 
 /**
- * Grid a dragged node snaps to — half a slot each way. Half rather than whole
- * so nodes can sit between columns, and half of the *slot* rather than of the
- * node so the grid lines up with wherever the auto-layout would have put
- * things: dragged and auto-placed nodes share one lattice.
+ * Grid a node settles onto when a drag ends — half a slot each way. Half rather
+ * than whole so nodes can sit between columns, and half of the *slot* rather
+ * than of the node so the grid lines up with wherever the auto-layout would
+ * have put things: dragged and auto-placed nodes share one lattice.
+ *
+ * Applied on drop only (see `onNodeDragStop`), so the drag itself stays smooth.
  */
 export const SNAP_GRID: [number, number] = [SLOT_X / 2, SLOT_Y / 2];
 
