@@ -11,6 +11,8 @@ export const PROVIDERS: { id: Provider; label: string }[] = [
   { id: 'anthropic', label: 'Anthropic' },
 ];
 
+import type { FileRef } from './types';
+
 export interface NodePayload {
   id: string;
   /** The bullet's markdown text, with `@` mentions expanded to full titles. */
@@ -19,6 +21,8 @@ export interface NodePayload {
   refs: string[];
   /** True for a template node: passed through instead of sent to the LLM. */
   template: boolean;
+  /** Attachments, sent to the model along with this bullet's prompt. */
+  files: FileRef[];
 }
 
 export interface RunResponse {
@@ -61,6 +65,38 @@ export function getServerUrl(): string {
   const pageOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const fallback = (import.meta as any).env?.DEV ? '/api' : pageOrigin;
   return (saved || envUrl || fallback).replace(/\/+$/, '');
+}
+
+/** Whether the server has a bucket configured; uploads are hidden if not. */
+export async function filesEnabled(): Promise<boolean> {
+  try {
+    const res = await fetch(`${getServerUrl()}/files/enabled`);
+    if (!res.ok) return false;
+    return !!(await res.json()).enabled;
+  } catch {
+    return false;
+  }
+}
+
+/** Upload one file and get back the reference to store on the bullet. */
+export async function uploadFile(bulletId: string, file: File): Promise<FileRef> {
+  const body = new FormData();
+  body.append('bulletId', bulletId);
+  body.append('file', file);
+  const res = await fetch(`${getServerUrl()}/files`, { method: 'POST', body });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return { key: data.key, name: data.name };
+}
+
+/** Remove the stored object. Best-effort: the bullet drops it either way. */
+export async function deleteFile(key: string): Promise<void> {
+  await fetch(`${getServerUrl()}/files/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key }),
+  }).catch(() => undefined);
 }
 
 export async function runGraph(

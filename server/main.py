@@ -13,17 +13,19 @@ branches in parallel.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 from typing import Any, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import pbt
 
+import files as attachments
 from llm import make_llm_call
 
 # The built frontend (repo-root `dist/`), if it was shipped alongside the
@@ -33,16 +35,32 @@ DIST_DIR = pathlib.Path(__file__).resolve().parent.parent / "dist"
 
 PROVIDERS = {"gemini", "openai", "anthropic"}
 
+# Attachments are held in memory on the way through, so keep them modest.
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
 # pbt has no model_type semantics of its own: it parses this directive into
 # `model.config` and passes it to `llm_call(config=...)`, which is where the
 # passthrough happens (see `llm.py`). Prepended to a template node's source.
 TEMPLATE_CONFIG_LINE = '{{ config(model_type="template") }}'
+
+# Attachments reach the model the same way: pbt parses the declared names out
+# of the config block and hands the matching files to `llm_call(files=...)`.
+def _promptfiles_line(keys: list[str]) -> str:
+    return "{{ config(promptfiles='%s') }}" % json.dumps(keys)
+
+
+class FileRef(BaseModel):
+    """An attachment on a bullet: the object key plus its original name."""
+
+    key: str
+    name: str = ""
 
 
 class Node(BaseModel):
     id: str
     # One markdown text field per bullet; `@` mentions arrive already expanded.
     text: str = ""
+    files: list[FileRef] = []
     parentId: Optional[str] = None
     refs: list[str] = []
     # Template nodes are not sent to the LLM — see `_build_source` / `llm.py`.
@@ -91,7 +109,19 @@ def _build_source(node: Node, child_ids: list[str], id_to_slug: dict[str, str]) 
     source = ("\n".join(ref_lines) + "\n" + prompt) if ref_lines else prompt
     if node.template:
         source = TEMPLATE_CONFIG_LINE + "\n" + source
+    keys = _node_file_keys(node)
+    if keys:
+        source = _promptfiles_line(keys) + "\n" + source
     return source
+
+
+def _node_file_keys(node: Node) -> list[str]:
+    """The attachments this bullet may use — its own, and nothing else.
+
+    pbt's promptfiles are a flat namespace, so a bullet asking for a key that
+    doesn't sit under its own prefix is simply ignored rather than trusted.
+    """
+    return [f.key for f in node.files if attachments.belongs_to(f.key, node.id)]
 
 
 def _serialise(outputs: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
@@ -124,6 +154,37 @@ def health() -> dict:
     return {"status": "ok", "pbt_version": pbt.__version__}
 
 
+@app.get("/files/enabled")
+def files_enabled() -> dict:
+    """Whether a bucket is configured — the UI hides attaching if not."""
+    return {"enabled": attachments.enabled()}
+
+
+@app.post("/files")
+async def upload(bulletId: str = Form(...), file: UploadFile = File(...)) -> dict:
+    """Attach one file to one bullet."""
+    if not attachments.enabled():
+        return {"error": "File storage is not configured on this server."}
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        return {"error": f"That file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."}
+    try:
+        return attachments.put(bulletId, file.filename or "file", data)
+    except Exception as exc:  # noqa: BLE001 — surface storage errors to the UI
+        return {"error": str(exc)}
+
+
+@app.post("/files/delete")
+def remove_file(ref: FileRef) -> dict:
+    if not attachments.enabled():
+        return {"error": "File storage is not configured on this server."}
+    try:
+        attachments.delete(ref.key)
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
 @app.post("/run", response_model=RunResponse)
 async def run(req: RunRequest) -> RunResponse:
     if req.provider not in PROVIDERS:
@@ -145,9 +206,25 @@ async def run(req: RunRequest) -> RunResponse:
 
     models = {id_to_slug[n.id]: _build_source(n, children[n.id], id_to_slug) for n in nodes}
 
+    # Pull each bullet's attachments once, keyed the way the config declares
+    # them, so pbt can route them to the model that asked.
+    promptfiles: dict[str, Any] = {}
+    try:
+        for n in nodes:
+            for key in _node_file_keys(n):
+                if key not in promptfiles:
+                    promptfiles[key] = attachments.get(key)
+    except Exception as exc:  # noqa: BLE001 — a missing object shouldn't 500
+        return RunResponse(errors=[f"Could not read an attached file: {exc}"])
+
     try:
         llm = make_llm_call(api_key=req.apiKey, provider=req.provider)
-        outputs = await pbt.async_run(models_from_dict=models, llm_call=llm, verbose=False)
+        outputs = await pbt.async_run(
+            models_from_dict=models,
+            llm_call=llm,
+            promptfiles=promptfiles or None,
+            verbose=False,
+        )
     except Exception as exc:  # noqa: BLE001 — surface any failure to the client
         return RunResponse(errors=[str(exc)])
 

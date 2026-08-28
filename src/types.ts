@@ -1,3 +1,11 @@
+/** A file attached to a bullet, held in the server's bucket. */
+export interface FileRef {
+  /** Object key — it carries the owning bullet's id as its prefix. */
+  key: string;
+  /** The name it was uploaded under, for showing to a person. */
+  name: string;
+}
+
 export interface Bullet {
   id: string;
   /**
@@ -12,6 +20,8 @@ export interface Bullet {
   collapsed: boolean;
   /** Ids of other bullets referenced from this one (via the `@` mention). */
   refs: string[];
+  /** Files attached to this bullet, sent to the LLM with its prompt. */
+  files: FileRef[];
   /**
    * Where the mind map draws this node once it has been dragged. `null` means
    * "wherever the auto-layout puts it", which is how every node starts.

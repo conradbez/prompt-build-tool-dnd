@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { nanoid } from 'nanoid';
-import type { Bullet, Focus, OutlineState, FlatBullet } from './types';
+import type { Bullet, FileRef, Focus, OutlineState, FlatBullet } from './types';
 import { mentionIds, mentionToken, resolveMentions, stripMention } from './lib/mentions';
 
 /**
@@ -16,6 +16,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     parentId: null,
     collapsed: false,
     refs: [],
+    files: [],
     pos: null,
     template: false,
     ...partial,
@@ -71,6 +72,7 @@ function loadDoc(): { bullets: Record<string, Bullet>; rootIds: string[] } | nul
         parentId: typeof raw.parentId === 'string' ? raw.parentId : null,
         collapsed: !!raw.collapsed,
         refs: Array.isArray(raw.refs) ? (raw.refs as string[]) : [],
+        files: Array.isArray(raw.files) ? (raw.files as FileRef[]) : [],
         pos: isPos(raw.pos) ? raw.pos : null,
         template: !!raw.template,
       });
@@ -151,6 +153,7 @@ export function buildNodePayloads(s: OutlineState = state) {
   return Object.values(s.bullets).map((b) => ({
     id: b.id,
     text: resolveMentions(b.text, titles),
+    files: b.files,
     parentId: b.parentId,
     refs: b.refs.filter((r) => s.bullets[r]),
     template: b.template,
@@ -286,6 +289,25 @@ export const actions = {
     }
     next.focus = { id, caret: 'end' };
     next.selectedId = id;
+    emit(next);
+  },
+
+  /** Attach an uploaded file to a bullet. */
+  attachFile(id: string, file: FileRef) {
+    const b = state.bullets[id];
+    if (!b || b.files.some((f) => f.key === file.key)) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, files: [...b.files, file] };
+    emit(next);
+  },
+
+  /** Drop an attachment from a bullet (the object itself is deleted by the
+   *  caller, which owns the server round-trip). */
+  detachFile(id: string, key: string) {
+    const b = state.bullets[id];
+    if (!b) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, files: b.files.filter((f) => f.key !== key) };
     emit(next);
   },
 

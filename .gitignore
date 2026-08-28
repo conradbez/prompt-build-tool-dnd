@@ -324,3 +324,7 @@ thumb
 sketch
 
 # End of https://www.toptal.com/developers/gitignore/api/python,node,react
+
+# Local scratch notes. "todo files.md" carries live bucket credentials — it
+# must not be committed.
+todo *.md

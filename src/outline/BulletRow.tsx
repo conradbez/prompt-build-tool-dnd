@@ -13,6 +13,7 @@ import {
   type TitleMap,
 } from '../lib/mentions';
 import { renderMarkdown } from '../lib/markdown';
+import { deleteFile } from '../api';
 import { INDENT } from './dragDrop';
 import { caretAtStart, caretOnFirstLine, caretOnLastLine } from '../lib/caret';
 
@@ -272,6 +273,29 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart }: Pr
             </>
           ) : (
             <Rendered bullet={bullet} titles={titles} />
+          )}
+
+          {bullet.files.length > 0 && (
+            <ul className="ol-files">
+              {bullet.files.map((f) => (
+                <li className="ol-file" key={f.key}>
+                  <span className="ol-file__name" title={f.name}>
+                    📎 {f.name}
+                  </span>
+                  <button
+                    className="ol-file__x"
+                    title="Remove this attachment"
+                    aria-label={`Remove ${f.name}`}
+                    onClick={() => {
+                      actions.detachFile(id, f.key);
+                      void deleteFile(f.key);
+                    }}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </div>

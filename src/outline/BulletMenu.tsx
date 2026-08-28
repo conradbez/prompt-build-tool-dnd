@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Bullet } from '../types';
 import { actions } from '../store';
+import { filesEnabled, uploadFile } from '../api';
 
 interface Props {
   bullet: Bullet;
@@ -14,8 +15,37 @@ interface Props {
  */
 export function BulletMenu({ bullet }: Props) {
   const [open, setOpen] = useState(false);
+  const [canUpload, setCanUpload] = useState(false);
+  const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const picker = useRef<HTMLInputElement | null>(null);
   const { id } = bullet;
+
+  // Only offer attaching when the server actually has a bucket behind it.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    filesEnabled().then((yes) => live && setCanUpload(yes));
+    return () => {
+      live = false;
+    };
+  }, [open]);
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const chosen = Array.from(e.target.files ?? []);
+    e.target.value = ''; // so picking the same file again still fires
+    if (chosen.length === 0) return;
+    setBusy(true);
+    try {
+      for (const file of chosen) {
+        actions.attachFile(id, await uploadFile(id, file));
+      }
+    } catch (err) {
+      actions.setRunResult({}, [err instanceof Error ? err.message : String(err)]);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Close on an outside click or Escape while the popup is open.
   useEffect(() => {
@@ -58,8 +88,29 @@ export function BulletMenu({ bullet }: Props) {
         •••
       </button>
 
+      <input
+        ref={picker}
+        type="file"
+        multiple
+        hidden
+        onChange={onPick}
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+
       {open && (
         <ul className="ol-menu__pop" role="menu">
+          {canUpload && (
+            <li>
+              <button
+                role="menuitem"
+                title="Attach a file to this bullet — it is sent to the LLM with this bullet's prompt"
+                onClick={() => run(() => picker.current?.click())}
+              >
+                {busy ? 'Uploading…' : 'Attach file…'}
+              </button>
+            </li>
+          )}
           <li>
             <button role="menuitem" onClick={() => run(() => focusNew(actions.addChild(id)))}>
               Add child

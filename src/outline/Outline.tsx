@@ -17,6 +17,8 @@ interface Drag {
   /** False until the pointer has moved past the slop, so a tap still focuses. */
   active: boolean;
   target: DropTarget | null;
+  /** Viewport x of a top-level bullet dot, for placing the indicator. */
+  dotBase: number;
 }
 
 /**
@@ -48,17 +50,25 @@ export function Outline() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.focus]);
 
-  /** Measure the visible rows, minus the subtree being dragged. */
-  function measure(exclude: string[]): RowRect[] {
+  /**
+   * Measure the visible rows, minus the subtree being dragged. `dotBase` is
+   * where a top-level bullet's dot sits, so the drop indicator can line its
+   * circle up with the real bullets of whatever level it is snapping to.
+   */
+  function measure(exclude: string[]): { rects: RowRect[]; dotBase: number } {
     const scroll = scrollRef.current;
     const rects: RowRect[] = [];
+    let dotBase = 0;
     for (const { id, depth } of flatten(getState())) {
       const el = scroll?.querySelector(`[data-row="${id}"]`) as HTMLElement | null;
-      if (!el || exclude.includes(id)) continue;
+      if (!el) continue;
+      const dot = el.querySelector('.ol-dot') as HTMLElement | null;
+      if (dot) dotBase = dot.getBoundingClientRect().x - depth * INDENT;
+      if (exclude.includes(id)) continue;
       const r = el.getBoundingClientRect();
       rects.push({ id, depth, top: r.y, bottom: r.y + r.height });
     }
-    return rects;
+    return { rects, dotBase };
   }
 
   function onDragStart(id: string, e: React.PointerEvent) {
@@ -78,7 +88,7 @@ export function Outline() {
     } catch {
       /* capture is an optimisation, not a requirement */
     }
-    setDrag({ id, subtree, startX: e.clientX, startY: e.clientY, active: false, target: null });
+    setDrag({ id, subtree, startX: e.clientX, startY: e.clientY, active: false, target: null, dotBase: 0 });
   }
 
   function onPointerMove(e: React.PointerEvent) {
@@ -87,12 +97,13 @@ export function Outline() {
     if (!drag.active && moved < DRAG_SLOP) return;
     e.preventDefault();
     const s = getState();
+    const { rects, dotBase } = measure(drag.subtree);
     // Sideways movement is measured from where the drag began.
-    const target = computeDrop(measure(drag.subtree), e.clientX, e.clientY, drag.startX, {
+    const target = computeDrop(rects, e.clientX, e.clientY, drag.startX, {
       parentOf: (bid) => s.bullets[bid]?.parentId ?? null,
       childrenOf: (pid) => (pid ? (s.bullets[pid]?.children ?? []) : s.rootIds),
     });
-    setDrag({ ...drag, active: true, target });
+    setDrag({ ...drag, active: true, target, dotBase });
   }
 
   function onPointerUp() {
@@ -123,17 +134,18 @@ export function Outline() {
           />
         ))}
 
-        {/* The drop indicator: a line at the insertion point whose left edge —
-            and the ghost bullet on it — show the nesting level being chosen. */}
+        {/* The drop indicator. Its circle sits exactly on the bullet column of
+            the level being chosen, so the nesting reads at a glance. */}
         {drag?.active && drag.target && scroll && (
           <div
             className="ol-drop"
             style={{
               top: drag.target.y - scroll.y + (scrollRef.current?.scrollTop ?? 0),
-              left: drag.target.depth * INDENT,
+              left: drag.dotBase + drag.target.depth * INDENT - scroll.x,
             }}
           >
             <span className="ol-drop__dot" />
+            <span className="ol-drop__line" />
           </div>
         )}
       </div>

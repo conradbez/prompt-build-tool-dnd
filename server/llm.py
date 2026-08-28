@@ -2,12 +2,13 @@
 Minimal LLM client for the mind-map runner.
 
 One function, ``make_llm_call``, returns a callable bound to a provider and an
-optional API key. It is deliberately small: text prompts only — no file inputs
-and no in-browser models. Those main-branch features are intentionally left out.
+optional API key. pbt hands it the files a bullet declared (see `files.py`), so
+an attachment on a bullet goes to the model along with that bullet's prompt.
 """
 
 from __future__ import annotations
 
+import mimetypes
 import os
 from typing import Any, Callable, Optional
 
@@ -16,6 +17,35 @@ ENV_KEYS = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
 }
+
+
+def _read_files(files: Any) -> list[tuple[bytes, str]]:
+    """Read pbt's file objects into (bytes, mime type) pairs."""
+    out: list[tuple[bytes, str]] = []
+    for f in files or []:
+        data = f.read() if hasattr(f, "read") else bytes(f)
+        if hasattr(f, "seek"):
+            f.seek(0)  # a file may be shared by several models in one run
+        out.append((data, _detect_mime(data, getattr(f, "name", ""))))
+    return out
+
+
+def _detect_mime(data: bytes, name: str = "") -> str:
+    """Sniff the common cases, then fall back to the file extension."""
+    if data[:4] == b"%PDF":
+        return "application/pdf"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    guessed = mimetypes.guess_type(name)[0] if name else None
+    if guessed:
+        return guessed
+    try:
+        data.decode("utf-8")
+        return "text/plain"
+    except UnicodeDecodeError:
+        return "application/octet-stream"
 
 
 def _is_template(config: Any) -> bool:
@@ -50,15 +80,30 @@ def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Ca
                 f"{ENV_KEYS[provider]} on the server."
             )
 
+        file_data = _read_files(files)
+
         if provider == "gemini":
             from google import genai
+            from google.genai import types
 
             client = genai.Client(api_key=key)
+            parts: list = [
+                types.Part.from_bytes(data=data, mime_type=mime) for data, mime in file_data
+            ]
+            parts.append(prompt)
             resp = client.models.generate_content(
                 model=os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"),
-                contents=[prompt],
+                contents=parts,
             )
             return resp.text or ""
+
+        if file_data:
+            # Only the Gemini path builds multimodal parts so far. Say so
+            # rather than quietly dropping the attachment from the prompt.
+            raise RuntimeError(
+                f"Attachments are only wired up for Gemini; '{provider}' received "
+                f"{len(file_data)} file(s) it cannot send."
+            )
 
         if provider == "openai":
             import openai

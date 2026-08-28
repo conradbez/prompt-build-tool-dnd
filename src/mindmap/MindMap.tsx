@@ -106,6 +106,7 @@ export function MindMap() {
         hasChildren: b.children.length > 0,
         collapsed: b.collapsed,
         template: b.template,
+        fileCount: b.files.length,
         result: state.results[p.id],
       };
       return {
@@ -294,7 +295,8 @@ export function MindMap() {
           : { onEdgeClick: onEdgeSelect })}
       >
         <Background gap={20} color="#e5e7eb" />
-        <Controls showInteractive={false} />
+        {/* Top-left: the provider/key/Run toolbar now sits bottom-left. */}
+        <Controls showInteractive={false} position="top-left" />
       </ReactFlow>
     </div>
   );

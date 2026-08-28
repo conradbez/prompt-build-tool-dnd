@@ -6,6 +6,8 @@ export interface BulletNodeData {
   hasChildren: boolean;
   collapsed: boolean;
   template: boolean;
+  /** How many files are attached — shown as a paperclip count. */
+  fileCount: number;
   result?: string;
   [key: string]: unknown;
 }
@@ -15,11 +17,18 @@ export function BulletNode({ id, data, selected }: NodeProps) {
   return (
     <div className={`mm-node ${selected ? 'mm-node--selected' : ''} ${d.template ? 'mm-node--template' : ''}`}>
       <Handle type="target" position={Position.Top} className="mm-handle" />
-      {d.template && (
+      {(d.template || d.fileCount > 0) && (
         <div className="mm-node__flags">
-          <span className="tpl-chip" title="Not sent to the LLM">
-            TPL
-          </span>
+          {d.template && (
+            <span className="tpl-chip" title="Not sent to the LLM">
+              TPL
+            </span>
+          )}
+          {d.fileCount > 0 && (
+            <span className="mm-node__files" title={`${d.fileCount} attached file(s)`}>
+              📎 {d.fileCount}
+            </span>
+          )}
         </div>
       )}
       <div

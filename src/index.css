@@ -132,11 +132,11 @@ body,
   position: relative; /* the drop indicator is positioned against this */
   height: 100%;
   overflow-y: auto;
-  /* A reading column rather than the full width of the window: the outline is
-     now a full-screen view, and the top padding clears the floating toolbar. */
+  /* A reading column rather than the full width of the window, now that the
+     outline is a full-screen view. */
   max-width: 760px;
   margin: 0 auto;
-  padding: 64px 24px 40vh;
+  padding: 28px 24px 40vh;
 }
 
 /* --------------------------------------------------------- drag and drop */
@@ -163,26 +163,34 @@ body,
   opacity: 0.25;
 }
 
-/* Where it will land. The left edge is the nesting level being chosen. */
+/* Where it will land. The circle sits on the bullet column of the level being
+   chosen — the same x as a real bullet at that depth — and the line runs from
+   it to the right margin. */
 .ol-drop {
   position: absolute;
   right: 28px;
-  height: 4px;
-  margin-left: 20px;
-  border-radius: 2px;
-  background: #cbd2d9;
+  display: flex;
+  align-items: center;
+  height: 10px;
+  margin-top: -5px;
   pointer-events: none;
   z-index: 5;
 }
 
 .ol-drop__dot {
-  position: absolute;
-  left: -9px;
-  top: -3px;
+  flex: 0 0 auto;
   width: 10px;
   height: 10px;
   border-radius: 50%;
   background: #9aa5b1;
+}
+
+.ol-drop__line {
+  flex: 1 1 auto;
+  height: 4px;
+  margin-left: 4px;
+  border-radius: 2px;
+  background: #cbd2d9;
 }
 
 .ol-row {
@@ -435,6 +443,61 @@ body,
 .ol-md__empty,
 .mm-node__empty {
   color: var(--muted);
+}
+
+/* ----------------------------------------------------------- attachments */
+
+.ol-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ol-file {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  padding: 2px 4px 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12px;
+  color: #52606d;
+}
+
+.ol-file__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-file__x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.ol-file__x:hover {
+  color: #b42318;
+}
+
+.mm-node__files {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  color: #3e4c59;
+  background: #e4e7eb;
 }
 
 /* ------------------------------------------------------------- mentions */
@@ -693,11 +756,12 @@ body,
 /* ------------------------------------------------------------------ toolbar */
 
 .tb {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 20;
-  max-width: calc(100% - 24px);
+  /* Bottom-left, level with the help button in the opposite corner. */
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 40;
+  max-width: calc(100% - 32px);
 }
 
 .tb__row {

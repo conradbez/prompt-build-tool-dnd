@@ -114,7 +114,37 @@ To keep this simple, several main-branch features are **not** implemented:
   to template*), with no map/reduce loop type.
 - **In-browser execution** (PyScript) and **in-browser LLMs** (WebLLM) — running
   always goes through the server.
-- File uploads / promptfiles, per-session storage, and parallel-loop map/reduce.
+- Per-session storage and parallel-loop map/reduce.
+
+## Attaching files
+
+With a bucket configured, `•••` → **Attach file…** puts a file on a bullet. It
+is uploaded to an S3-compatible bucket and sent to the model along with *that
+bullet's* prompt — attachments are scoped to the bullet, not the document.
+
+Every object is written under `bullets/<bulletId>/…`, and a run only hands a
+bullet the objects sitting under its own prefix. pbt's `promptfiles` are a flat
+namespace, so that prefix check is what stops one bullet's files leaking into
+another's prompt: the server emits
+`{{ config(promptfiles='["…"]') }}` for the keys a bullet actually owns, and
+pbt routes the matching files to that model's `llm_call(files=…)`.
+
+Configure the bucket with the standard AWS environment variables — Railway's
+bucket variables map straight onto them:
+
+```bash
+AWS_ENDPOINT_URL=https://…
+AWS_S3_BUCKET_NAME=…
+AWS_DEFAULT_REGION=auto
+AWS_ACCESS_KEY_ID=…
+AWS_SECRET_ACCESS_KEY=…
+```
+
+Locally they go in `.env` (git-ignored) next to your model key. Without them
+`GET /files/enabled` reports `false` and the UI simply doesn't offer attaching.
+Uploads are capped at 20 MB, and only **Gemini** currently receives the file
+bytes — the other providers raise a clear error rather than silently dropping
+an attachment from the prompt.
 
 ## References
 
