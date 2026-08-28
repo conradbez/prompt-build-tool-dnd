@@ -1,9 +1,9 @@
 # Workflowy Mind Map
 
 A React app that pairs a **Workflowy-style outliner** with a **live mind map** of
-the same tree. Edit bullets on the right; watch them flow as a node graph on the
-left. The two views share one state, so a change (or a click) on either side is
-reflected on the other.
+the same tree. Work in whichever one suits the moment and switch with a key;
+they share one state, so a change (or a click) in either is reflected in the
+other.
 
 Each bullet is a single markdown text field — rendered when you're not editing
 it, raw while you are.
@@ -13,24 +13,23 @@ Flow) — the node-graph library already used by this project.
 
 ## Layout
 
+One view fills the window; the other is parked top-right as a live thumbnail
+with a ⇄ button above it.
+
 ```
-┌───────────────────────────┬──────┬──────────────────────┐
-│                           │      │  • # Find best fruit │
-│        Mind map           │ drag │    Using the list…   │
-│   (React Flow, top → down)│  ⇄   │    • List 10 fruits  │
-│                           │      │    • Assess fruits…  │
-└───────────────────────────┴──────┴──────────────────────┘
-        left panel          divider     right panel
+┌──────────────────────────────────────────┬────────┐
+│  provider · key · Run                    │   ⇄    │
+│                                          ├────────┤
+│                                          │ ┌────┐ │
+│          the view you are in             │ │mini│ │
+│      (mind map, or the outline)          │ └────┘ │
+│                                          │        │
+└──────────────────────────────────────────┴────────┘
 ```
 
-- **Right — outline.** Workflowy-style bullets. Each bullet is **one markdown
-  text field** — there is no separate title, so anything that should stand out
-  says so in markdown (`# heading`, `**bold**`). The bullet you have the caret
-  in shows its raw markdown; every other bullet shows it rendered. Resize the
-  panel by dragging the divider (20–70 % of the screen).
-- **Left — mind map.** Top-level bullets sit at the top and flow down to their
-  children (many children to one parent). Parent→child links are solid; `@`
-  references are dashed. Clicking a node focuses that bullet in the outline.
+Swap them by pressing `⌘\` / `Ctrl+\`, clicking the ⇄ button, or clicking the
+thumbnail itself. Both views stay mounted and share one store, so the small one
+keeps up with whatever you do in the big one.
 
 ## Keyboard shortcuts
 
@@ -42,6 +41,7 @@ Flow) — the node-graph library already used by this project.
 | `Alt+Shift+↑` / `Alt+Shift+↓` | Reorder the bullet up / down |
 | `↑` / `↓` | Move focus to the previous / next bullet, at line boundaries |
 | `Backspace` (empty bullet, at start) | Delete the bullet |
+| `⌘\` / `Ctrl+\` | Switch between the mind map and the outline |
 
 **Reorder** works like Workflowy: `Alt+Shift+↑`/`↓` moves a bullet among its
 siblings, and past the first/last sibling it hops above/below the parent.

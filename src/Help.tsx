@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react';
+import { SWITCH_HINT } from './lib/shortcuts';
 
 interface Row {
   keys: string;
   desc: string;
 }
 
+const VIEW: Row[] = [
+  { keys: SWITCH_HINT, desc: 'Switch between the mind map and the outline' },
+  { keys: 'Click the thumbnail', desc: 'Same thing — or the ⇄ button above it (top right)' },
+];
+
 const EDITING: Row[] = [
-  { keys: 'Enter', desc: 'In the title → jump to the body; in the body → new bullet below' },
-  { keys: 'Shift + Enter', desc: 'New line inside the body' },
+  { keys: 'Enter', desc: 'New bullet below' },
+  { keys: 'Shift + Enter', desc: 'New line inside this bullet' },
   { keys: 'Tab / Shift + Tab', desc: 'Indent / outdent (nest under, or lift out of, a bullet)' },
   { keys: 'Alt + Shift + ↑ / ↓', desc: 'Reorder the bullet among its siblings (Workflowy-style)' },
   { keys: '↑ / ↓', desc: 'Move the caret to the previous / next bullet' },
@@ -17,13 +23,15 @@ const EDITING: Row[] = [
 const MAP: Row[] = [
   { keys: 'Click a node', desc: 'Focus that bullet in the outline (and vice-versa)' },
   { keys: '＋ on a node', desc: 'Add a child node — a child feeds its output up into this node' },
-  { keys: 'Tap a link', desc: 'Solid link → detach the child to top level; dashed link → remove the reference' },
+  { keys: 'Drag a node', desc: 'Move it — the node then keeps that spot instead of following the layout' },
+  { keys: 'Drag from ＋', desc: 'Link to another node; drop on empty canvas to make a new child there' },
+  { keys: 'Click a link, Backspace', desc: 'Solid link → detach the child to top level; dashed link → remove the reference (on touch, tap the link)' },
   { keys: 'Drag / scroll / pinch', desc: 'Pan and zoom the map' },
 ];
 
 const RUNNING: Row[] = [
   { keys: 'Provider + key + Run', desc: 'Runs the graph through prompt-build-tool and shows each result under its node' },
-  { keys: '@Title', desc: 'Reference another (non-child) node — its output is included in this prompt (a dashed link appears)' },
+  { keys: '@Bullet', desc: 'Reference another (non-child) node — its output is included in this prompt (a dashed link appears)' },
   { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed" },
 ];
 
@@ -71,6 +79,7 @@ export function Help() {
                 ✕
               </button>
             </div>
+            <Section title="Switching view" rows={VIEW} />
             <Section title="Editing bullets" rows={EDITING} />
             <Section title="Mind map" rows={MAP} />
             <Section title="Running &amp; references" rows={RUNNING} />

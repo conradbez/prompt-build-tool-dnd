@@ -29,41 +29,96 @@ body,
 /* ------------------------------------------------------------------ layout */
 
 .app {
-  display: flex;
+  position: relative;
   height: 100%;
   width: 100%;
   overflow: hidden;
 }
 
-.app__left {
-  position: relative;
-  height: 100%;
-  min-width: 0;
+/* The view in front fills everything; the toolbar and the parked view float
+   above it. */
+.app__main {
+  position: absolute;
+  inset: 0;
+}
+
+.app__main--map {
   background: var(--panel);
 }
 
-.app__right {
-  height: 100%;
-  min-width: 0;
+.app__main--outline {
   background: var(--bg);
-  border-left: 1px solid var(--border);
 }
 
-.app__divider {
-  width: 8px;
-  flex: 0 0 8px;
-  cursor: col-resize;
+.app__corner {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.app__toggle {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--border);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-.app__divider-grip {
-  width: 2px;
-  height: 40px;
-  border-radius: 2px;
-  background: var(--muted);
+.app__toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The parked view: a real, live render of the other panel, scaled down. */
+.app__mini {
+  position: relative;
+  width: 240px;
+  height: 160px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+.app__mini--map {
+  background: var(--panel);
+}
+
+.app__mini--outline {
+  background: var(--bg);
+}
+
+.app__mini:hover,
+.app__mini:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* Rendered at full size and shrunk, so text and nodes keep their proportions.
+   Inert, so the click always reaches the wrapper above. */
+.app__mini-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 312.5%; /* 100 / 0.32 */
+  height: 312.5%;
+  transform: scale(0.32);
+  transform-origin: top left;
+  pointer-events: none;
 }
 
 /* ------------------------------------------------------------------ outline */
@@ -77,7 +132,11 @@ body,
   position: relative; /* the drop indicator is positioned against this */
   height: 100%;
   overflow-y: auto;
-  padding: 28px 28px 40vh 20px;
+  /* A reading column rather than the full width of the window: the outline is
+     now a full-screen view, and the top padding clears the floating toolbar. */
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 64px 24px 40vh;
 }
 
 /* --------------------------------------------------------- drag and drop */
@@ -715,15 +774,12 @@ body,
 
 /* -------------------------------------------------------------- touch tweaks */
 
-.app__divider {
-  touch-action: none; /* the divider drags, never scrolls */
-}
-
 /* Coarse pointers (touch): bigger hit targets, no reliance on hover. */
 @media (pointer: coarse) {
-  .app__divider {
-    width: 16px;
-    flex-basis: 16px;
+  .app__toggle {
+    width: 40px;
+    height: 40px;
+    font-size: 17px;
   }
   .ol-caret {
     width: 26px;

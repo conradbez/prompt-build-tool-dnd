@@ -11,6 +11,27 @@ export const NODE_WIDTH = 190;
 export const NODE_HEIGHT = 56;
 const H_GAP = 28; // horizontal gap between sibling subtrees
 const V_GAP = 44; // vertical gap between depth levels
+
+/** One column of the auto-layout: a node plus the gap after it. */
+export const SLOT_X = NODE_WIDTH + H_GAP;
+/** One row of the auto-layout. */
+export const SLOT_Y = NODE_HEIGHT + V_GAP;
+
+/**
+ * Grid a dragged node snaps to — half a slot each way. Half rather than whole
+ * so nodes can sit between columns, and half of the *slot* rather than of the
+ * node so the grid lines up with wherever the auto-layout would have put
+ * things: dragged and auto-placed nodes share one lattice.
+ */
+export const SNAP_GRID: [number, number] = [SLOT_X / 2, SLOT_Y / 2];
+
+/** Round a free position onto that grid. */
+export function snapToGrid(pos: { x: number; y: number }): { x: number; y: number } {
+  return {
+    x: Math.round(pos.x / SNAP_GRID[0]) * SNAP_GRID[0],
+    y: Math.round(pos.y / SNAP_GRID[1]) * SNAP_GRID[1],
+  };
+}
 const RESULT_HEIGHT = 168; // extra room a node needs when it shows a run result
 
 /**

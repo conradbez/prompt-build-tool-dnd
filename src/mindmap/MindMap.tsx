@@ -16,7 +16,7 @@ import '@xyflow/react/dist/style.css';
 
 import { actions, getState, useOutline, titleMap } from '../store';
 import { renderMarkdown } from '../lib/markdown';
-import { layout, NODE_WIDTH, NODE_HEIGHT } from './layout';
+import { layout, snapToGrid, NODE_WIDTH, NODE_HEIGHT, SNAP_GRID } from './layout';
 import { BulletNode, type BulletNodeData } from './BulletNode';
 
 const nodeTypes = { bullet: BulletNode };
@@ -198,7 +198,16 @@ export function MindMap() {
     if (!p) return;
     if (Math.hypot(p.clientX - from.x, p.clientY - from.y) < DRAG_SLOP) return; // a click, not a drag
     const id = actions.addChild(conn.fromNode.id);
-    if (id && conn.to) actions.setPos(id, { x: conn.to.x - NODE_WIDTH / 2, y: conn.to.y });
+    if (!id || !conn.to) return;
+    // Keep the x you dropped at, but take the y from the nodes it is joining,
+    // so a new child lines up with the children already sitting beside it
+    // rather than hanging wherever the pointer happened to be.
+    const parentId = conn.fromNode.id;
+    const siblingY = nodes
+      .filter((n) => n.id !== id && state.bullets[n.id]?.parentId === parentId)
+      .map((n) => n.position.y);
+    const y = siblingY.length ? Math.min(...siblingY) : conn.to.y;
+    actions.setPos(id, snapToGrid({ x: conn.to.x - NODE_WIDTH / 2, y }));
   };
 
   /** A dragged node stops following the auto-layout. */
@@ -267,6 +276,10 @@ export function MindMap() {
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
         proOptions={{ hideAttribution: true }}
+        // Dragged nodes land on the same lattice the auto-layout uses, so a
+        // hand-placed node still lines up with its neighbours.
+        snapToGrid
+        snapGrid={SNAP_GRID}
         // The one place a pointer device departs from React Flow's defaults:
         // click-to-connect would swallow the click on the `+` circle, and that
         // click is how you add a child node.

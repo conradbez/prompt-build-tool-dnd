@@ -49,20 +49,16 @@ export function Outline() {
   }, [state.focus]);
 
   /** Measure the visible rows, minus the subtree being dragged. */
-  function measure(exclude: string[]): { rects: RowRect[]; left: number } {
+  function measure(exclude: string[]): RowRect[] {
     const scroll = scrollRef.current;
-    const base = scroll?.getBoundingClientRect();
     const rects: RowRect[] = [];
-    let left = base ? base.x : 0;
     for (const { id, depth } of flatten(getState())) {
       const el = scroll?.querySelector(`[data-row="${id}"]`) as HTMLElement | null;
-      if (!el) continue;
+      if (!el || exclude.includes(id)) continue;
       const r = el.getBoundingClientRect();
-      if (depth === 0) left = r.x;
-      if (exclude.includes(id)) continue;
       rects.push({ id, depth, top: r.y, bottom: r.y + r.height });
     }
-    return { rects, left };
+    return rects;
   }
 
   function onDragStart(id: string, e: React.PointerEvent) {
@@ -90,9 +86,9 @@ export function Outline() {
     const moved = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
     if (!drag.active && moved < DRAG_SLOP) return;
     e.preventDefault();
-    const { rects, left } = measure(drag.subtree);
     const s = getState();
-    const target = computeDrop(rects, e.clientX, e.clientY, left, {
+    // Sideways movement is measured from where the drag began.
+    const target = computeDrop(measure(drag.subtree), e.clientX, e.clientY, drag.startX, {
       parentOf: (bid) => s.bullets[bid]?.parentId ?? null,
       childrenOf: (pid) => (pid ? (s.bullets[pid]?.children ?? []) : s.rootIds),
     });

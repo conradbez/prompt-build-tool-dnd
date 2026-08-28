@@ -6,6 +6,11 @@
  * edge is the nesting level**, so moving the pointer sideways during a drag
  * chooses the depth, exactly as `Tab`/`Shift+Tab` would afterwards.
  *
+ * The sideways reading is **relative to where the drag started**, not to the
+ * pointer's absolute x: a nudge of half an indent is one level, so you can
+ * change the nesting with a small wrist movement instead of dragging the
+ * pointer all the way to the target indent.
+ *
  * Pure functions only, so the rules are testable without a DOM.
  */
 
@@ -36,6 +41,10 @@ export interface Tree {
 /** Pixels of indent per nesting level — matches the row's `marginLeft`. */
 export const INDENT = 22;
 
+/** Sideways travel that shifts the drop one level. Half an indent: enough to
+ *  be deliberate, small enough to be a nudge. */
+export const SHIFT_STEP = INDENT / 2;
+
 /**
  * Work out the drop target for a pointer at (x, y).
  *
@@ -46,7 +55,8 @@ export function computeDrop(
   rows: RowRect[],
   pointerX: number,
   pointerY: number,
-  rowLeft: number,
+  /** Where the drag began — sideways movement is measured from here. */
+  originX: number,
   tree: Tree,
 ): DropTarget | null {
   if (rows.length === 0) return { parentId: null, index: 0, depth: 0, y: 0 };
@@ -63,8 +73,11 @@ export function computeDrop(
   // must stay reachable).
   const maxDepth = prev ? prev.depth + 1 : 0;
   const minDepth = next ? next.depth : 0;
-  const wanted = Math.round((pointerX - rowLeft) / INDENT);
-  const depth = Math.max(minDepth, Math.min(maxDepth, wanted));
+  // Without any sideways movement a bullet lands level with the row above;
+  // each nudge of `SHIFT_STEP` moves it one level in or out from there.
+  const base = prev ? prev.depth : 0;
+  const shift = Math.round((pointerX - originX) / SHIFT_STEP);
+  const depth = Math.max(minDepth, Math.min(maxDepth, base + shift));
 
   const y = prev ? prev.bottom : rows[0].top;
 
