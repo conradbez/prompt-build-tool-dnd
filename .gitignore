@@ -328,3 +328,4 @@ sketch
 # Local scratch notes. "todo files.md" carries live bucket credentials — it
 # must not be committed.
 todo *.md
+.pbt/pbt.db

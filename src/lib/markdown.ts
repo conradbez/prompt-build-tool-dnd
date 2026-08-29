@@ -4,7 +4,9 @@
  * Deliberately tiny and dependency-free. Everything is HTML-escaped first and
  * only the tags below are ever emitted, so the output is safe to drop in with
  * `dangerouslySetInnerHTML`: headings, bold, italic, strikethrough, inline and
- * fenced code, links (http/https/mailto/relative only), lists, blockquotes.
+ * fenced code, links (http/https/mailto/relative only), lists, blockquotes,
+ * and GFM pipe tables — models reach for a table the moment you ask them to
+ * score anything, so a run's output is full of them.
  */
 
 import { mentionLabel, type TitleMap } from './mentions';
@@ -38,6 +40,43 @@ function inline(s: string): string {
     );
 }
 
+/** A `| a | b |` row. */
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+/** The `|---|:--:|` rule under a header, which is what makes it a table. */
+const TABLE_RULE = /^\s*\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?\s*$/;
+
+function cells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((c) => c.trim());
+}
+
+/** Column alignments from the rule row: `:--` left, `--:` right, `:-:` centre. */
+function alignments(rule: string): string[] {
+  return cells(rule).map((c) => {
+    const left = c.startsWith(':');
+    const right = c.endsWith(':');
+    if (left && right) return ' style="text-align:center"';
+    if (right) return ' style="text-align:right"';
+    return '';
+  });
+}
+
+function table(header: string, rule: string, body: string[]): string {
+  const align = alignments(rule);
+  const cell = (tag: string, row: string[]) =>
+    row.map((c, i) => `<${tag}${align[i] ?? ''}>${inline(c)}</${tag}>`).join('');
+  const rows = body.map((r) => `<tr>${cell('td', cells(r))}</tr>`).join('');
+  // Wrapped: a table is regularly wider than the column it lands in, and the
+  // scrollbar has to belong to the table rather than to the page around it.
+  return (
+    `<div class="md-table"><table><thead><tr>${cell('th', cells(header))}</tr></thead>` +
+    `<tbody>${rows}</tbody></table></div>`
+  );
+}
+
 /** Turn already-escaped lines into block-level HTML. */
 function blocks(lines: string[]): string {
   const out: string[] = [];
@@ -54,7 +93,8 @@ function blocks(lines: string[]): string {
     para = null;
   };
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (/^\s*```/.test(line)) {
       if (fence) {
         out.push(`<pre><code>${fence.join('\n')}</code></pre>`);
@@ -68,6 +108,17 @@ function blocks(lines: string[]): string {
     }
     if (fence) {
       fence.push(line);
+      continue;
+    }
+
+    if (TABLE_ROW.test(line) && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1])) {
+      closeList();
+      closePara();
+      const body: string[] = [];
+      let j = i + 2;
+      while (j < lines.length && TABLE_ROW.test(lines[j])) body.push(lines[j++]);
+      out.push(table(line, lines[i + 1], body));
+      i = j - 1;
       continue;
     }
 
@@ -120,6 +171,27 @@ export function renderMarkdown(raw: string, titles: TitleMap): string {
   const held = raw.replace(tokenRe(), (_, id) => `${HOLD}${ids.push(id) - 1}${HOLD}`);
   const html = blocks(escapeHtml(held).split('\n'));
   return html.replace(new RegExp(`${HOLD}(\\d+)${HOLD}`, 'g'), (_, i) => {
+    const id = ids[Number(i)];
+    const full = titles[id] || 'Untitled';
+    return `<span class="md-mention" data-title="${escapeHtml(full)}">${escapeHtml(
+      mentionLabel(titles[id]),
+    )}</span>`;
+  });
+}
+
+/**
+ * Render *only* the inline marks — bold, italic, code, links, mentions.
+ *
+ * For the outline's one-line answer preview, where block structure is the
+ * enemy: a heading or a table crammed into a 20px box reads as a wall, but the
+ * emphasis a model puts on the actual answer is worth keeping. Whitespace is
+ * flattened first so a multi-paragraph reply arrives as one continuous phrase.
+ */
+export function renderInlineMarkdown(raw: string, titles: TitleMap): string {
+  const ids: string[] = [];
+  const held = raw.replace(tokenRe(), (_, id) => `${HOLD}${ids.push(id) - 1}${HOLD}`);
+  const flat = escapeHtml(held).replace(/\s+/g, ' ').trim();
+  return inline(flat).replace(new RegExp(`${HOLD}(\\d+)${HOLD}`, 'g'), (_, i) => {
     const id = ids[Number(i)];
     const full = titles[id] || 'Untitled';
     return `<span class="md-mention" data-title="${escapeHtml(full)}">${escapeHtml(

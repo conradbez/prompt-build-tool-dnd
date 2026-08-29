@@ -18,15 +18,24 @@ import pathlib
 import re
 from typing import Any, Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# Keys (providers, the S3 bucket, Modal) live in the repo-root `.env`. Loaded
+# before anything reads os.environ, and before `modal_exec` checks for tokens.
+load_dotenv(pathlib.Path(__file__).resolve().parent.parent / ".env")
+
 import pbt
 
 import files as attachments
+import modal_exec
 from llm import make_llm_call
+
+# Teach pbt about `model_type="python_modal"` once, at import.
+modal_exec.register()
 
 # The built frontend (repo-root `dist/`), if it was shipped alongside the
 # server. When present it is served at `/`, so one deployment hosts both the
@@ -56,6 +65,14 @@ class FileRef(BaseModel):
     name: str = ""
 
 
+class FileRequest(BaseModel):
+    """A request about one stored file, from the session that owns it."""
+
+    key: str
+    name: str = ""
+    sessionId: str = ""
+
+
 class Node(BaseModel):
     id: str
     # One markdown text field per bullet; `@` mentions arrive already expanded.
@@ -63,19 +80,25 @@ class Node(BaseModel):
     files: list[FileRef] = []
     parentId: Optional[str] = None
     refs: list[str] = []
-    # Template nodes are not sent to the LLM — see `_build_source` / `llm.py`.
-    template: bool = False
+    # "prompt" | "template" | "python" — see `_build_source`. Anything else is
+    # treated as a prompt rather than rejected: a bullet is not worth a 422.
+    kind: str = "prompt"
 
 
 class RunRequest(BaseModel):
     nodes: list[Node]
     provider: str = "gemini"
     apiKey: Optional[str] = None
+    # Files are namespaced per browser session; see `files.py`.
+    sessionId: str = ""
 
 
 class RunResponse(BaseModel):
     # Keyed by the bullet id the client sent, so the UI can map results back.
     outputs: dict[str, str] = {}
+    # The prompt each bullet was actually sent, same keys. The UI shows it
+    # beside the answer, so "why did it say that" has an answer on screen.
+    prompts: dict[str, str] = {}
     errors: list[str] = []
 
 
@@ -84,17 +107,45 @@ def _slug(node_id: str) -> str:
     return "n_" + re.sub(r"[^0-9a-zA-Z]", "_", node_id)
 
 
-def _build_source(node: Node, child_ids: list[str], id_to_slug: dict[str, str]) -> str:
+def _build_source(
+    node: Node, child_ids: list[str], id_to_slug: dict[str, str], session_id: str = ""
+) -> str:
     """Compose a bullet's pbt prompt.
 
-    Dependencies become `{{ ref('...') }}` lines prepended to the text so the
-    referenced outputs flow in. A node's **children are auto-included** — their
-    outputs feed up into the parent — plus any explicit `@` references. A child
-    is not duplicated if it is also referenced explicitly.
+    The bullet's own text comes **first**, then each dependency's output as a
+    `{{ ref('...') }}` line below it — so a bullet reads as its instruction
+    followed by the material that instruction is about, and "summarise what
+    follows" means what it says. A node's **children are auto-included** (their
+    outputs feed up into the parent) in child order, then any explicit `@`
+    references. A child is not duplicated if it is also referenced explicitly.
 
     A template node additionally gets a `{{ config(model_type="template") }}`
     line, which pbt parses into `model.config` and hands to `llm_call`, where
     it short-circuits into a passthrough instead of an LLM call.
+
+    A python node gets the `python_modal` config line instead, and its refs go
+    into a Jinja *comment* — see `_python_source`.
+    """
+    dep_ids = _deps(node, child_ids, id_to_slug)
+    dep_slugs = [id_to_slug[d] for d in dep_ids]
+    if node.kind == "python":
+        return _python_source(node, dep_slugs)
+
+    ref_lines = ["{{ ref('%s') }}" % slug for slug in dep_slugs]
+    prompt = node.text.strip()
+    source = "\n".join([prompt, *ref_lines]) if ref_lines else prompt
+    if node.kind == "template":
+        source = TEMPLATE_CONFIG_LINE + "\n" + source
+    keys = _node_file_keys(node, session_id)
+    if keys:
+        source = _promptfiles_line(keys) + "\n" + source
+    return source
+
+
+def _deps(node: Node, child_ids: list[str], id_to_slug: dict[str, str]) -> list[str]:
+    """What feeds this bullet, in the order it arrives: children, then `@` refs.
+
+    A child is not repeated if it is also referenced explicitly.
     """
     dep_ids: list[str] = []
     for c in child_ids:
@@ -103,25 +154,119 @@ def _build_source(node: Node, child_ids: list[str], id_to_slug: dict[str, str]) 
     for r in node.refs:
         if r in id_to_slug and r not in dep_ids:
             dep_ids.append(r)
-
-    ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids]
-    prompt = node.text.strip()
-    source = ("\n".join(ref_lines) + "\n" + prompt) if ref_lines else prompt
-    if node.template:
-        source = TEMPLATE_CONFIG_LINE + "\n" + source
-    keys = _node_file_keys(node)
-    if keys:
-        source = _promptfiles_line(keys) + "\n" + source
-    return source
+    return dep_ids
 
 
-def _node_file_keys(node: Node) -> list[str]:
+def _python_source(node: Node, dep_slugs: list[str]) -> str:
+    """A python bullet's source: its dependency, and nothing else.
+
+    A python bullet holds no code of its own — it runs what its one child
+    produced. So its own text never reaches the sandbox, and this source
+    carries only the two directives pbt needs.
+
+    The refs go inside a Jinja *comment* rather than on their own lines the way
+    a prompt bullet's do. `extract_dependencies` scans the raw source with a
+    regex, so the ordering and the parallelism still come out right, while the
+    comment renders to nothing — leaving no upstream text pasted into what is
+    about to be compiled as Python. The outputs reach the sandbox as `inputs`,
+    injected by `PythonModalExec` in dependency order (see `modal_exec.py`).
+
+    Attachments are deliberately not declared here: the sandbox is a different
+    machine and never sees them, so there is nothing to fetch from the bucket.
+    """
+    lines = [modal_exec.CONFIG_LINE]
+    if dep_slugs:
+        refs = " ".join("ref('%s')" % slug for slug in dep_slugs)
+        lines.append("{# inputs in order: %s #}" % refs)
+    return "\n".join(lines)
+
+
+def _runnable(nodes: list[Node]) -> list[Node]:
+    """The bullets worth running: everything except wholly empty subtrees.
+
+    An empty bullet is not necessarily a blank one — it is how you write "hand
+    my children's outputs upward", and dropping it used to cut the branch below
+    it out of the graph silently, since a child reaches the root only through
+    its parent. So a bullet is kept when it has text *or* anything beneath it
+    does; only a subtree that is empty all the way down is skipped.
+    """
+    by_id = {n.id: n for n in nodes}
+    children: dict[str, list[str]] = {n.id: [] for n in nodes}
+    for n in nodes:
+        if n.parentId in children:
+            children[n.parentId].append(n.id)
+
+    filled: set[str] = set()
+
+    def fills(node_id: str, seen: frozenset[str]) -> bool:
+        """True if this bullet or any descendant has text. Cycle-safe."""
+        if node_id in filled:
+            return True
+        if node_id in seen:  # a malformed parentId loop shouldn't hang the run
+            return False
+        below = seen | {node_id}
+        node = by_id[node_id]
+        # A python bullet's own text never runs, so it cannot be what makes a
+        # branch worth running — only the children it would execute can.
+        own = bool(node.text.strip()) and node.kind != "python"
+        if own or any(fills(c, below) for c in children[node_id]):
+            filled.add(node_id)
+            return True
+        return False
+
+    return [n for n in nodes if fills(n.id, frozenset())]
+
+
+def _overfull_python(nodes: list[Node]) -> list[str]:
+    """Ids of python bullets fed by more than one upstream bullet.
+
+    A python bullet's child output *is* its program, so a second input would
+    mean two scripts concatenated into one file. One child, one program. `@`
+    references count too — they reach the sandbox by the same route, and the
+    editor cannot produce one on a python bullet, so anything arriving here
+    with them came from elsewhere.
+    """
+    known = {n.id for n in nodes}
+    counts: dict[str, int] = {}
+    for n in nodes:
+        if n.parentId in known:
+            counts[n.parentId] = counts.get(n.parentId, 0) + 1
+    return [
+        n.id
+        for n in nodes
+        if n.kind == "python"
+        and counts.get(n.id, 0) + len([r for r in n.refs if r in known]) > 1
+    ]
+
+
+def _model_input(
+    node: Node, dep_ids: list[str], results: dict[str, str]
+) -> str:
+    """The prompt as the model received it, rebuilt from the run's outputs.
+
+    pbt renders `{{ ref('x') }}` into x's output, so the prompt a bullet was
+    actually sent is its own text followed by each dependency's result, in
+    dependency order — the same assembly `_build_source` describes. Rebuilt
+    here rather than fished out of pbt: `async_run` hands back outputs only,
+    and a cached node never re-renders, so there is nothing to fish.
+
+    A python bullet is the exception: its own text is not part of the program,
+    and what runs is the code extracted from its child.
+    """
+    parts = [results[d] for d in dep_ids if d in results]
+    if node.kind == "python":
+        return modal_exec._inherited_code(parts)
+    return "\n".join([node.text.strip(), *parts]) if parts else node.text.strip()
+
+
+def _node_file_keys(node: Node, session_id: str) -> list[str]:
     """The attachments this bullet may use — its own, and nothing else.
 
-    pbt's promptfiles are a flat namespace, so a bullet asking for a key that
-    doesn't sit under its own prefix is simply ignored rather than trusted.
+    Two gates: the key must sit under the *session* that sent the request, and
+    under *this bullet* within it. pbt's promptfiles are a flat namespace, so a
+    node naming someone else's key is ignored rather than trusted.
     """
-    return [f.key for f in node.files if attachments.belongs_to(f.key, node.id)]
+    return [f.key for f in node.files if attachments.belongs_to(f.key, session_id, node.id)]
 
 
 def _serialise(outputs: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
@@ -160,26 +305,57 @@ def files_enabled() -> dict:
     return {"enabled": attachments.enabled()}
 
 
+@app.get("/python/enabled")
+def python_enabled() -> dict:
+    """Whether Modal is configured — the UI hides `python` bullets if not."""
+    return {"enabled": modal_exec.enabled()}
+
+
 @app.post("/files")
-async def upload(bulletId: str = Form(...), file: UploadFile = File(...)) -> dict:
-    """Attach one file to one bullet."""
+async def upload(
+    sessionId: str = Form(...),
+    bulletId: str = Form(...),
+    file: UploadFile = File(...),
+) -> dict:
+    """Attach one file to one bullet, inside the caller's session."""
     if not attachments.enabled():
         return {"error": "File storage is not configured on this server."}
+    if not sessionId:
+        return {"error": "Missing session."}
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
         return {"error": f"That file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."}
     try:
-        return attachments.put(bulletId, file.filename or "file", data)
+        return attachments.put(sessionId, bulletId, file.filename or "file", data)
     except Exception as exc:  # noqa: BLE001 — surface storage errors to the UI
         return {"error": str(exc)}
 
 
-@app.post("/files/delete")
-def remove_file(ref: FileRef) -> dict:
+@app.post("/files/link")
+def link(req: FileRequest) -> dict:
+    """A short-lived download URL for one of *this session's* files.
+
+    The bytes travel from the bucket to the browser directly; the server only
+    signs, and only for keys under the session that asked.
+    """
     if not attachments.enabled():
         return {"error": "File storage is not configured on this server."}
+    if not attachments.in_session(req.key, req.sessionId):
+        return {"error": "That file does not belong to this session."}
     try:
-        attachments.delete(ref.key)
+        return {"url": attachments.presign(req.key, req.name), "expiresIn": attachments.LINK_TTL_SECONDS}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+@app.post("/files/delete")
+def remove_file(req: FileRequest) -> dict:
+    if not attachments.enabled():
+        return {"error": "File storage is not configured on this server."}
+    if not attachments.in_session(req.key, req.sessionId):
+        return {"error": "That file does not belong to this session."}
+    try:
+        attachments.delete(req.key)
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
@@ -190,10 +366,21 @@ async def run(req: RunRequest) -> RunResponse:
     if req.provider not in PROVIDERS:
         return RunResponse(errors=[f"Unsupported provider: {req.provider}"])
 
-    # Only run bullets that actually have content.
-    nodes = [n for n in req.nodes if n.text.strip()]
+    nodes = _runnable(req.nodes)
     if not nodes:
         return RunResponse(errors=["No non-empty bullets to run."])
+
+    # The editor keeps a python bullet to one child, but the editor is not the
+    # only thing that can post here.
+    crowded = _overfull_python(nodes)
+    if crowded:
+        plural = "one bullet has" if len(crowded) == 1 else f"{len(crowded)} bullets have"
+        return RunResponse(
+            errors=[
+                f"A python bullet runs the code from a single child, but "
+                f"{plural} more than one input."
+            ]
+        )
 
     id_to_slug = {n.id: _slug(n.id) for n in nodes}
     slug_to_id = {v: k for k, v in id_to_slug.items()}
@@ -204,14 +391,19 @@ async def run(req: RunRequest) -> RunResponse:
         if n.parentId in children:
             children[n.parentId].append(n.id)
 
-    models = {id_to_slug[n.id]: _build_source(n, children[n.id], id_to_slug) for n in nodes}
+    models = {
+        id_to_slug[n.id]: _build_source(n, children[n.id], id_to_slug, req.sessionId)
+        for n in nodes
+    }
 
     # Pull each bullet's attachments once, keyed the way the config declares
     # them, so pbt can route them to the model that asked.
     promptfiles: dict[str, Any] = {}
     try:
         for n in nodes:
-            for key in _node_file_keys(n):
+            if n.kind == "python":
+                continue  # the sandbox never sees attachments — don't fetch them
+            for key in _node_file_keys(n, req.sessionId):
                 if key not in promptfiles:
                     promptfiles[key] = attachments.get(key)
     except Exception as exc:  # noqa: BLE001 — a missing object shouldn't 500
@@ -230,7 +422,10 @@ async def run(req: RunRequest) -> RunResponse:
 
     results, errors = _serialise(outputs)
     by_id = {slug_to_id.get(name, name): value for name, value in results.items()}
-    return RunResponse(outputs=by_id, errors=errors)
+    prompts = {
+        n.id: _model_input(n, _deps(n, children[n.id], id_to_slug), by_id) for n in nodes
+    }
+    return RunResponse(outputs=by_id, prompts=prompts, errors=errors)
 
 
 # Serve the built frontend last, so `/run` and `/healthz` take precedence.

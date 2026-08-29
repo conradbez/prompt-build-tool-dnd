@@ -3,6 +3,8 @@ import { MindMap } from './mindmap/MindMap';
 import { Outline } from './outline/Outline';
 import { Toolbar } from './Toolbar';
 import { Help } from './Help';
+import { ResultModal } from './outline/ResultModal';
+import { useOutline } from './store';
 import { SWITCH_HINT } from './lib/shortcuts';
 
 type View = 'map' | 'outline';
@@ -35,6 +37,12 @@ function useCompact(): boolean {
  */
 export default function App() {
   const [full, setFull] = useState<View>('map');
+  const state = useOutline();
+  // The modal is rendered here, not inside a panel: it is opened from both the
+  // outline and the mind map, and the parked one of those is a live render
+  // that would otherwise put a second copy on screen.
+  const open = state.openResultId;
+  const openBullet = open ? state.bullets[open] : undefined;
   const compact = useCompact();
   const toggle = useCallback(() => setFull((v) => (v === 'map' ? 'outline' : 'map')), []);
 
@@ -89,6 +97,14 @@ export default function App() {
       </div>
 
       <Help />
+
+      {openBullet && state.results[openBullet.id] !== undefined && (
+        <ResultModal
+          bullet={openBullet}
+          prompt={state.prompts[openBullet.id]}
+          result={state.results[openBullet.id]}
+        />
+      )}
     </div>
   );
 }

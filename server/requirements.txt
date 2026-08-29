@@ -7,3 +7,5 @@ google-genai>=1.0
 openai>=1.40
 anthropic>=0.39
 boto3>=1.34
+modal>=1.0
+python-dotenv>=1.0

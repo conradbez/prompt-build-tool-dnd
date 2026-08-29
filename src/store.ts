@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { nanoid } from 'nanoid';
-import type { Bullet, FileRef, Focus, OutlineState, FlatBullet } from './types';
+import type { Bullet, BulletKind, FileRef, Focus, OutlineState, FlatBullet } from './types';
 import { mentionIds, mentionToken, resolveMentions, stripMention } from './lib/mentions';
 
 /**
@@ -18,14 +18,14 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     refs: [],
     files: [],
     pos: null,
-    template: false,
+    kind: 'prompt',
     ...partial,
   };
 }
 
-const DOC_KEY = 'wm.doc.v4';
+const DOC_KEY = 'wm.doc.v5';
 // Shapes this prototype has outgrown. They are wiped on load, not migrated.
-const STALE_KEYS = ['wm.doc.v1', 'wm.doc.v2', 'wm.doc.v3'];
+const STALE_KEYS = ['wm.doc.v1', 'wm.doc.v2', 'wm.doc.v3', 'wm.doc.v4'];
 
 function fresh(): { bullets: Record<string, Bullet>; rootIds: string[] } {
   const root = makeBullet({
@@ -74,13 +74,17 @@ function loadDoc(): { bullets: Record<string, Bullet>; rootIds: string[] } | nul
         refs: Array.isArray(raw.refs) ? (raw.refs as string[]) : [],
         files: Array.isArray(raw.files) ? (raw.files as FileRef[]) : [],
         pos: isPos(raw.pos) ? raw.pos : null,
-        template: !!raw.template,
+        kind: isKind(raw.kind) ? raw.kind : 'prompt',
       });
     }
     return { bullets, rootIds: d.rootIds.filter((id: string) => bullets[id]) };
   } catch {
     return null;
   }
+}
+
+function isKind(v: unknown): v is BulletKind {
+  return v === 'prompt' || v === 'template' || v === 'python';
 }
 
 function isPos(v: unknown): v is { x: number; y: number } {
@@ -103,8 +107,10 @@ function seed(): OutlineState {
     focus: { id: firstId, caret: 'end' },
     selectedId: firstId,
     results: {},
+    prompts: {},
     runErrors: [],
     running: false,
+    openResultId: null,
   };
 }
 
@@ -156,7 +162,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     files: b.files,
     parentId: b.parentId,
     refs: b.refs.filter((r) => s.bullets[r]),
-    template: b.template,
+    kind: b.kind,
   }));
 }
 
@@ -166,7 +172,12 @@ export function buildNodePayloads(s: OutlineState = state) {
  */
 export function titleMap(s: OutlineState = state): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const b of Object.values(s.bullets)) out[b.id] = firstLine(b.text);
+  for (const b of Object.values(s.bullets)) {
+    // A python bullet has no text to take a name from, but it is still a
+    // legitimate `@` target — the thing its script printed. Name it for what
+    // it is rather than letting mentions to it read "@Untitled".
+    out[b.id] = b.kind === 'python' ? 'Python' : firstLine(b.text);
+  }
   return out;
 }
 
@@ -174,6 +185,26 @@ export function titleMap(s: OutlineState = state): Record<string, string> {
 export function firstLine(text: string): string {
   const line = text.split('\n', 1)[0] ?? '';
   return line.replace(/^\s*(#{1,6}\s+|[-*+]\s+|>\s+)/, '').trim();
+}
+
+/**
+ * Whether `parentId` may take `movingId` as a child.
+ *
+ * A python bullet runs *one* program, and its child's output is that program.
+ * Two children would mean two scripts concatenated into one file, which is
+ * nobody's intent — so it holds exactly one child, and every path that could
+ * give it a second is turned away here rather than in six separate places.
+ * Passing `movingId` lets a bullet already sitting there be reordered.
+ */
+export function canTakeChild(
+  s: OutlineState,
+  parentId: string | null,
+  movingId?: string,
+): boolean {
+  if (!parentId) return true; // top level is unbounded
+  const parent = s.bullets[parentId];
+  if (!parent || parent.kind !== 'python') return true;
+  return parent.children.filter((c) => c !== movingId).length === 0;
 }
 
 /** The bullets a bullet mentions, read straight out of its text. */
@@ -249,12 +280,15 @@ export const actions = {
     emit(next);
   },
 
-  /** Flip a bullet between a prompt (sent to the LLM) and a template (not). */
-  toggleTemplate(id: string) {
+  /** Make a bullet a prompt, a template, or python — see `BulletKind`. */
+  setKind(id: string, kind: BulletKind) {
     const b = state.bullets[id];
-    if (!b) return;
+    if (!b || b.kind === kind) return;
     const next = clone(state);
-    next.bullets[id] = { ...b, template: !b.template };
+    // A python bullet runs its children's code and never its own text, so any
+    // text it is carrying is dead weight the moment it becomes one. Dropping
+    // it here is what keeps the row honest: what you see is what runs.
+    next.bullets[id] = kind === 'python' ? { ...b, kind, text: '', refs: [] } : { ...b, kind };
     emit(next);
   },
 
@@ -270,6 +304,7 @@ export const actions = {
       collectDescendants(state, id, desc);
       if (desc.includes(newParentId)) return; // can't drop inside itself
     }
+    if (!canTakeChild(state, newParentId, id)) return;
     const next = clone(state);
     const { list: oldList, index: oldIndex } = siblingsOf(next, id);
     const sameParent = b.parentId === newParentId;
@@ -356,6 +391,7 @@ export const actions = {
   addChild(parentId: string): string {
     const parent = state.bullets[parentId];
     if (!parent) return '';
+    if (!canTakeChild(state, parentId)) return '';
     const next = clone(state);
     const nb = makeBullet({ id: nanoid(), parentId });
     next.bullets[nb.id] = nb;
@@ -380,6 +416,7 @@ export const actions = {
     } else if (b.parentId) {
       const parent = next.bullets[b.parentId];
       const grandId = parent.parentId;
+      if (!canTakeChild(state, grandId, id)) return;
       setChildren(next, parent.id, parent.children.filter((x) => x !== id));
       const gList = grandId ? next.bullets[grandId].children : next.rootIds;
       const pIndex = gList.indexOf(parent.id);
@@ -408,6 +445,7 @@ export const actions = {
     } else if (b.parentId) {
       const parent = next.bullets[b.parentId];
       const grandId = parent.parentId;
+      if (!canTakeChild(state, grandId, id)) return;
       setChildren(next, parent.id, parent.children.filter((x) => x !== id));
       const gList = grandId ? next.bullets[grandId].children : next.rootIds;
       const pIndex = gList.indexOf(parent.id);
@@ -424,6 +462,7 @@ export const actions = {
 
   /** Create a new empty sibling directly after `id`; focus it. */
   addSiblingAfter(id: string): string {
+    if (!canTakeChild(state, state.bullets[id]?.parentId ?? null)) return '';
     const next = clone(state);
     const { list, index, parentId } = siblingsOf(next, id);
     const nb = makeBullet({ id: nanoid(), parentId });
@@ -441,6 +480,7 @@ export const actions = {
   indent(id: string) {
     const { list, index } = siblingsOf(state, id);
     if (index <= 0) return; // no previous sibling to nest under
+    if (!canTakeChild(state, list[index - 1])) return;
     const next = clone(state);
     const prevId = list[index - 1];
     const b = next.bullets[id];
@@ -507,8 +547,18 @@ export const actions = {
     emit({ ...state, running, ...(running ? { runErrors: [] } : {}) });
   },
 
-  setRunResult(outputs: Record<string, string>, errors: string[]) {
-    emit({ ...state, results: outputs, runErrors: errors, running: false });
+  /** Open (or close, with null) the answer modal for one bullet. */
+  openResult(id: string | null) {
+    if (state.openResultId === id) return;
+    emit({ ...state, openResultId: id });
+  },
+
+  setRunResult(
+    outputs: Record<string, string>,
+    errors: string[],
+    prompts: Record<string, string> = {},
+  ) {
+    emit({ ...state, results: outputs, prompts, runErrors: errors, running: false });
   },
 
   /** Reparent `id` under `newParentId` (used by mind-map / future drag ops). */
@@ -522,6 +572,7 @@ export const actions = {
       collectDescendants(state, id, desc);
       if (desc.includes(newParentId)) return;
     }
+    if (!canTakeChild(state, newParentId, id)) return;
     const next = clone(state);
     const { list } = siblingsOf(next, id);
     setChildren(next, b.parentId, list.filter((x) => x !== id));

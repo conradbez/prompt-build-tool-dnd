@@ -14,7 +14,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { actions, getState, useOutline, titleMap } from '../store';
+import { actions, canTakeChild, getState, useOutline, titleMap } from '../store';
 import { renderMarkdown } from '../lib/markdown';
 import { layout, snapToGrid, NODE_WIDTH, NODE_HEIGHT } from './layout';
 import { BulletNode, type BulletNodeData } from './BulletNode';
@@ -104,10 +104,11 @@ export function MindMap() {
       const data: BulletNodeData = {
         html: renderMarkdown(b.text, titles),
         hasChildren: b.children.length > 0,
+        canAddChild: canTakeChild(state, b.id),
         collapsed: b.collapsed,
-        template: b.template,
+        kind: b.kind,
         fileCount: b.files.length,
-        result: state.results[p.id],
+        hasResult: state.results[p.id] !== undefined,
       };
       return {
         id: p.id,

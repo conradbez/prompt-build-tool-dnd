@@ -11,7 +11,8 @@ export const PROVIDERS: { id: Provider; label: string }[] = [
   { id: 'anthropic', label: 'Anthropic' },
 ];
 
-import type { FileRef } from './types';
+import type { BulletKind, FileRef } from './types';
+import { getSessionId } from './lib/session';
 
 export interface NodePayload {
   id: string;
@@ -19,14 +20,16 @@ export interface NodePayload {
   text: string;
   parentId: string | null;
   refs: string[];
-  /** True for a template node: passed through instead of sent to the LLM. */
-  template: boolean;
+  /** Prompt, template, or python — decides how the server runs it. */
+  kind: BulletKind;
   /** Attachments, sent to the model along with this bullet's prompt. */
   files: FileRef[];
 }
 
 export interface RunResponse {
   outputs: Record<string, string>;
+  /** The prompt each bullet was actually sent, keyed the same way. */
+  prompts: Record<string, string>;
   errors: string[];
 }
 
@@ -67,6 +70,17 @@ export function getServerUrl(): string {
   return (saved || envUrl || fallback).replace(/\/+$/, '');
 }
 
+/** Whether the server can run `python` bullets (Modal configured). */
+export async function pythonEnabled(): Promise<boolean> {
+  try {
+    const res = await fetch(`${getServerUrl()}/python/enabled`);
+    if (!res.ok) return false;
+    return !!(await res.json()).enabled;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether the server has a bucket configured; uploads are hidden if not. */
 export async function filesEnabled(): Promise<boolean> {
   try {
@@ -81,6 +95,7 @@ export async function filesEnabled(): Promise<boolean> {
 /** Upload one file and get back the reference to store on the bullet. */
 export async function uploadFile(bulletId: string, file: File): Promise<FileRef> {
   const body = new FormData();
+  body.append('sessionId', getSessionId());
   body.append('bulletId', bulletId);
   body.append('file', file);
   const res = await fetch(`${getServerUrl()}/files`, { method: 'POST', body });
@@ -90,12 +105,28 @@ export async function uploadFile(bulletId: string, file: File): Promise<FileRef>
   return { key: data.key, name: data.name };
 }
 
+/**
+ * Ask for a short-lived download link. The server signs it only for keys
+ * belonging to this session, and the bytes then come straight from the bucket.
+ */
+export async function fileLink(file: FileRef): Promise<string> {
+  const res = await fetch(`${getServerUrl()}/files/link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...file, sessionId: getSessionId() }),
+  });
+  if (!res.ok) throw new Error(`Could not get a link: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.url as string;
+}
+
 /** Remove the stored object. Best-effort: the bullet drops it either way. */
 export async function deleteFile(key: string): Promise<void> {
   await fetch(`${getServerUrl()}/files/delete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key }),
+    body: JSON.stringify({ key, sessionId: getSessionId() }),
   }).catch(() => undefined);
 }
 
@@ -110,7 +141,12 @@ export async function runGraph(
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodes, provider, apiKey: apiKey || undefined }),
+        body: JSON.stringify({
+        nodes,
+        provider,
+        apiKey: apiKey || undefined,
+        sessionId: getSessionId(),
+      }),
     });
   } catch (err) {
     throw new Error(

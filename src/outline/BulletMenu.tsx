@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Bullet } from '../types';
-import { actions } from '../store';
-import { filesEnabled, uploadFile } from '../api';
+import { actions, canTakeChild, getState } from '../store';
+import { filesEnabled, pythonEnabled, uploadFile } from '../api';
 
 interface Props {
   bullet: Bullet;
@@ -16,16 +16,21 @@ interface Props {
 export function BulletMenu({ bullet }: Props) {
   const [open, setOpen] = useState(false);
   const [canUpload, setCanUpload] = useState(false);
+  const [canPython, setCanPython] = useState(false);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const picker = useRef<HTMLInputElement | null>(null);
   const { id } = bullet;
 
-  // Only offer attaching when the server actually has a bucket behind it.
+  // Attaching is hidden without a bucket — there is nowhere to put the bytes.
+  // `python` is only *annotated*, never hidden: this check fails on a stale or
+  // unreachable server too, and a silently missing menu item is a worse bug
+  // than a bullet that runs and reports what the server is missing.
   useEffect(() => {
     if (!open) return;
     let live = true;
     filesEnabled().then((yes) => live && setCanUpload(yes));
+    pythonEnabled().then((yes) => live && setCanPython(yes));
     return () => {
       live = false;
     };
@@ -111,25 +116,57 @@ export function BulletMenu({ bullet }: Props) {
               </button>
             </li>
           )}
-          <li>
-            <button role="menuitem" onClick={() => run(() => focusNew(actions.addChild(id)))}>
-              Add child
-            </button>
-          </li>
-          <li>
-            <button role="menuitem" onClick={() => run(() => focusNew(actions.addSiblingAfter(id)))}>
-              Add bullet below
-            </button>
-          </li>
-          <li>
-            <button
-              role="menuitem"
-              title="Template nodes are not sent to the LLM — their text, with refs filled in, is the output."
-              onClick={() => run(() => actions.toggleTemplate(id))}
-            >
-              {bullet.template ? 'Convert to prompt' : 'Convert to template'}
-            </button>
-          </li>
+          {canTakeChild(getState(), id) && (
+            <li>
+              <button role="menuitem" onClick={() => run(() => focusNew(actions.addChild(id)))}>
+                Add child
+              </button>
+            </li>
+          )}
+          {canTakeChild(getState(), bullet.parentId) && (
+            <li>
+              <button role="menuitem" onClick={() => run(() => focusNew(actions.addSiblingAfter(id)))}>
+                Add bullet below
+              </button>
+            </li>
+          )}
+          {bullet.kind !== 'prompt' && (
+            <li>
+              <button
+                role="menuitem"
+                title="An ordinary bullet: its text is sent to the LLM."
+                onClick={() => run(() => actions.setKind(id, 'prompt'))}
+              >
+                Convert to prompt
+              </button>
+            </li>
+          )}
+          {bullet.kind !== 'template' && (
+            <li>
+              <button
+                role="menuitem"
+                title="Template nodes are not sent to the LLM — their text, with refs filled in, is the output."
+                onClick={() => run(() => actions.setKind(id, 'template'))}
+              >
+                Convert to template
+              </button>
+            </li>
+          )}
+          {bullet.kind !== 'python' && (
+            <li>
+              <button
+                role="menuitem"
+                title={
+                  canPython
+                    ? 'Python nodes take no text of their own — they run the code their one child produced, in a Modal sandbox, and whatever it prints is the output.'
+                    : 'Python nodes run their child\u2019s code in a Modal sandbox, which this server has not reported as configured — running one will say what is missing.'
+                }
+                onClick={() => run(() => actions.setKind(id, 'python'))}
+              >
+                Convert to python{canPython ? '' : ' (server not ready)'}
+              </button>
+            </li>
+          )}
           <li>
             <button role="menuitem" onClick={() => run(() => actions.indent(id))}>
               Indent

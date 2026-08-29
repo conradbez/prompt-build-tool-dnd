@@ -32,7 +32,10 @@ const MAP: Row[] = [
 const RUNNING: Row[] = [
   { keys: 'Provider + key + Run', desc: 'Runs the graph through prompt-build-tool and shows each result under its node' },
   { keys: '@Bullet', desc: 'Reference another (non-child) node — its output is included in this prompt (a dashed link appears)' },
-  { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed" },
+  { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed. The bullet's own text comes first, then each child's output below it" },
+  { keys: 'An empty bullet', desc: 'Kept, not skipped, when anything below it has text — a blank bullet just hands its children\u2019s outputs upward' },
+  { keys: '••• → Convert to template', desc: 'TPL — not sent to the LLM: the text, with every reference filled in, is the output' },
+  { keys: '••• → Convert to python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output' },
 ];
 
 function Section({ title, rows }: { title: string; rows: Row[] }) {

@@ -36,9 +36,13 @@ export function Toolbar() {
     try {
       const nodes = buildNodePayloads(getState());
       const res = await runGraph(nodes, provider, apiKey);
-      actions.setRunResult(res.outputs || {}, res.errors || []);
+      actions.setRunResult(res.outputs || {}, res.errors || [], res.prompts || {});
     } catch (err) {
-      actions.setRunResult(getState().results, [err instanceof Error ? err.message : String(err)]);
+      actions.setRunResult(
+        getState().results,
+        [err instanceof Error ? err.message : String(err)],
+        getState().prompts,
+      );
     }
   };
 

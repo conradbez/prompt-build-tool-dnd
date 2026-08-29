@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import type { Bullet } from '../types';
+import { PYTHON_CAPTION, type Bullet } from '../types';
 import { actions, getState, titleMap } from '../store';
 import { register, getEditor } from './focusRegistry';
 import { BulletMenu } from './BulletMenu';
+import { KindChip } from '../mindmap/BulletNode';
 import {
   detectMention,
   applyMention,
@@ -12,8 +13,8 @@ import {
   mentionIds,
   type TitleMap,
 } from '../lib/mentions';
-import { renderMarkdown } from '../lib/markdown';
-import { deleteFile } from '../api';
+import { renderInlineMarkdown, renderMarkdown } from '../lib/markdown';
+import { deleteFile, fileLink } from '../api';
 import { INDENT } from './dragDrop';
 import { caretAtStart, caretOnFirstLine, caretOnLastLine } from '../lib/caret';
 
@@ -45,6 +46,10 @@ interface Props {
   dragging: boolean;
   /** Press on the bullet dot — the drag handle. */
   onDragStart: (id: string, e: React.PointerEvent) => void;
+  /** This bullet's latest run output, if it has one. */
+  result?: string;
+  /** Open the full answer in a modal — the one-line preview is only a handle. */
+  onExpand: (id: string) => void;
 }
 
 const MAX_MATCHES = 8;
@@ -54,7 +59,7 @@ const MAX_MATCHES = 8;
  * you edit the raw markdown; the moment it loses focus the text is rendered,
  * so the outline reads as formatted prose.
  */
-export function BulletRow({ bullet, depth, selected, dragging, onDragStart }: Props) {
+export function BulletRow({ bullet, depth, selected, dragging, onDragStart, result, onExpand }: Props) {
   const [ac, setAc] = useState<AutocompleteState | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   const { id } = bullet;
@@ -217,10 +222,14 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart }: Pr
 
   const hasChildren = bullet.children.length > 0;
   const hasMention = mentionIds(bullet.text).length > 0;
+  // A python bullet takes no typing — it runs what its children wrote. The
+  // editor still mounts (focus and arrow-key navigation run through it), it
+  // just refuses input and reads out what the bullet does instead.
+  const isPython = bullet.kind === 'python';
 
   return (
     <div
-      className={`ol-row ${bullet.template ? 'ol-row--template' : ''} ${dragging ? 'ol-row--dragging' : ''}`}
+      className={`ol-row ${bullet.kind !== 'prompt' ? `ol-row--${bullet.kind}` : ''} ${dragging ? 'ol-row--dragging' : ''}`}
       data-row={id}
       style={{ marginLeft: depth * INDENT }}
       onMouseMove={onMouseMove}
@@ -252,18 +261,16 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart }: Pr
 
       <div className="ol-fields">
         <div className={`ol-field-wrap ${hasMention ? 'ol-has-mention' : ''}`}>
-          {bullet.template && (
-            <span className="tpl-chip tpl-chip--outline" title="Not sent to the LLM — its text is its output">
-              TPL
-            </span>
-          )}
+          <KindChip kind={bullet.kind} className="tpl-chip--outline" />
 
           {editing ? (
             <>
               <Mirror raw={bullet.text} titles={titles} />
               <AutoTextarea
                 id={id}
-                value={display}
+                value={isPython ? '' : display}
+                readOnly={isPython}
+                placeholder={isPython ? PYTHON_CAPTION : 'Empty'}
                 onChange={onChange}
                 onKeyDown={onKeyDown}
                 onKeyUp={onKeyUp}
@@ -279,9 +286,25 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart }: Pr
             <ul className="ol-files">
               {bullet.files.map((f) => (
                 <li className="ol-file" key={f.key}>
-                  <span className="ol-file__name" title={f.name}>
+                  <button
+                    className="ol-file__name"
+                    title={`Download ${f.name}`}
+                    // The row hands clicks to the editor; this one is ours.
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={async () => {
+                      try {
+                        // Signed on demand and short-lived, so the link can't
+                        // be kept or shared for long.
+                        window.location.href = await fileLink(f);
+                      } catch (err) {
+                        actions.setRunResult({}, [
+                          err instanceof Error ? err.message : String(err),
+                        ]);
+                      }
+                    }}
+                  >
                     📎 {f.name}
-                  </span>
+                  </button>
                   <button
                     className="ol-file__x"
                     title="Remove this attachment"
@@ -299,13 +322,48 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart }: Pr
           )}
         </div>
       </div>
+
+      {/* The result column. Every row reserves it, whether or not there is an
+          answer yet, so the bullets keep a straight right edge and the column
+          does not appear and disappear as runs come in. */}
+      <div className="ol-result">
+        {result !== undefined && (
+          <>
+            {/* The answer *is* the control — clicking it opens the full text.
+                It hugs its content rather than filling the column, so the tint
+                that comes up on hover reads as a box around this one answer. */}
+            <button
+              type="button"
+              className="ol-result__text"
+              title={result}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => onExpand(id)}
+              // Inline marks only — the answer's own emphasis survives, its
+              // block structure does not, because none of it fits on one line.
+              dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(result, titles) }}
+            />
+            <button
+              className="ol-result__more"
+              title="Open the full answer"
+              aria-label="Open the full answer"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => onExpand(id)}
+            >
+              ⤢
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
 /** The read view: the bullet's markdown, rendered. Clicking starts editing. */
 function Rendered({ bullet, titles }: { bullet: Bullet; titles: TitleMap }) {
-  const html = renderMarkdown(bullet.text, titles);
+  const html =
+    bullet.kind === 'python'
+      ? `<p class="ol-md__empty">${PYTHON_CAPTION}</p>`
+      : renderMarkdown(bullet.text, titles);
   return (
     <div
       className="ol-md"
@@ -375,6 +433,10 @@ function Dropdown({ ac, onPick }: { ac: AutocompleteState; onPick: (m: Match) =>
 interface AutoProps {
   id: string;
   value: string;
+  /** Shown when the value is empty — a python bullet says what it does here. */
+  placeholder?: string;
+  /** Python bullets take no typing; the editor mounts only to carry focus. */
+  readOnly?: boolean;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onKeyUp: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -382,7 +444,7 @@ interface AutoProps {
 }
 
 /** Textarea that grows to fit its content and registers itself for focus. */
-function AutoTextarea({ id, value, ...handlers }: AutoProps) {
+function AutoTextarea({ id, value, placeholder = 'Empty', ...handlers }: AutoProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
   useLayoutEffect(() => {
@@ -402,7 +464,7 @@ function AutoTextarea({ id, value, ...handlers }: AutoProps) {
       rows={1}
       spellCheck={false}
       className="ol-text"
-      placeholder="Empty"
+      placeholder={placeholder}
       {...handlers}
     />
   );

@@ -131,6 +131,8 @@ export function Outline() {
             selected={state.selectedId === id}
             dragging={drag?.active === true && drag.subtree.includes(id)}
             onDragStart={onDragStart}
+            result={state.results[id]}
+            onExpand={actions.openResult}
           />
         ))}
 

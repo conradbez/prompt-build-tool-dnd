@@ -128,13 +128,27 @@ body,
   overflow: hidden;
 }
 
+/* Keep the answer column clear of the parked-view thumbnail, which is pinned
+   to the top-right of the window (240px wide + 12px of margin either side).
+   Without this the first few answers — the ones nearest the top, and the ones
+   you most want to read — run underneath it. Only the full-size outline needs
+   the room: the thumbnail cannot collide with itself, and below the compact
+   breakpoint it is a 30px button instead. */
+@media (min-width: 721px) {
+  .app__main--outline .ol-root {
+    padding-right: 264px;
+  }
+}
+
 .ol-scroll {
   position: relative; /* the drop indicator is positioned against this */
   height: 100%;
   overflow-y: auto;
-  /* A reading column rather than the full width of the window, now that the
-     outline is a full-screen view. */
-  max-width: 760px;
+  /* Wide enough for two columns: the bullets on the left and their answers on
+     the right. The bullets keep a reading measure of their own (see
+     `.ol-fields`), so widening this shifts them left rather than stretching
+     the text across the window. */
+  max-width: 1180px;
   margin: 0 auto;
   padding: 28px 24px 40vh;
 }
@@ -331,6 +345,282 @@ body,
   padding-bottom: 6px;
 }
 
+/* ------------------------------------------------- the answer column */
+
+/* One answer per row, on a single line, level with the bullet it belongs to.
+   The width is fixed rather than fluid so the column edge is straight all the
+   way down: every row shares the container's right edge, whatever its depth,
+   because the indent is a left margin. */
+.ol-result {
+  flex: 0 0 300px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* Match `.ol-gutter` so the answer sits on the bullet's first line rather
+     than floating against the top of a multi-line bullet. */
+  height: 20px;
+  min-width: 0;
+  padding-left: 16px;
+}
+
+/* The answer, and the button that opens it. `flex: 0 1 auto` makes it hug its
+   text and shrink only when the text is too long, so the hover tint draws a box
+   around *this* answer rather than washing the whole column. */
+.ol-result__text {
+  flex: 0 1 auto;
+  min-width: 0;
+  /* One line, clipped — the whole answer is a click away. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border: none;
+  background: transparent;
+  padding: 2px 6px;
+  margin: 0 -6px; /* the padding is for the tint; keep the text where it was */
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: #065f46;
+  transition: background-color 90ms ease-out;
+}
+
+/* The preview renders inline markdown; nothing inside it may start a new line
+   or claim vertical space, or the one-line box grows to fit it. */
+.ol-result__text * {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+.ol-result__text code {
+  font-size: 0.92em;
+}
+
+/* A paler wash than the map's result panel (#ecfdf5): this one sits on the page
+   itself with no border to contain it, so the same green would shout. */
+.ol-result__text:hover,
+.ol-result__text:focus-visible {
+  background: #f2fcf7;
+}
+
+/* Closing the modal hands focus back to the button that opened it, so this
+   ring is on screen often. The browser default is a loud blue on a green box;
+   this keeps the affordance and drops the clash. */
+.ol-result__text:focus-visible {
+  outline: 2px solid #a7f3d0;
+  outline-offset: 0;
+}
+
+/* The bullet that produced it, marked while its answer is hovered — the pair
+   is easy to lose across the gap between the two columns. Grey rather than a
+   second green: the tint on the answer is the accent, and echoing it on the
+   input would leave nothing to distinguish the two. `:has` reads the hover
+   backwards, from the answer to the text that fed it. */
+.ol-row:has(.ol-result__text:hover) .ol-md,
+.ol-row:has(.ol-result__text:hover) .ol-text,
+.ol-row:has(.ol-result__text:focus-visible) .ol-md,
+.ol-row:has(.ol-result__text:focus-visible) .ol-text {
+  color: #7b8794;
+}
+
+.ol-result__more {
+  flex: 0 0 auto;
+  margin-left: auto; /* pinned right, so the column has one straight edge */
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  opacity: 0;
+}
+
+/* Same manners as the gutter menu: the slot is always laid out, only the glyph
+   fades in, so revealing it never nudges the text beside it. */
+.ol-row:hover .ol-result__more,
+.ol-result__more:focus-visible {
+  opacity: 1;
+}
+
+.ol-result__more:hover {
+  background: #e4e7eb;
+  color: var(--text);
+}
+
+/* ------------------------------------------------------- answer modal */
+
+.res-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 32, 0.45);
+}
+
+.res-modal__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1200px, 100%);
+  max-height: 100%;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.res-modal__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.res-modal__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.res-modal__close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.res-modal__close:hover {
+  color: var(--text);
+}
+
+/* Your text | Model input | Model response. Equal thirds, each scrolling on
+   its own so a long answer never drags the other two columns down with it. */
+.res-modal__cols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: 0;
+  overflow: hidden;
+}
+
+.res-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+}
+
+.res-col:first-child {
+  border-left: none;
+}
+
+.res-col__head {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.res-col__body {
+  overflow: auto;
+  padding: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  /* The prompt column is often long lines of prose the model was handed; let
+     them wrap rather than pushing a horizontal scrollbar onto the column. */
+  overflow-wrap: anywhere;
+}
+
+/* The editable column. Styled to sit flush with the rendered ones beside it,
+   so the modal reads as three views of one thing rather than a form bolted to
+   two panes. */
+.res-col__edit {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 14px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.res-col__edit:focus {
+  background: #fcfcfd;
+}
+
+.res-col__empty {
+  margin: 0;
+  padding: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* --------------------------------------------------------------- tables */
+
+/* Rendered markdown tables, wherever they appear. They are wider than their
+   column more often than not, so each one scrolls inside its own wrapper
+   rather than stretching the layout around it. */
+.md-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.md-table table {
+  border-collapse: collapse;
+  /* Size to the content and let the wrapper scroll. Capping the table itself
+     at 100% instead would squeeze every column until the text broke one
+     character per line. */
+  width: max-content;
+  font-size: 12px;
+  /* The prose around it breaks anywhere to avoid a scrollbar; a table has a
+     scrollbar of its own, so its cells break on words like normal text. */
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.md-table th,
+.md-table td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+  /* Wide enough that a sentence in a cell wraps rather than running the table
+     off to the right forever. */
+  max-width: 260px;
+}
+
+.md-table th {
+  background: var(--panel);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .ol-field-wrap {
   position: relative;
 }
@@ -473,6 +763,17 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ol-file__name:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .ol-file__x {
@@ -626,19 +927,43 @@ body,
   z-index: 2;
 }
 
+/* Python bullets hold code, not prose — say so in the chip's colour. */
+.tpl-chip--python {
+  color: #2d5f8a;
+  background: #d8ecfb;
+}
+
 .ol-row--template .ol-text,
-.ol-row--template .ol-md {
+.ol-row--template .ol-md,
+.ol-row--python .ol-text,
+.ol-row--python .ol-md {
   padding-right: 38px;
   color: #3e4c59;
 }
 
-.mm-node--template {
+/* Code reads badly in the body font, so the row and the node both switch. */
+.ol-row--python .ol-text,
+.ol-row--python .ol-md,
+.mm-node--python .mm-node__md {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.mm-node--template,
+.mm-node--python {
   border-style: dashed;
   border-color: #cbd2d9;
   background: #f5f7fa;
 }
 
-.mm-node--template .mm-node__md {
+.mm-node--python {
+  border-color: #a9cbe6;
+  background: #f2f8fd;
+}
+
+.mm-node--template .mm-node__md,
+.mm-node--python .mm-node__md {
   color: #3e4c59;
 }
 
@@ -739,18 +1064,26 @@ body,
 
 
 
-.mm-node__result {
+/* "success" — a tag, not the answer. Small enough that a node keeps its size
+   whether or not it has run, so a finished graph still reads as a graph. */
+.mm-node__ok {
   margin-top: 7px;
-  padding: 7px 8px;
-  border-radius: 8px;
-  background: #ecfdf5;
+  padding: 2px 7px;
+  border-radius: 999px;
   border: 1px solid #a7f3d0;
+  background: #ecfdf5;
   color: #065f46;
-  font-size: 12.5px;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  max-height: 150px;
-  overflow-y: auto;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.mm-node__ok:hover {
+  background: #d6f7e6;
+  border-color: #6ee7b7;
 }
 
 /* ------------------------------------------------------------------ toolbar */
