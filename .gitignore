@@ -329,3 +329,4 @@ sketch
 # must not be committed.
 todo *.md
 .pbt/pbt.db
+.pbt/pbt.db

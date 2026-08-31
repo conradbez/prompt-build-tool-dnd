@@ -3,6 +3,7 @@ import { PROVIDERS, runGraph, type Provider } from './api';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
 
 const PROVIDER_STORAGE = 'wm.provider';
+const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
 const keyStorage = (p: Provider) => `wm.apiKey.${p}`;
 
 function loadProvider(): Provider {
@@ -19,6 +20,17 @@ export function Toolbar() {
   const state = useOutline();
   const [provider, setProvider] = useState<Provider>(loadProvider);
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem(keyStorage(loadProvider())) || '');
+  // Settings: one instruction the server prepends to every LLM call in a run.
+  // Remembered here, sent with each run — the server keeps no state.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [globalInstruction, setGlobalInstruction] = useState<string>(
+    () => localStorage.getItem(GLOBAL_INSTRUCTION_STORAGE) || '',
+  );
+
+  const onInstructionChange = (v: string) => {
+    setGlobalInstruction(v);
+    localStorage.setItem(GLOBAL_INSTRUCTION_STORAGE, v);
+  };
 
   const onProviderChange = (p: Provider) => {
     setProvider(p);
@@ -35,7 +47,7 @@ export function Toolbar() {
     actions.setRunning(true);
     try {
       const nodes = buildNodePayloads(getState());
-      const res = await runGraph(nodes, provider, apiKey);
+      const res = await runGraph(nodes, provider, apiKey, globalInstruction);
       actions.setRunResult(res.outputs || {}, res.errors || [], res.prompts || {});
     } catch (err) {
       actions.setRunResult(
@@ -72,7 +84,38 @@ export function Toolbar() {
         <button className="tb__run" onClick={run} disabled={state.running}>
           {state.running ? 'Running…' : 'Run'}
         </button>
+        <button
+          className={`tb__gear${settingsOpen ? ' tb__gear--on' : ''}${
+            globalInstruction.trim() ? ' tb__gear--set' : ''
+          }`}
+          onClick={() => setSettingsOpen((v) => !v)}
+          title="Settings"
+          aria-label="Settings"
+          aria-expanded={settingsOpen}
+        >
+          ⚙
+        </button>
       </div>
+
+      {settingsOpen && (
+        <div className="tb__settings">
+          <label className="tb__label" htmlFor="tb-global-instruction">
+            Global instruction prepended to every LLM call
+          </label>
+          <textarea
+            id="tb-global-instruction"
+            className="tb__textarea"
+            value={globalInstruction}
+            onChange={(e) => onInstructionChange(e.target.value)}
+            placeholder="e.g. Answer in British English, and keep it under 200 words."
+            rows={4}
+            spellCheck={false}
+          />
+          <div className="tb__hint">
+            Template and python bullets are left alone — only prompts get it.
+          </div>
+        </div>
+      )}
 
       {state.runErrors.length > 0 && (
         <div className="tb__errors">

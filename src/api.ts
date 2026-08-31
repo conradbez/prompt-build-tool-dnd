@@ -134,6 +134,8 @@ export async function runGraph(
   nodes: NodePayload[],
   provider: Provider,
   apiKey: string | undefined,
+  /** Settings → prepended to every LLM call the run makes. */
+  globalInstruction?: string,
 ): Promise<RunResponse> {
   const url = `${getServerUrl()}/run`;
   let res: Response;
@@ -146,6 +148,7 @@ export async function runGraph(
         provider,
         apiKey: apiKey || undefined,
         sessionId: getSessionId(),
+        globalInstruction: globalInstruction || '',
       }),
     });
   } catch (err) {

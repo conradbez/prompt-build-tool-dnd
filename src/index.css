@@ -1169,6 +1169,73 @@ body,
   word-break: break-word;
 }
 
+.tb__gear {
+  height: 30px;
+  width: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tb__gear--on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Filled in when an instruction is set, so a closed panel still says so. */
+.tb__gear--set {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.tb__settings {
+  margin-top: 6px;
+  padding: 10px;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.tb__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.tb__textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  resize: vertical;
+  outline: none;
+}
+
+.tb__textarea:focus {
+  border-color: var(--accent);
+}
+
+.tb__hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #6b7280;
+}
+
 /* -------------------------------------------------------------- touch tweaks */
 
 /* Coarse pointers (touch): bigger hit targets, no reliance on hover. */
@@ -1204,8 +1271,12 @@ body,
   }
   .tb__select,
   .tb__key,
-  .tb__run {
+  .tb__run,
+  .tb__gear {
     height: 40px;
+  }
+  .tb__gear {
+    width: 40px;
   }
   .tb__run {
     padding: 0 20px;

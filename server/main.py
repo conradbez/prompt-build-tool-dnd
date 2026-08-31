@@ -50,7 +50,10 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 # pbt has no model_type semantics of its own: it parses this directive into
 # `model.config` and passes it to `llm_call(config=...)`, which is where the
 # passthrough happens (see `llm.py`). Prepended to a template node's source.
-TEMPLATE_CONFIG_LINE = '{{ config(model_type="template") }}'
+# `global_instruction=False` because a template bullet is a passthrough: its
+# rendered prompt *is* its output, so a prepended instruction would show up as
+# text in the result instead of steering a model.
+TEMPLATE_CONFIG_LINE = '{{ config(model_type="template", global_instruction=False) }}'
 
 # Attachments reach the model the same way: pbt parses the declared names out
 # of the config block and hands the matching files to `llm_call(files=...)`.
@@ -91,6 +94,9 @@ class RunRequest(BaseModel):
     apiKey: Optional[str] = None
     # Files are namespaced per browser session; see `files.py`.
     sessionId: str = ""
+    # Settings → "global instruction": prompt text pbt renders into every
+    # bullet's prompt (templates and python bullets opt out). Empty means none.
+    globalInstruction: str = ""
 
 
 class RunResponse(BaseModel):
@@ -240,7 +246,7 @@ def _overfull_python(nodes: list[Node]) -> list[str]:
 
 
 def _model_input(
-    node: Node, dep_ids: list[str], results: dict[str, str]
+    node: Node, dep_ids: list[str], results: dict[str, str], global_instruction: str = ""
 ) -> str:
     """The prompt as the model received it, rebuilt from the run's outputs.
 
@@ -252,11 +258,20 @@ def _model_input(
 
     A python bullet is the exception: its own text is not part of the program,
     and what runs is the code extracted from its child.
+
+    The global instruction sits on top, the way pbt prepends it — but only for
+    the bullets that receive one, i.e. prompts. Templates and python bullets
+    opt out, so showing it there would be a lie about what ran. (pbt treats an
+    instruction containing `{{ prompt }}` as a wrapper instead; this rebuild
+    shows the plain prepend, which is what the settings box invites.)
     """
     parts = [results[d] for d in dep_ids if d in results]
     if node.kind == "python":
         return modal_exec._inherited_code(parts)
-    return "\n".join([node.text.strip(), *parts]) if parts else node.text.strip()
+    body = "\n".join([node.text.strip(), *parts]) if parts else node.text.strip()
+    if global_instruction and node.kind != "template":
+        return global_instruction.rstrip("\n") + "\n\n" + body
+    return body
 
 
 def _node_file_keys(node: Node, session_id: str) -> list[str]:
@@ -366,6 +381,8 @@ async def run(req: RunRequest) -> RunResponse:
     if req.provider not in PROVIDERS:
         return RunResponse(errors=[f"Unsupported provider: {req.provider}"])
 
+    global_instruction = req.globalInstruction.strip()
+
     nodes = _runnable(req.nodes)
     if not nodes:
         return RunResponse(errors=["No non-empty bullets to run."])
@@ -415,6 +432,7 @@ async def run(req: RunRequest) -> RunResponse:
             models_from_dict=models,
             llm_call=llm,
             promptfiles=promptfiles or None,
+            global_instruction=global_instruction or None,
             verbose=False,
         )
     except Exception as exc:  # noqa: BLE001 — surface any failure to the client
@@ -423,7 +441,8 @@ async def run(req: RunRequest) -> RunResponse:
     results, errors = _serialise(outputs)
     by_id = {slug_to_id.get(name, name): value for name, value in results.items()}
     prompts = {
-        n.id: _model_input(n, _deps(n, children[n.id], id_to_slug), by_id) for n in nodes
+        n.id: _model_input(n, _deps(n, children[n.id], id_to_slug), by_id, global_instruction)
+        for n in nodes
     }
     return RunResponse(outputs=by_id, prompts=prompts, errors=errors)
 
