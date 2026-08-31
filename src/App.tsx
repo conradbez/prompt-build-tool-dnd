@@ -98,7 +98,7 @@ export default function App() {
 
       <Help />
 
-      {openBullet && state.results[openBullet.id] !== undefined && (
+      {openBullet && (
         <ResultModal
           bullet={openBullet}
           prompt={state.prompts[openBullet.id]}

@@ -200,7 +200,12 @@ class PythonModalExec(ExecutePythonModelHandler):
         promptdata: dict | None,
         prompt_skipped_models: set[str],
         skip_downstream_models: set[str],
+        # Accepted to match pbt's signature and ignored: a python bullet's
+        # prompt is source code, so prose prepended to it would not compile.
+        # `accepts_global_instruction` is False on the base class anyway, so
+        # pbt already passes None here.
         validators: dict | None = None,
+        global_instruction: str | None = None,
     ):
         from pbt.executor.executor import ModelRunResult
 

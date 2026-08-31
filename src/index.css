@@ -475,6 +475,19 @@ body,
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
 }
 
+/* A one-column modal (settings) has no reason to be 1200px wide. */
+.res-modal__panel--narrow {
+  width: min(560px, 100%);
+}
+
+/* One column, filling the panel: the three-way split is the answer modal's
+   layout, not this one's. A lone textarea would also collapse to a single
+   line, hence the writing-sized height. */
+.res-modal__panel--narrow .res-modal__cols {
+  grid-template-columns: minmax(0, 1fr);
+  height: min(300px, 50vh);
+}
+
 .res-modal__head {
   display: flex;
   align-items: center;
@@ -571,6 +584,15 @@ body,
 
 .res-col__edit:focus {
   background: #fcfcfd;
+}
+
+.res-col__note {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .res-col__empty {
@@ -1193,48 +1215,6 @@ body,
   color: #fff;
 }
 
-.tb__settings {
-  margin-top: 6px;
-  padding: 10px;
-  width: 340px;
-  max-width: calc(100vw - 32px);
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(4px);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.tb__label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #374151;
-}
-
-.tb__textarea {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 6px 8px;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.4;
-  resize: vertical;
-  outline: none;
-}
-
-.tb__textarea:focus {
-  border-color: var(--accent);
-}
-
-.tb__hint {
-  margin-top: 6px;
-  font-size: 11px;
-  color: #6b7280;
-}
 
 /* -------------------------------------------------------------- touch tweaks */
 

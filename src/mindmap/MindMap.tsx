@@ -223,8 +223,13 @@ export function MindMap() {
     actions.setPos(node.id, snapToGrid(node.position));
   };
 
+  // A node has no editor of its own on the canvas, so a click opens the bullet
+  // — the same modal its `success` tag opens, which is where its text is
+  // edited and its answer read. Focus follows, so the outline agrees about
+  // which bullet is current.
   const onNodeClick: NodeMouseHandler = (_, node) => {
     actions.setFocus({ id: node.id, caret: 'end' });
+    actions.openResult(node.id);
   };
 
   // Deleting a parent→child link makes the child a top-level node; deleting a

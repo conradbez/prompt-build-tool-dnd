@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { PROVIDERS, runGraph, type Provider } from './api';
+import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
 
 const PROVIDER_STORAGE = 'wm.provider';
@@ -98,23 +99,11 @@ export function Toolbar() {
       </div>
 
       {settingsOpen && (
-        <div className="tb__settings">
-          <label className="tb__label" htmlFor="tb-global-instruction">
-            Global instruction prepended to every LLM call
-          </label>
-          <textarea
-            id="tb-global-instruction"
-            className="tb__textarea"
-            value={globalInstruction}
-            onChange={(e) => onInstructionChange(e.target.value)}
-            placeholder="e.g. Answer in British English, and keep it under 200 words."
-            rows={4}
-            spellCheck={false}
-          />
-          <div className="tb__hint">
-            Template and python bullets are left alone — only prompts get it.
-          </div>
-        </div>
+        <SettingsModal
+          value={globalInstruction}
+          onChange={onInstructionChange}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
 
       {state.runErrors.length > 0 && (

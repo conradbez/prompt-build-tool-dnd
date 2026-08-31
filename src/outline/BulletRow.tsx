@@ -247,15 +247,21 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
           {bullet.collapsed ? '▸' : '▾'}
         </button>
         {/* The dot doubles as the drag handle, as in Workflowy: press and move
-            to drag the bullet (and its subtree), click to focus it. */}
+            to drag the bullet (and its subtree), click to open it — the same
+            modal its answer opens. The text stays editable in the row, so
+            opening a bullet is a deliberate click on the dot, not a side
+            effect of clicking where you meant to type. */}
         <button
           className={`ol-dot ${selected ? 'ol-dot--selected' : hasChildren && bullet.collapsed ? 'ol-dot--full' : ''}`}
           onPointerDown={(e) => {
             if (e.button === 0 || e.pointerType !== 'mouse') onDragStart(id, e);
           }}
-          onClick={() => actions.setFocus({ id, caret: 'end' })}
+          onClick={() => {
+            actions.select(id);
+            onExpand(id);
+          }}
           tabIndex={-1}
-          aria-label="Focus bullet, or drag to move it"
+          aria-label="Open bullet, or drag to move it"
         />
       </div>
 

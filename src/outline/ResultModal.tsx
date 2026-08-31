@@ -8,12 +8,15 @@ interface Props {
   bullet: Bullet;
   /** What the bullet was actually sent: its own text plus its inputs. */
   prompt: string | undefined;
-  result: string;
+  /** Undefined until this bullet has run — the modal opens either way. */
+  result: string | undefined;
 }
 
 /**
  * One bullet's run, in three columns: what you wrote, what the model was
- * actually sent, and what came back.
+ * actually sent, and what came back. It is also how a bullet is opened at all
+ * — clicking a node on the map or a bullet's dot in the outline opens this,
+ * run or not, so the two right-hand columns are empty until there is a run.
  *
  * The middle column is the point of the thing. A bullet's prompt is not what
  * you typed — its children's answers are appended below it before it goes out —
@@ -68,7 +71,12 @@ export function ResultModal({ bullet, prompt, result }: Props) {
             titles={titles}
             empty="Not recorded — run this bullet again to capture it."
           />
-          <Column heading="Model response" body={result} titles={titles} />
+          <Column
+            heading="Model response"
+            body={result}
+            titles={titles}
+            empty="Not run yet — press Run to fill this in."
+          />
         </div>
       </div>
     </div>
