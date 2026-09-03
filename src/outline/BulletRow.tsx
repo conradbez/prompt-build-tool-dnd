@@ -269,24 +269,28 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
         <div className={`ol-field-wrap ${hasMention ? 'ol-has-mention' : ''}`}>
           <KindChip kind={bullet.kind} className="tpl-chip--outline" />
 
-          {editing ? (
-            <>
-              <Mirror raw={bullet.text} titles={titles} />
-              <AutoTextarea
-                id={id}
-                value={isPython ? '' : display}
-                readOnly={isPython}
-                placeholder={isPython ? PYTHON_CAPTION : 'Empty'}
-                onChange={onChange}
-                onKeyDown={onKeyDown}
-                onKeyUp={onKeyUp}
-                onFocus={() => actions.select(id)}
-              />
-              {ac && <Dropdown ac={ac} onPick={accept} />}
-            </>
-          ) : (
+          {/* Read view and editor are stacked in one grid cell and *both*
+              stay mounted, one of them merely hidden. Swapping one for the
+              other made the row's height jump the moment you clicked into it
+              — raw markdown and its rendered form are never quite the same
+              box — and every row below it moved. Stacked, the cell is as tall
+              as the taller of the two whatever has focus, so the outline
+              holds still. */}
+          <div className={`ol-view ${editing ? 'ol-view--editing' : ''}`}>
             <Rendered bullet={bullet} titles={titles} />
-          )}
+            {editing && <Mirror raw={bullet.text} titles={titles} />}
+            <AutoTextarea
+              id={id}
+              value={isPython ? '' : display}
+              readOnly={isPython}
+              placeholder={isPython ? PYTHON_CAPTION : 'Empty'}
+              onChange={onChange}
+              onKeyDown={onKeyDown}
+              onKeyUp={onKeyUp}
+              onFocus={() => actions.select(id)}
+            />
+            {editing && ac && <Dropdown ac={ac} onPick={accept} />}
+          </div>
 
           {bullet.files.length > 0 && (
             <ul className="ol-files">

@@ -647,7 +647,38 @@ body,
   position: relative;
 }
 
+/* The read view and the editor occupy the *same* grid cell, and both stay in
+   the layout — only one of them is visible. Rendered markdown and the raw
+   markdown behind it are never exactly the same height (headings and code set
+   their own type, block margins have no counterpart in a textarea, and the
+   syntax characters can push a line over into a second one), so swapping one
+   for the other on focus resized the row and shoved every row below it. Now
+   the cell is always as tall as the taller of the pair, and clicking into a
+   bullet moves nothing. */
+.ol-view {
+  position: relative;
+  display: grid;
+  align-items: start;
+}
+
+.ol-view > .ol-md,
+.ol-view > .ol-text {
+  grid-area: 1 / 1;
+}
+
+/* `visibility` rather than `display`: the hidden half must keep its box — that
+   box is what holds the row's height steady — while staying untouchable and
+   out of the tab order. */
+.ol-view--editing > .ol-md,
+.ol-view:not(.ol-view--editing) > .ol-text {
+  visibility: hidden;
+}
+
 .ol-text {
+  /* A textarea is inline-block by default, which parks it on a text baseline
+     and leaves a few pixels of descender space under it that the rendered
+     `div` beside it never had — the row grew by that much on every focus. */
+  display: block;
   width: 100%;
   border: none;
   outline: none;
