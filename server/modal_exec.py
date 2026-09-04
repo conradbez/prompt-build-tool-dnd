@@ -1,22 +1,20 @@
 """
 A ``python`` bullet type: run the bullet's code in a Modal Sandbox.
 
-``template`` needs no model type of its own — pbt hands the config to
-``llm_call`` and `llm.py` short-circuits there. Python cannot work that way:
-``llm_call`` only sees the rendered text, not the upstream outputs, and the
-code has to run somewhere that is not this process. So this registers a real
-pbt model handler instead.
+``template`` needs no model type of its own — pbt ships one. Python cannot be
+had that cheaply: the code has to run somewhere that is not this process, and
+pbt's built-in ``execute_python`` runs it in-process. So this registers a model
+type of its own.
 
 A python bullet holds no code a person typed. It runs what its one child
 produced — an LLM writes a script, the bullet above it executes that script —
 so the only thing that ever reaches the sandbox came from upstream.
 
-The registry pbt actually consults is the private ``_MODEL_CLASS_MAP`` in
-``pbt.executor.graph`` — there is no public registration function, and
-``models_from_dict`` reads the same map, so writing to it is enough. Subclassing
-``ExecutePythonModelHandler`` keeps this a "python model" in pbt's eyes; the
-whole of ``execute_node`` is replaced because the base class runs ``exec()``
-in-process, which is precisely what we are avoiding.
+pbt 0.2 exposes a public model-type registry, so this is a plain
+``pbt.BaseModelType`` registered under ``python_modal``. The executor owns
+rendering, the prompt cache, JSON parsing and storage; the strategy below only
+supplies the interesting middle — hand the upstream output to a sandbox and
+return what it printed.
 
 Auth is Modal's usual environment: ``MODAL_TOKEN_ID`` / ``MODAL_TOKEN_SECRET``
 (or a ``modal token new`` profile on the box). Nothing is read from the browser
@@ -29,16 +27,9 @@ import asyncio
 import json
 import os
 import re
-import time
-from typing import Any, Callable
+from typing import Any
 
-from pbt.executor.graph import _MODEL_CLASS_MAP
-from pbt.executor.model_constructs import (
-    ExecutePythonModelHandler,
-    _files_hash,
-    _parse_json_output,
-)
-from pbt.executor.parser_model import render_prompt
+import pbt
 
 MODEL_TYPE = "python_modal"
 
@@ -178,7 +169,7 @@ def _run_sandbox(code: str) -> str:
     return result[:MAX_OUTPUT_CHARS]
 
 
-class PythonModalExec(ExecutePythonModelHandler):
+class PythonModalExec(pbt.BaseModelType):
     """Run the code this bullet's child produced, in a Modal Sandbox (gVisor).
 
     The bullet carries no code of its own — it is an operator, not an editor.
@@ -187,84 +178,28 @@ class PythonModalExec(ExecutePythonModelHandler):
     output, which flows on downstream.
     """
 
-    model_type: str = MODEL_TYPE  # type: ignore[assignment]
+    # The rendered template is Python source, so prose prepended to it would
+    # not compile.
+    accepts_global_instruction = False
 
-    async def execute_node(
-        self,
-        model_outputs: dict,
-        model_files: list | None,
-        storage_backend,
-        run_id: str,
-        llm_call: Callable,
-        rag_call: Callable | None,
-        promptdata: dict | None,
-        prompt_skipped_models: set[str],
-        skip_downstream_models: set[str],
-        # Accepted to match pbt's signature and ignored: a python bullet's
-        # prompt is source code, so prose prepended to it would not compile.
-        # `accepts_global_instruction` is False on the base class anyway, so
-        # pbt already passes None here.
-        validators: dict | None = None,
-        global_instruction: str | None = None,
-    ):
-        from pbt.executor.executor import ModelRunResult
+    async def execute(self, spec, ctx):
+        rendered, state = ctx.render(spec)
+        inputs = [ctx.outputs.get(dep) for dep in spec.depends_on]
 
-        rendered, skip_state = render_prompt(
-            self.source,
-            model_outputs,
-            promptdata=promptdata,
-            rag_call=rag_call,
-            prompt_skipped_models=prompt_skipped_models,
-            model_name=self.name,
+        # A python bullet's own source renders to nothing (its refs live in a
+        # Jinja comment — see `main.py:_python_source`), so the upstream
+        # outputs *are* the program and have to be in the cache key. They are
+        # appended to the text handed to `ctx.cached`, which is only ever used
+        # to build that key; the prompt shown in the run report was already
+        # recorded by `ctx.render` above.
+        cache_text = rendered + "\x00" + json.dumps(inputs, sort_keys=True, default=str)
+
+        return await ctx.cached(
+            cache_text, spec, state, compute=lambda: self._run(inputs)
         )
 
-        inputs = [model_outputs.get(dep) for dep in self.depends_on]
-        cache_key = "\x00".join(
-            [
-                rendered,
-                json.dumps(self.config, sort_keys=True),
-                _files_hash(model_files),
-                # The upstream outputs are part of the program, so they belong
-                # in the key even though they are not part of `rendered`.
-                json.dumps(inputs, sort_keys=True, default=str),
-            ]
-        )
-
-        if skip_state.skip_value is not None:
-            prompt_skipped_models.add(self.name)
-            if skip_state.skip_downstream:
-                skip_downstream_models.add(self.name)
-            model_outputs[self.name] = skip_state.skip_value
-            storage_backend.mark_model_success(
-                run_id, self.name, rendered, skip_state.skip_value, cache_key=cache_key
-            )
-            return ModelRunResult(
-                model_name=self.name,
-                status="success",
-                prompt_rendered=rendered,
-                llm_output=skip_state.skip_value,
-                execution_ms=0,
-                cached=False,
-                prompt_skipped=True,
-            )
-
-        output_format = self.config.get("output_format", "text")
-
-        cached = storage_backend.get_cached_llm_output(cache_key)
-        if cached is not None:
-            model_outputs[self.name] = (
-                _parse_json_output(cached) if output_format == "json" else cached
-            )
-            return ModelRunResult(
-                model_name=self.name,
-                status="success",
-                prompt_rendered=rendered,
-                llm_output=cached,
-                execution_ms=0,
-                cached=True,
-                prompt_skipped=False,
-            )
-
+    @staticmethod
+    async def _run(inputs: list[Any]) -> str:
         if not enabled():
             raise RuntimeError(
                 "Python bullets run on Modal, which is not configured on this "
@@ -278,35 +213,12 @@ class PythonModalExec(ExecutePythonModelHandler):
                 "one received nothing to run. Give it a child that outputs a "
                 "script."
             )
-        code = _program(inputs, source)
 
-        t0 = time.monotonic()
         # Modal's client is blocking, and pbt runs independent branches
         # concurrently — keep one sandbox from stalling the others.
-        output = await asyncio.to_thread(_run_sandbox, code)
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-
-        if output_format == "json":
-            parsed = _parse_json_output(output)
-            model_outputs[self.name] = parsed
-            output = json.dumps(parsed)
-        else:
-            model_outputs[self.name] = output
-
-        storage_backend.mark_model_success(
-            run_id, self.name, rendered, output, cache_key=cache_key
-        )
-        return ModelRunResult(
-            model_name=self.name,
-            status="success",
-            prompt_rendered=rendered,
-            llm_output=output,
-            execution_ms=elapsed_ms,
-            cached=False,
-            prompt_skipped=False,
-        )
+        return await asyncio.to_thread(_run_sandbox, _program(inputs, source))
 
 
 def register() -> None:
     """Teach pbt about `model_type="python_modal"`. Idempotent."""
-    _MODEL_CLASS_MAP[MODEL_TYPE] = PythonModalExec
+    pbt.register_model_type(MODEL_TYPE, PythonModalExec)

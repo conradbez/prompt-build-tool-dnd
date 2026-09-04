@@ -294,7 +294,11 @@ def _serialise(outputs: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
         elif isinstance(value, pbt.ModelStatus):
             errors.append(f"{name}: {value.value}")
         else:
-            results[name] = value if isinstance(value, str) else str(value)
+            text = value if isinstance(value, str) else str(value)
+            # Stripped because a template bullet's output is its own rendered
+            # source, and the injected `{{ config(...) }}` line renders to an
+            # empty first line.
+            results[name] = text.strip()
     return results, errors
 
 
