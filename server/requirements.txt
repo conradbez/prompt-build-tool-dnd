@@ -2,7 +2,7 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2
 python-multipart>=0.0.9
-prompt-build-tool>=0.3.0
+prompt-build-tool @ git+https://github.com/conradbez/prompt-build-tool@3f765807aba950c5c9cd830f8a399fed4f0a7f05
 google-genai>=1.0
 openai>=1.40
 anthropic>=0.39
