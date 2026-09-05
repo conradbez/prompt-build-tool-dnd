@@ -16,6 +16,7 @@ import '@xyflow/react/dist/style.css';
 
 import { actions, canTakeChild, getState, useOutline, titleMap } from '../store';
 import { renderMarkdown } from '../lib/markdown';
+import { usePromptVarMap } from '../lib/promptdata';
 import { layout, snapToGrid, NODE_WIDTH, NODE_HEIGHT } from './layout';
 import { BulletNode, type BulletNodeData } from './BulletNode';
 
@@ -100,13 +101,15 @@ export function MindMap() {
     [],
   );
 
+  const vars = usePromptVarMap();
+
   const computedNodes = useMemo<Node[]>(() => {
     const placed = layout(state);
     const titles = titleMap(state);
     return placed.map((p) => {
       const b = state.bullets[p.id];
       const data: BulletNodeData = {
-        html: renderMarkdown(b.text, titles),
+        html: renderMarkdown(b.text, titles, vars),
         hasChildren: b.children.length > 0,
         canAddChild: canTakeChild(state, b.id),
         collapsed: b.collapsed,
@@ -125,7 +128,7 @@ export function MindMap() {
         height: NODE_HEIGHT,
       };
     });
-  }, [state]);
+  }, [state, vars]);
 
   /**
    * React Flow needs somewhere to put a node's position *while* it is being

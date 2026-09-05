@@ -13,6 +13,7 @@ bullet graph as JSON and returns each bullet's result after flowing through
 {
   "provider": "anthropic",          // gemini | openai | anthropic
   "apiKey": "sk-...",               // optional; falls back to server env var
+  "promptdata": { "tone": "formal" },  // optional; run variables, see below
   "nodes": [
     { "id": "a", "text": "# Topic\nPick a topic", "refs": [] },
     { "id": "b", "text": "# Tweet\nWrite a tweet about it", "refs": ["a"] }
@@ -47,6 +48,32 @@ bullet is how you write "hand my children's outputs upward", and a child
 reaches the root only through its parent, so dropping it would cut off the
 whole branch. Only a subtree that is empty all the way down is skipped.
 
+## Run variables (`promptdata`)
+
+`promptdata` is a flat name → value map for the whole run — the settings table
+in the UI is one row per entry. A bullet uses one by writing `@name`, and the
+server rewrites each `@name` it recognises into `{{ promptdata("name") }}`
+before pbt renders it, so the value arrives through pbt's own mechanism rather
+than by string-splicing on the way in.
+
+Only **known** names are rewritten. An `@word` matching no variable is left
+exactly as typed — it is prose, not a broken reference — and a name that is not
+`[A-Za-z0-9_]+` is dropped from the map rather than written into a template.
+The `@` must also start a word, so an email address in a prompt is safe.
+
+Variables work in the **global instruction** too, and are the only variable that
+can: pbt refuses `ref()` there (it would make every model depend on one) and
+points at `promptdata` instead.
+
+The `prompts` in the response show variables **filled in**, not as the Jinja
+call they compiled to — that column answers "what did the model actually see".
+
+One ambiguity is left standing, since both features share the `@`: an `@`
+mention arrives here already expanded to the target's title (`@[[id]]` →
+`@Some bullet`), so a bullet whose title *begins* with a variable's name — a
+variable `tone` and a bullet called "tone of voice" — has that first word
+substituted. Rename one of the two; the "Model input" column shows it happening.
+
 ## Bullet kinds
 
 Each node carries a `kind`, which decides what running it does:
@@ -61,7 +88,7 @@ Each node carries a `kind`, which decides what running it does:
 `model.config` and hands it to `llm_call`, where `llm.py` short-circuits into a
 passthrough. `python` cannot work that way — `llm_call` never sees the upstream
 outputs, and the code must not run in this process — so `modal_exec.py`
-registers a real pbt model handler for `model_type="python_modal"`.
+registers a pbt model kind for `model_type="python_modal"`.
 
 A python bullet **holds no code of its own** — it is an operator, not an
 editor. Its child's output *is* the program. So one bullet asks an LLM for a

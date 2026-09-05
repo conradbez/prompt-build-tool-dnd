@@ -10,11 +10,11 @@ A python bullet holds no code a person typed. It runs what its one child
 produced — an LLM writes a script, the bullet above it executes that script —
 so the only thing that ever reaches the sandbox came from upstream.
 
-pbt 0.2 exposes a public model-type registry, so this is a plain
-``pbt.BaseModelType`` registered under ``python_modal``. The executor owns
-rendering, the prompt cache, JSON parsing and storage; the strategy below only
-supplies the interesting middle — hand the upstream output to a sandbox and
-return what it printed.
+pbt exposes a public model-kind registry, so this is a plain
+``pbt.ModelKind`` registered under ``python_modal``. The executor owns
+rendering, the prompt cache, JSON parsing and storage; the exec function below
+only supplies the interesting middle — hand the upstream output to a sandbox
+and return what it printed.
 
 Auth is Modal's usual environment: ``MODAL_TOKEN_ID`` / ``MODAL_TOKEN_SECRET``
 (or a ``modal token new`` profile on the box). Nothing is read from the browser
@@ -169,7 +169,32 @@ def _run_sandbox(code: str) -> str:
     return result[:MAX_OUTPUT_CHARS]
 
 
-class PythonModalExec(pbt.BaseModelType):
+async def _run(inputs: list[Any]) -> str:
+    if not enabled():
+        raise RuntimeError(
+            "Python bullets run on Modal, which is not configured on this "
+            "server. Set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET."
+        )
+
+    source = _inherited_code(inputs)
+    if not source.strip():
+        raise RuntimeError(
+            "A python bullet runs the code its child produces, and this "
+            "one received nothing to run. Give it a child that outputs a "
+            "script."
+        )
+
+    # Modal's client is blocking, and pbt runs independent branches
+    # concurrently — keep one sandbox from stalling the others.
+    return await asyncio.to_thread(_run_sandbox, _program(inputs, source))
+
+
+# Registered on import: the decorator runs when this module body executes, so
+# importing `modal_exec` is what teaches pbt the kind. The rendered template is
+# Python source, so prose prepended to it would not compile — hence
+# `accepts_global_instruction=False`.
+@pbt.model_kind(MODEL_TYPE, accepts_global_instruction=False)
+async def execute(rendered: str, call: pbt.ModelCall) -> str:
     """Run the code this bullet's child produced, in a Modal Sandbox (gVisor).
 
     The bullet carries no code of its own — it is an operator, not an editor.
@@ -177,48 +202,14 @@ class PythonModalExec(pbt.BaseModelType):
     ``inputs`` (a list, or ``ref(0)``). Whatever it prints is the bullet's
     output, which flows on downstream.
     """
+    inputs = [call.outputs.get(dep) for dep in call.spec.depends_on]
 
-    # The rendered template is Python source, so prose prepended to it would
-    # not compile.
-    accepts_global_instruction = False
+    # A python bullet's own source renders to nothing (its refs live in a
+    # Jinja comment — see `main.py:_python_source`), so the upstream outputs
+    # *are* the program and have to be in the cache key. They are appended to
+    # the text handed to `call.compute`, which is only ever used to build that
+    # key; the prompt shown in the run report was recorded when the executor
+    # rendered.
+    cache_text = rendered + "\x00" + json.dumps(inputs, sort_keys=True, default=str)
 
-    async def execute(self, spec, ctx):
-        rendered, state = ctx.render(spec)
-        inputs = [ctx.outputs.get(dep) for dep in spec.depends_on]
-
-        # A python bullet's own source renders to nothing (its refs live in a
-        # Jinja comment — see `main.py:_python_source`), so the upstream
-        # outputs *are* the program and have to be in the cache key. They are
-        # appended to the text handed to `ctx.cached`, which is only ever used
-        # to build that key; the prompt shown in the run report was already
-        # recorded by `ctx.render` above.
-        cache_text = rendered + "\x00" + json.dumps(inputs, sort_keys=True, default=str)
-
-        return await ctx.cached(
-            cache_text, spec, state, compute=lambda: self._run(inputs)
-        )
-
-    @staticmethod
-    async def _run(inputs: list[Any]) -> str:
-        if not enabled():
-            raise RuntimeError(
-                "Python bullets run on Modal, which is not configured on this "
-                "server. Set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET."
-            )
-
-        source = _inherited_code(inputs)
-        if not source.strip():
-            raise RuntimeError(
-                "A python bullet runs the code its child produces, and this "
-                "one received nothing to run. Give it a child that outputs a "
-                "script."
-            )
-
-        # Modal's client is blocking, and pbt runs independent branches
-        # concurrently — keep one sandbox from stalling the others.
-        return await asyncio.to_thread(_run_sandbox, _program(inputs, source))
-
-
-def register() -> None:
-    """Teach pbt about `model_type="python_modal"`. Idempotent."""
-    pbt.register_model_type(MODEL_TYPE, PythonModalExec)
+    return await call.compute(cache_text, compute=lambda: _run(inputs))

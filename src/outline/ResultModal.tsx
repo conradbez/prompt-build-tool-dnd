@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { renderMarkdown } from '../lib/markdown';
 import { displayToRaw, toDisplay } from '../lib/mentions';
+import { usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
 import { actions, firstLine, getState, titleMap } from '../store';
 import { PYTHON_CAPTION, type Bullet } from '../types';
 
@@ -39,6 +40,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
   });
 
   const titles = titleMap(getState());
+  const vars = usePromptVarMap();
   const title = firstLine(bullet.text) || (bullet.kind === 'python' ? 'Python' : 'Untitled');
 
   return (
@@ -69,12 +71,14 @@ export function ResultModal({ bullet, prompt, result }: Props) {
             heading="Model input"
             body={prompt}
             titles={titles}
+            vars={vars}
             empty="Not recorded — run this bullet again to capture it."
           />
           <Column
             heading="Model response"
             body={result}
             titles={titles}
+            vars={vars}
             empty="Not run yet — press Run to fill this in."
           />
         </div>
@@ -120,11 +124,13 @@ function Column({
   heading,
   body,
   titles,
+  vars,
   empty = 'Empty',
 }: {
   heading: string;
   body: string | undefined;
   titles: Record<string, string>;
+  vars: PromptVarMap;
   empty?: string;
 }) {
   const text = (body ?? '').trim();
@@ -134,7 +140,7 @@ function Column({
       {text ? (
         <div
           className="res-col__body"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(text, titles) }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(text, titles, vars) }}
         />
       ) : (
         <p className="res-col__empty">{empty}</p>

@@ -12,6 +12,8 @@
  * keyboard handler work on ordinary-looking text.
  */
 
+import { varRefRe, type PromptVarMap } from './promptdata';
+
 /** How many characters of the target's title a mention shows. */
 export const MENTION_LABEL_CHARS = 10;
 
@@ -49,19 +51,40 @@ export interface Segment {
   text: string;
   /** Set when this segment is a mention — the id it points at. */
   id?: string;
+  /** Set when this segment is a run variable — the promptdata name it reads. */
+  name?: string;
 }
 
-/** Split raw text into plain runs and mention runs, for coloured rendering. */
-export function toSegments(raw: string, titles: TitleMap): Segment[] {
+/**
+ * Split raw text into plain runs, mention runs and variable runs, for coloured
+ * rendering. `vars` is the set of variables that currently exist: an `@word`
+ * naming none of them is ordinary text, not a broken variable.
+ */
+export function toSegments(raw: string, titles: TitleMap, vars: PromptVarMap = {}): Segment[] {
   const out: Segment[] = [];
   let last = 0;
   for (const m of raw.matchAll(tokenRe())) {
     const at = m.index ?? 0;
-    if (at > last) out.push({ text: raw.slice(last, at) });
+    if (at > last) out.push(...splitVars(raw.slice(last, at), vars));
     out.push({ text: mentionLabel(titles[m[1]]), id: m[1] });
     last = at + m[0].length;
   }
-  if (last < raw.length) out.push({ text: raw.slice(last) });
+  if (last < raw.length) out.push(...splitVars(raw.slice(last), vars));
+  return out;
+}
+
+/** The variable pass over one plain run, between mentions. */
+function splitVars(text: string, vars: PromptVarMap): Segment[] {
+  const out: Segment[] = [];
+  let last = 0;
+  for (const m of text.matchAll(varRefRe())) {
+    if (!(m[1] in vars)) continue;
+    const at = m.index ?? 0;
+    if (at > last) out.push({ text: text.slice(last, at) });
+    out.push({ text: m[0], name: m[1] });
+    last = at + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last) });
   return out;
 }
 
@@ -138,14 +161,46 @@ export function applyMention(
   target: { id: string; title: string },
   titles: TitleMap,
 ): { raw: string; display: string; caret: number } {
+  return insertAtMention(
+    display,
+    oldRaw,
+    mentionStart,
+    caret,
+    mentionLabel(target.title),
+    mentionToken(target.id),
+    titles,
+  );
+}
+
+/**
+ * Accept a run variable: the same replacement, except that a variable is
+ * written as it reads — `@name` in both forms, since there is no id to hide.
+ */
+export function applyVar(
+  display: string,
+  oldRaw: string,
+  mentionStart: number,
+  caret: number,
+  name: string,
+  titles: TitleMap,
+): { raw: string; display: string; caret: number } {
+  return insertAtMention(display, oldRaw, mentionStart, caret, '@' + name, '@' + name, titles);
+}
+
+/** Swap the active `@query` for `label` on screen and `token` in the store. */
+function insertAtMention(
+  display: string,
+  oldRaw: string,
+  mentionStart: number,
+  caret: number,
+  label: string,
+  token: string,
+  titles: TitleMap,
+): { raw: string; display: string; caret: number } {
   const before = display.slice(0, mentionStart);
   const after = display.slice(caret);
-  const label = mentionLabel(target.title);
   // The trailing space is part of both forms, so display and raw stay in step.
-  const raw = displayToRaw(before + SENTINEL + ' ' + after, oldRaw, titles).replace(
-    SENTINEL,
-    mentionToken(target.id),
-  );
+  const raw = displayToRaw(before + SENTINEL + ' ' + after, oldRaw, titles).replace(SENTINEL, token);
   return {
     raw,
     display: before + label + ' ' + after,

@@ -31,11 +31,8 @@ load_dotenv(pathlib.Path(__file__).resolve().parent.parent / ".env")
 import pbt
 
 import files as attachments
-import modal_exec
+import modal_exec  # registers `model_type="python_modal"` with pbt on import
 from llm import make_llm_call
-
-# Teach pbt about `model_type="python_modal"` once, at import.
-modal_exec.register()
 
 # The built frontend (repo-root `dist/`), if it was shipped alongside the
 # server. When present it is served at `/`, so one deployment hosts both the
@@ -59,6 +56,45 @@ TEMPLATE_CONFIG_LINE = '{{ config(model_type="template", global_instruction=Fals
 # of the config block and hands the matching files to `llm_call(files=...)`.
 def _promptfiles_line(keys: list[str]) -> str:
     return "{{ config(promptfiles='%s') }}" % json.dumps(keys)
+
+
+# A run variable, written in a bullet as `@name`. The `@` has to start a word —
+# the same rule the editor's autocomplete uses — so an email address in a prompt
+# is not mistaken for one.
+_VAR_REF = re.compile(r"(?<![^\s([{])@([A-Za-z0-9_]+)")
+# What a variable may be called. Anything else is dropped rather than written
+# into a template, since the name goes straight into a Jinja call.
+_VAR_NAME = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _clean_promptdata(promptdata: dict[str, str]) -> dict[str, str]:
+    """The variables worth passing on: usable names, values as strings."""
+    return {k: str(v) for k, v in promptdata.items() if _VAR_NAME.match(k)}
+
+
+def _as_promptdata(text: str, names: set[str]) -> str:
+    """Rewrite each `@name` that names a known variable into pbt's own call.
+
+    Only known names are rewritten: an `@word` matching no variable is text the
+    person wrote, and it goes to the model as they wrote it.
+    """
+    if not names:
+        return text
+    return _VAR_REF.sub(
+        lambda m: '{{ promptdata("%s") }}' % m.group(1) if m.group(1) in names else m.group(0),
+        text,
+    )
+
+
+def _fill_vars(text: str, promptdata: dict[str, str]) -> str:
+    """The same rewrite, but substituting the values — for showing a person
+    what a bullet was actually sent, where a Jinja call would say nothing."""
+    if not promptdata:
+        return text
+    return _VAR_REF.sub(
+        lambda m: promptdata.get(m.group(1), m.group(0)),
+        text,
+    )
 
 
 class FileRef(BaseModel):
@@ -97,6 +133,9 @@ class RunRequest(BaseModel):
     # Settings → "global instruction": prompt text pbt renders into every
     # bullet's prompt (templates and python bullets opt out). Empty means none.
     globalInstruction: str = ""
+    # Settings → run variables, name → value. A bullet writes `@name`; pbt is
+    # handed the map and renders `{{ promptdata("name") }}` from it.
+    promptdata: dict[str, str] = {}
 
 
 class RunResponse(BaseModel):
@@ -114,7 +153,11 @@ def _slug(node_id: str) -> str:
 
 
 def _build_source(
-    node: Node, child_ids: list[str], id_to_slug: dict[str, str], session_id: str = ""
+    node: Node,
+    child_ids: list[str],
+    id_to_slug: dict[str, str],
+    session_id: str = "",
+    var_names: set[str] | None = None,
 ) -> str:
     """Compose a bullet's pbt prompt.
 
@@ -131,6 +174,9 @@ def _build_source(
 
     A python node gets the `python_modal` config line instead, and its refs go
     into a Jinja *comment* — see `_python_source`.
+
+    Any `@name` naming a run variable becomes `{{ promptdata("name") }}` on the
+    way through, which is how the values reach the prompt (see `_as_promptdata`).
     """
     dep_ids = _deps(node, child_ids, id_to_slug)
     dep_slugs = [id_to_slug[d] for d in dep_ids]
@@ -138,7 +184,7 @@ def _build_source(
         return _python_source(node, dep_slugs)
 
     ref_lines = ["{{ ref('%s') }}" % slug for slug in dep_slugs]
-    prompt = node.text.strip()
+    prompt = _as_promptdata(node.text.strip(), var_names or set())
     source = "\n".join([prompt, *ref_lines]) if ref_lines else prompt
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
@@ -175,7 +221,8 @@ def _python_source(node: Node, dep_slugs: list[str]) -> str:
     regex, so the ordering and the parallelism still come out right, while the
     comment renders to nothing — leaving no upstream text pasted into what is
     about to be compiled as Python. The outputs reach the sandbox as `inputs`,
-    injected by `PythonModalExec` in dependency order (see `modal_exec.py`).
+    injected by the `python_modal` model kind in dependency order (see
+    `modal_exec.py`).
 
     Attachments are deliberately not declared here: the sandbox is a different
     machine and never sees them, so there is nothing to fetch from the bucket.
@@ -246,7 +293,11 @@ def _overfull_python(nodes: list[Node]) -> list[str]:
 
 
 def _model_input(
-    node: Node, dep_ids: list[str], results: dict[str, str], global_instruction: str = ""
+    node: Node,
+    dep_ids: list[str],
+    results: dict[str, str],
+    global_instruction: str = "",
+    promptdata: dict[str, str] | None = None,
 ) -> str:
     """The prompt as the model received it, rebuilt from the run's outputs.
 
@@ -268,9 +319,12 @@ def _model_input(
     parts = [results[d] for d in dep_ids if d in results]
     if node.kind == "python":
         return modal_exec._inherited_code(parts)
-    body = "\n".join([node.text.strip(), *parts]) if parts else node.text.strip()
+    # Variables are shown filled in, not as the Jinja call they were compiled
+    # to: this column exists to answer "what did the model actually see".
+    own = _fill_vars(node.text.strip(), promptdata or {})
+    body = "\n".join([own, *parts]) if parts else own
     if global_instruction and node.kind != "template":
-        return global_instruction.rstrip("\n") + "\n\n" + body
+        return _fill_vars(global_instruction, promptdata or {}).rstrip("\n") + "\n\n" + body
     return body
 
 
@@ -386,6 +440,10 @@ async def run(req: RunRequest) -> RunResponse:
         return RunResponse(errors=[f"Unsupported provider: {req.provider}"])
 
     global_instruction = req.globalInstruction.strip()
+    # The variables the run may use. `@name`s in the bullets are rewritten
+    # against these names, and pbt is handed the values.
+    promptdata = _clean_promptdata(req.promptdata)
+    var_names = set(promptdata)
 
     nodes = _runnable(req.nodes)
     if not nodes:
@@ -413,7 +471,7 @@ async def run(req: RunRequest) -> RunResponse:
             children[n.parentId].append(n.id)
 
     models = {
-        id_to_slug[n.id]: _build_source(n, children[n.id], id_to_slug, req.sessionId)
+        id_to_slug[n.id]: _build_source(n, children[n.id], id_to_slug, req.sessionId, var_names)
         for n in nodes
     }
 
@@ -436,7 +494,11 @@ async def run(req: RunRequest) -> RunResponse:
             models_from_dict=models,
             llm_call=llm,
             promptfiles=promptfiles or None,
-            global_instruction=global_instruction or None,
+            promptdata=promptdata or None,
+            # `ref()` is refused inside a global instruction — pbt says as much
+            # and points at promptdata — but a variable is exactly what belongs
+            # there, so `@name` is rewritten here too.
+            global_instruction=_as_promptdata(global_instruction, var_names) or None,
             verbose=False,
         )
     except Exception as exc:  # noqa: BLE001 — surface any failure to the client
@@ -445,7 +507,9 @@ async def run(req: RunRequest) -> RunResponse:
     results, errors = _serialise(outputs)
     by_id = {slug_to_id.get(name, name): value for name, value in results.items()}
     prompts = {
-        n.id: _model_input(n, _deps(n, children[n.id], id_to_slug), by_id, global_instruction)
+        n.id: _model_input(
+            n, _deps(n, children[n.id], id_to_slug), by_id, global_instruction, promptdata
+        )
         for n in nodes
     }
     return RunResponse(outputs=by_id, prompts=prompts, errors=errors)

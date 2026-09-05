@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { PROVIDERS, runGraph, type Provider } from './api';
 import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
+import { usePromptVarMap } from './lib/promptdata';
 
 const PROVIDER_STORAGE = 'wm.provider';
 const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
@@ -27,6 +28,9 @@ export function Toolbar() {
   const [globalInstruction, setGlobalInstruction] = useState<string>(
     () => localStorage.getItem(GLOBAL_INSTRUCTION_STORAGE) || '',
   );
+  // The variables keep themselves (see `lib/promptdata`); the toolbar only
+  // sends them, and marks the gear when there is something behind it.
+  const vars = usePromptVarMap();
 
   const onInstructionChange = (v: string) => {
     setGlobalInstruction(v);
@@ -48,7 +52,7 @@ export function Toolbar() {
     actions.setRunning(true);
     try {
       const nodes = buildNodePayloads(getState());
-      const res = await runGraph(nodes, provider, apiKey, globalInstruction);
+      const res = await runGraph(nodes, provider, apiKey, globalInstruction, vars);
       actions.setRunResult(res.outputs || {}, res.errors || [], res.prompts || {});
     } catch (err) {
       actions.setRunResult(
@@ -87,7 +91,7 @@ export function Toolbar() {
         </button>
         <button
           className={`tb__gear${settingsOpen ? ' tb__gear--on' : ''}${
-            globalInstruction.trim() ? ' tb__gear--set' : ''
+            globalInstruction.trim() || Object.keys(vars).length ? ' tb__gear--set' : ''
           }`}
           onClick={() => setSettingsOpen((v) => !v)}
           title="Settings"

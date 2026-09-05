@@ -10,6 +10,7 @@
  */
 
 import { mentionLabel, type TitleMap } from './mentions';
+import { varRefRe, type PromptVarMap } from './promptdata';
 
 const ESCAPES: Record<string, string> = {
   '&': '&amp;',
@@ -157,26 +158,59 @@ function blocks(lines: string[]): string {
   return out.join('');
 }
 
-/** Placeholder that markdown rules can't match, used to park mentions. */
+/** Placeholders that markdown rules can't match, used to park mentions/vars. */
 const HOLD = '\u0002';
+const VAR_HOLD = '\u0003';
 const tokenRe = () => /@\[\[([A-Za-z0-9_-]+)\]\]/g;
 
-/**
- * Render a bullet's text. Mentions are lifted out first so that markdown rules
- * can't chew on an id (nanoid can contain `_`), then put back as coloured
- * spans carrying the target's full title for the hover tooltip.
- */
-export function renderMarkdown(raw: string, titles: TitleMap): string {
+/** Lift both kinds of `@` out of the text before any markdown rule sees them. */
+function hold(raw: string, vars: PromptVarMap): { held: string; ids: string[]; names: string[] } {
+  const names: string[] = [];
+  // Variables first: a mention token is `@[[...]]`, whose character after the
+  // `@` is not one a name may contain, so this pass cannot touch one.
+  const withVars = raw.replace(varRefRe(), (whole, name) =>
+    name in vars ? `${VAR_HOLD}${names.push(name) - 1}${VAR_HOLD}` : whole,
+  );
   const ids: string[] = [];
-  const held = raw.replace(tokenRe(), (_, id) => `${HOLD}${ids.push(id) - 1}${HOLD}`);
-  const html = blocks(escapeHtml(held).split('\n'));
-  return html.replace(new RegExp(`${HOLD}(\\d+)${HOLD}`, 'g'), (_, i) => {
-    const id = ids[Number(i)];
-    const full = titles[id] || 'Untitled';
-    return `<span class="md-mention" data-title="${escapeHtml(full)}">${escapeHtml(
-      mentionLabel(titles[id]),
-    )}</span>`;
-  });
+  const held = withVars.replace(tokenRe(), (_, id) => `${HOLD}${ids.push(id) - 1}${HOLD}`);
+  return { held, ids, names };
+}
+
+/** Put the parked mentions and variables back, as coloured spans. */
+function restore(
+  html: string,
+  ids: string[],
+  names: string[],
+  titles: TitleMap,
+  vars: PromptVarMap,
+): string {
+  return html
+    .replace(new RegExp(`${HOLD}(\\d+)${HOLD}`, 'g'), (_, i) => {
+      const id = ids[Number(i)];
+      const full = titles[id] || 'Untitled';
+      return `<span class="md-mention" data-title="${escapeHtml(full)}">${escapeHtml(
+        mentionLabel(titles[id]),
+      )}</span>`;
+    })
+    .replace(new RegExp(`${VAR_HOLD}(\\d+)${VAR_HOLD}`, 'g'), (_, i) => {
+      const name = names[Number(i)];
+      // The value goes in `data-title`, so hovering a variable reads it out
+      // through the same tooltip a mention uses.
+      return `<span class="md-var" data-title="${escapeHtml(
+        vars[name] || '(empty)',
+      )}">@${escapeHtml(name)}</span>`;
+    });
+}
+
+/**
+ * Render a bullet's text. Mentions and run variables are lifted out first so
+ * that markdown rules can't chew on an id (nanoid can contain `_`), then put
+ * back as coloured spans — a mention carrying the target's full title for the
+ * hover tooltip.
+ */
+export function renderMarkdown(raw: string, titles: TitleMap, vars: PromptVarMap = {}): string {
+  const { held, ids, names } = hold(raw, vars);
+  return restore(blocks(escapeHtml(held).split('\n')), ids, names, titles, vars);
 }
 
 /**
@@ -187,15 +221,12 @@ export function renderMarkdown(raw: string, titles: TitleMap): string {
  * emphasis a model puts on the actual answer is worth keeping. Whitespace is
  * flattened first so a multi-paragraph reply arrives as one continuous phrase.
  */
-export function renderInlineMarkdown(raw: string, titles: TitleMap): string {
-  const ids: string[] = [];
-  const held = raw.replace(tokenRe(), (_, id) => `${HOLD}${ids.push(id) - 1}${HOLD}`);
+export function renderInlineMarkdown(
+  raw: string,
+  titles: TitleMap,
+  vars: PromptVarMap = {},
+): string {
+  const { held, ids, names } = hold(raw, vars);
   const flat = escapeHtml(held).replace(/\s+/g, ' ').trim();
-  return inline(flat).replace(new RegExp(`${HOLD}(\\d+)${HOLD}`, 'g'), (_, i) => {
-    const id = ids[Number(i)];
-    const full = titles[id] || 'Untitled';
-    return `<span class="md-mention" data-title="${escapeHtml(full)}">${escapeHtml(
-      mentionLabel(titles[id]),
-    )}</span>`;
-  });
+  return restore(inline(flat), ids, names, titles, vars);
 }

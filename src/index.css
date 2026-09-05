@@ -486,11 +486,17 @@ body,
 }
 
 /* One column, filling the panel: the three-way split is the answer modal's
-   layout, not this one's. A lone textarea would also collapse to a single
-   line, hence the writing-sized height. */
+   layout, not this one's. The settings stack instead — the instruction gets a
+   writing-sized box, the variables table takes the rest and scrolls. */
 .res-modal__panel--narrow .res-modal__cols {
   grid-template-columns: minmax(0, 1fr);
-  height: min(300px, 50vh);
+  grid-template-rows: minmax(120px, auto) minmax(0, 1fr);
+  height: min(520px, 76vh);
+}
+
+.res-modal__panel--narrow .res-col + .res-col {
+  border-left: none;
+  border-top: 1px solid var(--border);
 }
 
 .res-modal__head {
@@ -902,6 +908,19 @@ body,
   cursor: help;
 }
 
+/* A run variable — `@name` from Settings — is a different kind of `@` from a
+   mention of a bullet, so it gets a colour of its own: teal against the
+   mention's purple, readable as "value substituted here" rather than "another
+   bullet's answer goes here". */
+.ol-var,
+.md-var {
+  color: #0f766e;
+  background: #ccfbf1;
+  border-radius: 3px;
+  pointer-events: auto;
+  cursor: help;
+}
+
 /* Full title of the hovered mention. Fixed, so no field can clip it. */
 .ol-tip {
   position: fixed;
@@ -953,6 +972,113 @@ body,
 .ol-ac__item:hover {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* A variable in the list wears the colour it will have in the text, so the
+   two halves of one dropdown are told apart before they are read. */
+.ol-ac__item--var {
+  color: #0f766e;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ol-ac__item--var.ol-ac__item--active,
+.ol-ac__item--var:hover {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
+.ol-ac__tag {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+
+/* ------------------------------------------------------- settings: variables */
+
+/* The table has no "add" button: its last row is blank, and filling it in is
+   what makes the next one. So the rows are plain fields in a grid rather than
+   a form — nothing to submit, nothing to confirm. */
+.pd-body {
+  /* Takes the section's spare height so the note below it sits at the foot of
+     the panel, level with the instruction's note above. */
+  flex: 1 1 auto;
+  padding: 8px 10px;
+}
+
+.pd-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.pd-table th {
+  padding: 2px 6px 6px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pd-table td {
+  padding: 2px 3px;
+  vertical-align: middle;
+}
+
+/* Name and value get a third and two thirds; the × column takes what it needs. */
+.pd-table th:nth-child(1) {
+  width: 34%;
+}
+
+.pd-table th:nth-child(3) {
+  width: 24px;
+}
+
+.pd-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.pd-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* A name is written into a prompt as-is, so it has to be an identifier. */
+.pd-input--name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #0f766e;
+}
+
+.pd-input--bad {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.pd-x {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pd-x:hover {
+  color: #dc2626;
 }
 
 /* ------------------------------------------------------------------ mindmap */

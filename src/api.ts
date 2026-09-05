@@ -136,6 +136,8 @@ export async function runGraph(
   apiKey: string | undefined,
   /** Settings → prepended to every LLM call the run makes. */
   globalInstruction?: string,
+  /** Settings → run variables. Each `@name` in a bullet reads one of these. */
+  promptdata?: Record<string, string>,
 ): Promise<RunResponse> {
   const url = `${getServerUrl()}/run`;
   let res: Response;
@@ -149,6 +151,7 @@ export async function runGraph(
         apiKey: apiKey || undefined,
         sessionId: getSessionId(),
         globalInstruction: globalInstruction || '',
+        promptdata: promptdata || {},
       }),
     });
   } catch (err) {

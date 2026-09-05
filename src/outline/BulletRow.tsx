@@ -7,18 +7,28 @@ import { KindChip } from '../mindmap/BulletNode';
 import {
   detectMention,
   applyMention,
+  applyVar,
   toDisplay,
   displayToRaw,
   toSegments,
-  mentionIds,
+  type Segment,
   type TitleMap,
 } from '../lib/mentions';
+import { usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
 import { renderInlineMarkdown, renderMarkdown } from '../lib/markdown';
 import { deleteFile, fileLink } from '../api';
 import { INDENT } from './dragDrop';
 import { caretAtStart, caretOnFirstLine, caretOnLastLine } from '../lib/caret';
 
+/**
+ * A completion offered under an `@`: either another bullet, whose output flows
+ * into this one, or a run variable from Settings, which is substituted in.
+ * They share the trigger because they read the same way in a sentence; the
+ * dropdown and the text colour them apart.
+ */
 interface Match {
+  kind: 'bullet' | 'var';
+  /** The bullet's id, or the variable's name. */
   id: string;
   /** Shown in the dropdown. */
   title: string;
@@ -65,6 +75,7 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
   const { id } = bullet;
 
   const titles: TitleMap = titleMap(getState());
+  const vars = usePromptVarMap();
   // The stored text holds `@[[id]]` tokens; the editor works on the display
   // form, where each token is the target's first line, first 10 characters.
   const display = toDisplay(bullet.text, titles);
@@ -72,10 +83,15 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
 
   function findMatches(query: string): Match[] {
     const s = getState();
-    return Object.values(s.bullets)
+    // Variables lead: there are a handful of them against every bullet in the
+    // document, and an exact name is what someone typing `@tone` meant.
+    const varMatches: Match[] = Object.keys(vars)
+      .filter((n) => n.toLowerCase().includes(query))
+      .map((n): Match => ({ kind: 'var', id: n, title: n }));
+    const bullets: Match[] = Object.values(s.bullets)
       .filter((b) => b.id !== id && (titles[b.id] || '').toLowerCase().includes(query))
-      .slice(0, MAX_MATCHES)
-      .map((b) => ({ id: b.id, title: titles[b.id] || 'Untitled' }));
+      .map((b): Match => ({ kind: 'bullet', id: b.id, title: titles[b.id] || 'Untitled' }));
+    return [...varMatches, ...bullets].slice(0, MAX_MATCHES);
   }
 
   function refreshMention(el: HTMLTextAreaElement) {
@@ -95,16 +111,20 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
   function accept(match: Match) {
     const el = getEditor(id);
     if (!el || !ac) return;
-    // The id — not the text — is what gets stored, so editing the target
-    // later just changes how this mention reads.
-    const { raw, caret } = applyMention(
-      el.value,
-      bullet.text,
-      ac.start,
-      el.selectionStart,
-      { id: match.id, title: titles[match.id] ?? '' },
-      titles,
-    );
+    // For a bullet the id — not the text — is what gets stored, so editing the
+    // target later just changes how the mention reads. A variable is stored as
+    // the `@name` you see: its name is its identity.
+    const { raw, caret } =
+      match.kind === 'var'
+        ? applyVar(el.value, bullet.text, ac.start, el.selectionStart, match.id, titles)
+        : applyMention(
+            el.value,
+            bullet.text,
+            ac.start,
+            el.selectionStart,
+            { id: match.id, title: titles[match.id] ?? '' },
+            titles,
+          );
     actions.setText(id, raw);
     setAc(null);
     requestAnimationFrame(() => {
@@ -209,7 +229,9 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
   function onMouseMove(e: React.MouseEvent) {
     const hit = document
       .elementsFromPoint(e.clientX, e.clientY)
-      .find((el) => el.classList.contains('ol-mention') || el.classList.contains('md-mention')) as
+      .find((el) =>
+        ['ol-mention', 'md-mention', 'ol-var', 'md-var'].some((c) => el.classList.contains(c)),
+      ) as
       | HTMLElement
       | undefined;
     const full = hit?.dataset.title;
@@ -221,7 +243,10 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
   }
 
   const hasChildren = bullet.children.length > 0;
-  const hasMention = mentionIds(bullet.text).length > 0;
+  // Either kind of `@` — a mention or a run variable — turns the textarea's own
+  // glyphs off in favour of the coloured mirror behind it.
+  const segments = toSegments(bullet.text, titles, vars);
+  const hasHighlight = segments.some((sg) => sg.id || sg.name);
   // A python bullet takes no typing — it runs what its children wrote. The
   // editor still mounts (focus and arrow-key navigation run through it), it
   // just refuses input and reads out what the bullet does instead.
@@ -266,7 +291,7 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
       </div>
 
       <div className="ol-fields">
-        <div className={`ol-field-wrap ${hasMention ? 'ol-has-mention' : ''}`}>
+        <div className={`ol-field-wrap ${hasHighlight ? 'ol-has-mention' : ''}`}>
           <KindChip kind={bullet.kind} className="tpl-chip--outline" />
 
           {/* Read view and editor are stacked in one grid cell and *both*
@@ -277,8 +302,8 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
               as the taller of the two whatever has focus, so the outline
               holds still. */}
           <div className={`ol-view ${editing ? 'ol-view--editing' : ''}`}>
-            <Rendered bullet={bullet} titles={titles} />
-            {editing && <Mirror raw={bullet.text} titles={titles} />}
+            <Rendered bullet={bullet} titles={titles} vars={vars} />
+            {editing && hasHighlight && <Mirror segments={segments} titles={titles} vars={vars} />}
             <AutoTextarea
               id={id}
               value={isPython ? '' : display}
@@ -350,7 +375,7 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
               onClick={() => onExpand(id)}
               // Inline marks only — the answer's own emphasis survives, its
               // block structure does not, because none of it fits on one line.
-              dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(result, titles) }}
+              dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(result, titles, vars) }}
             />
             <button
               className="ol-result__more"
@@ -369,11 +394,19 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
 }
 
 /** The read view: the bullet's markdown, rendered. Clicking starts editing. */
-function Rendered({ bullet, titles }: { bullet: Bullet; titles: TitleMap }) {
+function Rendered({
+  bullet,
+  titles,
+  vars,
+}: {
+  bullet: Bullet;
+  titles: TitleMap;
+  vars: PromptVarMap;
+}) {
   const html =
     bullet.kind === 'python'
       ? `<p class="ol-md__empty">${PYTHON_CAPTION}</p>`
-      : renderMarkdown(bullet.text, titles);
+      : renderMarkdown(bullet.text, titles, vars);
   return (
     <div
       className="ol-md"
@@ -393,14 +426,24 @@ function Rendered({ bullet, titles }: { bullet: Bullet; titles: TitleMap }) {
  * glyphs go transparent (caret and selection stay) and this mirror — same font,
  * same box, same string — is what you actually read.
  */
-function Mirror({ raw, titles }: { raw: string; titles: TitleMap }) {
-  const segs = toSegments(raw, titles);
-  if (!segs.some((sg) => sg.id)) return null;
+function Mirror({
+  segments,
+  titles,
+  vars,
+}: {
+  segments: Segment[];
+  titles: TitleMap;
+  vars: PromptVarMap;
+}) {
   return (
     <div className="ol-text ol-mirror" aria-hidden="true">
-      {segs.map((sg, i) =>
+      {segments.map((sg, i) =>
         sg.id ? (
           <span key={i} className="ol-mention" data-title={titles[sg.id] || 'Untitled'}>
+            {sg.text}
+          </span>
+        ) : sg.name ? (
+          <span key={i} className="ol-var" data-title={vars[sg.name] || '(empty)'}>
             {sg.text}
           </span>
         ) : (
@@ -426,14 +469,17 @@ function Dropdown({ ac, onPick }: { ac: AutocompleteState; onPick: (m: Match) =>
     <ul className="ol-ac">
       {ac.matches.map((m, i) => (
         <li
-          key={m.id}
-          className={`ol-ac__item ${i === ac.index ? 'ol-ac__item--active' : ''}`}
+          key={`${m.kind}:${m.id}`}
+          className={`ol-ac__item ol-ac__item--${m.kind} ${
+            i === ac.index ? 'ol-ac__item--active' : ''
+          }`}
           onMouseDown={(e) => {
             e.preventDefault();
             onPick(m);
           }}
         >
           @{m.title}
+          {m.kind === 'var' && <span className="ol-ac__tag">variable</span>}
         </li>
       ))}
     </ul>
