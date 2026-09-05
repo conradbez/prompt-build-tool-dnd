@@ -37,6 +37,7 @@ const RUNNING: Row[] = [
   { keys: 'An empty bullet', desc: 'Kept, not skipped, when anything below it has text — a blank bullet just hands its children\u2019s outputs upward' },
   { keys: '••• → Convert to template', desc: 'TPL — not sent to the LLM: the text, with every reference filled in, is the output' },
   { keys: '••• → Convert to python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output' },
+  { keys: '••• → Enforce JSON output', desc: 'JSON — the answer is parsed and validated (pbt\u2019s output_format="json"); one that is not JSON fails the bullet instead of flowing on as prose. Works on any kind of bullet' },
 ];
 
 function Section({ title, rows }: { title: string; rows: Row[] }) {

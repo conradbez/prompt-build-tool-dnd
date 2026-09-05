@@ -22,6 +22,8 @@ export interface NodePayload {
   refs: string[];
   /** Prompt, template, or python — decides how the server runs it. */
   kind: BulletKind;
+  /** Validate this bullet's answer as JSON (pbt's `output_format="json"`). */
+  jsonOutput: boolean;
   /** Attachments, sent to the model along with this bullet's prompt. */
   files: FileRef[];
 }

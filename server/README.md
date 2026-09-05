@@ -79,6 +79,33 @@ mention arrives here already expanded to the target's title (`@[[id]]` →
 variable `tone` and a bullet called "tone of voice" — has that first word
 substituted. Rename one of the two; the "Model input" column shows it happening.
 
+## Enforcing JSON (`jsonOutput`)
+
+A node with `"jsonOutput": true` is emitted with pbt's own
+`{{ config(output_format="json") }}`, so pbt **parses and validates** the answer
+(stripping any ` ```json ` fence). A bullet that comes back as prose fails with
+its parse error rather than passing the prose downstream — that is the part that
+makes it *enforcement* rather than a request.
+
+Asking is done too, since validating alone does not make a model comply:
+
+* a **prompt** bullet has `Respond with JSON only — no prose, no code fences.`
+  appended to its own text, where the "Model input" column shows it. Template
+  and python bullets do not get the line — a template's text *is* its output, so
+  an instruction in it would come out in the answer — but they are still
+  validated.
+* where the provider has a JSON mode, `llm.py` turns it on: Gemini's
+  `response_mime_type`, OpenAI's `response_format` (which requires the prompt to
+  mention JSON — the appended line is what satisfies it). Anthropic has no such
+  mode, so there the instruction and the validation are the whole of it.
+
+**The two forms of a JSON answer.** pbt hands the *parsed* value downstream, and
+Jinja writes a parsed value into the next prompt with `str()` — a Python-style
+mapping, single quotes and all. So `outputs` shows canonical, pretty-printed
+JSON (what a person reads) while `prompts` shows the mapping form (what actually
+reached the next model). They differ on purpose: the point of that column is to
+say what was really sent.
+
 ## Bullet kinds
 
 Each node carries a `kind`, which decides what running it does:

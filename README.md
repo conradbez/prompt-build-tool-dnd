@@ -117,6 +117,20 @@ To keep this simple, several main-branch features are **not** implemented:
   always goes through the server.
 - Per-session storage and parallel-loop map/reduce.
 
+## Enforcing JSON
+
+`•••` → **Enforce JSON output** marks a bullet `JSON`. The server emits pbt's
+`{{ config(output_format="json") }}` for it, so the answer is **parsed and
+validated**: one that is not JSON fails that bullet with its parse error instead
+of flowing downstream as prose. A prompt bullet also gets a line asking for JSON
+appended to its text (visible in the *Model input* column), and the provider's
+own JSON mode is switched on where it has one.
+
+It is orthogonal to the bullet's kind — a prompt, a template or a python bullet
+can each be held to JSON — so it is a chip of its own beside `TPL`/`PY` rather
+than a fourth kind. See [`server/README.md`](server/README.md) for how a JSON
+answer reaches the *next* bullet, which is not quite how it reads in the panel.
+
 ## Attaching files
 
 With a bucket configured, `•••` → **Attach file…** puts a file on a bullet. It

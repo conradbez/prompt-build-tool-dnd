@@ -168,6 +168,19 @@ export function BulletMenu({ bullet }: Props) {
             </li>
           )}
           <li>
+            <button
+              role="menuitem"
+              title={
+                bullet.jsonOutput
+                  ? 'Stop checking this answer — anything it says will be passed on as it is.'
+                  : 'Require JSON: the answer is parsed and validated, and an answer that is not JSON fails this bullet instead of flowing on as prose.'
+              }
+              onClick={() => run(() => actions.setJsonOutput(id, !bullet.jsonOutput))}
+            >
+              {bullet.jsonOutput ? 'Stop enforcing JSON' : 'Enforce JSON output'}
+            </button>
+          </li>
+          <li>
             <button role="menuitem" onClick={() => run(() => actions.indent(id))}>
               Indent
             </button>

@@ -1153,6 +1153,13 @@ body,
   background: #d8ecfb;
 }
 
+/* JSON is a constraint on the answer, not a kind of bullet, so it wears the
+   amber of a rule being enforced rather than either kind's colour. */
+.tpl-chip--json {
+  color: #92400e;
+  background: #fef3c7;
+}
+
 .ol-row--template .ol-text,
 .ol-row--template .ol-md,
 .ol-row--python .ol-text,

@@ -10,6 +10,8 @@ export interface BulletNodeData {
   canAddChild: boolean;
   collapsed: boolean;
   kind: BulletKind;
+  /** Whether this bullet's answer is validated as JSON — shown as a chip. */
+  jsonOutput: boolean;
   /** How many files are attached — shown as a paperclip count. */
   fileCount: number;
   /** True once this bullet has a result from the latest run. */
@@ -22,9 +24,10 @@ export function BulletNode({ id, data, selected }: NodeProps) {
   return (
     <div className={`mm-node ${selected ? 'mm-node--selected' : ''} ${d.kind !== 'prompt' ? `mm-node--${d.kind}` : ''}`}>
       <Handle type="target" position={Position.Top} className="mm-handle" />
-      {(d.kind !== 'prompt' || d.fileCount > 0) && (
+      {(d.kind !== 'prompt' || d.jsonOutput || d.fileCount > 0) && (
         <div className="mm-node__flags">
           {d.kind !== 'prompt' && <KindChip kind={d.kind} />}
+          {d.jsonOutput && <JsonChip />}
           {d.fileCount > 0 && (
             <span className="mm-node__files" title={`${d.fileCount} attached file(s)`}>
               📎 {d.fileCount}
@@ -80,6 +83,21 @@ export function BulletNode({ id, data, selected }: NodeProps) {
         {d.canAddChild && <span className="mm-handle__plus">＋</span>}
       </Handle>
     </div>
+  );
+}
+
+/**
+ * The `JSON` badge. Orthogonal to the kind — a prompt, a template or a python
+ * bullet can each be held to JSON — so it is its own chip beside that one.
+ */
+export function JsonChip({ className = '' }: { className?: string }) {
+  return (
+    <span
+      className={`tpl-chip tpl-chip--json ${className}`}
+      title="The answer is parsed and validated as JSON; one that is not JSON fails this bullet"
+    >
+      JSON
+    </span>
   );
 }
 

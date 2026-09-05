@@ -53,6 +53,18 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 # text in the result instead of steering a model.
 TEMPLATE_CONFIG_LINE = '{{ config(model_type="template", global_instruction=False) }}'
 
+# JSON enforcement, also pbt's own: it parses the answer (stripping ```json
+# fences), fails the model if it will not parse, and hands the *parsed* value
+# downstream. Several `config()` calls in one source merge, so this sits on its
+# own line alongside whichever others a bullet needs.
+JSON_CONFIG_LINE = '{{ config(output_format="json") }}'
+
+# Validation alone does not make a model comply, so a prompt bullet held to JSON
+# is also told to return it. Appended to the bullet's own text, where it is
+# visible in the "Model input" column rather than slipped in behind the scenes,
+# and it doubles as OpenAI's requirement that a JSON-mode prompt say "JSON".
+JSON_INSTRUCTION = "Respond with JSON only — no prose, no code fences."
+
 # Attachments reach the model the same way: pbt parses the declared names out
 # of the config block and hands the matching files to `llm_call(files=...)`.
 def _promptfiles_line(keys: list[str]) -> str:
@@ -123,6 +135,8 @@ class Node(BaseModel):
     # "prompt" | "template" | "python" — see `_build_source`. Anything else is
     # treated as a prompt rather than rejected: a bullet is not worth a 422.
     kind: str = "prompt"
+    # Hold this bullet's answer to JSON — pbt's `output_format="json"`.
+    jsonOutput: bool = False
 
 
 class RunRequest(BaseModel):
@@ -196,14 +210,29 @@ def _build_source(
         return _python_source(node, dep_slugs)
 
     ref_lines = ["{{ ref('%s') }}" % slug for slug in dep_slugs]
-    prompt = _as_promptdata(node.text.strip(), var_names or set())
+    prompt = _json_body(node, _as_promptdata(node.text.strip(), var_names or set()))
     source = "\n".join([prompt, *ref_lines]) if ref_lines else prompt
+    if node.jsonOutput:
+        source = JSON_CONFIG_LINE + "\n" + source
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
     keys = _node_file_keys(node, session_id)
     if keys:
         source = _promptfiles_line(keys) + "\n" + source
     return source
+
+
+def _json_body(node: Node, text: str) -> str:
+    """A JSON bullet's text, with the instruction that goes with the rule.
+
+    Only a *prompt* asks a model for anything: a template's rendered text is its
+    own output, so an instruction appended to one would come out in the answer,
+    and a python bullet's text never runs at all. Both still carry the config
+    line — the validation applies to whatever they produce.
+    """
+    if not node.jsonOutput or node.kind != "prompt":
+        return text
+    return "\n".join([text, JSON_INSTRUCTION]) if text else JSON_INSTRUCTION
 
 
 def _deps(node: Node, child_ids: list[str], id_to_slug: dict[str, str]) -> list[str]:
@@ -333,11 +362,27 @@ def _model_input(
         return modal_exec._inherited_code(parts)
     # Variables are shown filled in, not as the Jinja call they were compiled
     # to: this column exists to answer "what did the model actually see".
-    own = _fill_vars(node.text.strip(), promptdata or {})
+    own = _json_body(node, _fill_vars(node.text.strip(), promptdata or {}))
     body = "\n".join([own, *parts]) if parts else own
     if global_instruction and node.kind != "template":
         return _fill_vars(global_instruction, promptdata or {}).rstrip("\n") + "\n\n" + body
     return body
+
+
+def _json_forms(text: str) -> tuple[str, str]:
+    """A JSON answer's two forms: ``(what a person reads, what pbt rendered)``.
+
+    `output_format="json"` makes pbt hand the *parsed* value downstream, and
+    Jinja writes a parsed value into the next prompt with `str()` — a
+    Python-style mapping, single quotes and all. So the answer panel and the
+    "Model input" column genuinely differ here, and pretending otherwise would
+    make the column say something that never reached a model.
+    """
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return text, text  # not parseable here means it was never parsed there
+    return json.dumps(value, indent=2, ensure_ascii=False), str(value)
 
 
 def _node_file_keys(node: Node, session_id: str) -> list[str]:
@@ -521,9 +566,14 @@ async def run(req: RunRequest) -> RunResponse:
 
     results, errors = _serialise(outputs)
     by_id = {slug_to_id.get(name, name): value for name, value in results.items()}
+    # A JSON bullet reads one way and renders another — see `_json_forms`.
+    rendered = dict(by_id)
+    for n in nodes:
+        if n.jsonOutput and n.id in by_id:
+            by_id[n.id], rendered[n.id] = _json_forms(by_id[n.id])
     prompts = {
         n.id: _model_input(
-            n, _deps(n, children[n.id], id_to_slug), by_id, global_instruction, promptdata
+            n, _deps(n, children[n.id], id_to_slug), rendered, global_instruction, promptdata
         )
         for n in nodes
     }

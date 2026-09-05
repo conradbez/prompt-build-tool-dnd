@@ -3,7 +3,7 @@ import { PYTHON_CAPTION, type Bullet } from '../types';
 import { actions, getState, titleMap } from '../store';
 import { register, getEditor } from './focusRegistry';
 import { BulletMenu } from './BulletMenu';
-import { KindChip } from '../mindmap/BulletNode';
+import { JsonChip, KindChip } from '../mindmap/BulletNode';
 import {
   detectMention,
   applyMention,
@@ -293,6 +293,7 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
       <div className="ol-fields">
         <div className={`ol-field-wrap ${hasHighlight ? 'ol-has-mention' : ''}`}>
           <KindChip kind={bullet.kind} className="tpl-chip--outline" />
+          {bullet.jsonOutput && <JsonChip className="tpl-chip--outline" />}
 
           {/* Read view and editor are stacked in one grid cell and *both*
               stay mounted, one of them merely hidden. Swapping one for the

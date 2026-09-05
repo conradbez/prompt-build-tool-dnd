@@ -49,6 +49,13 @@ export interface Bullet {
   pos: { x: number; y: number } | null;
   /** What running this bullet does — see `BulletKind`. */
   kind: BulletKind;
+  /**
+   * Enforce JSON: emitted to pbt as `{{ config(output_format="json") }}`, which
+   * makes it *validate* the answer as JSON rather than merely ask for one — a
+   * bullet that comes back as prose fails instead of passing the prose on. The
+   * parsed value is what flows downstream.
+   */
+  jsonOutput: boolean;
 }
 
 export interface Focus {

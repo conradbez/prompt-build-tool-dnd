@@ -19,6 +19,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     files: [],
     pos: null,
     kind: 'prompt',
+    jsonOutput: false,
     ...partial,
   };
 }
@@ -75,6 +76,7 @@ function loadDoc(): { bullets: Record<string, Bullet>; rootIds: string[] } | nul
         files: Array.isArray(raw.files) ? (raw.files as FileRef[]) : [],
         pos: isPos(raw.pos) ? raw.pos : null,
         kind: isKind(raw.kind) ? raw.kind : 'prompt',
+        jsonOutput: !!raw.jsonOutput,
       });
     }
     return { bullets, rootIds: d.rootIds.filter((id: string) => bullets[id]) };
@@ -163,6 +165,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     parentId: b.parentId,
     refs: b.refs.filter((r) => s.bullets[r]),
     kind: b.kind,
+    jsonOutput: b.jsonOutput,
   }));
 }
 
@@ -289,6 +292,15 @@ export const actions = {
     // text it is carrying is dead weight the moment it becomes one. Dropping
     // it here is what keeps the row honest: what you see is what runs.
     next.bullets[id] = kind === 'python' ? { ...b, kind, text: '', refs: [] } : { ...b, kind };
+    emit(next);
+  },
+
+  /** Turn JSON enforcement on or off for one bullet — see `Bullet.jsonOutput`. */
+  setJsonOutput(id: string, on: boolean) {
+    const b = state.bullets[id];
+    if (!b || b.jsonOutput === on) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, jsonOutput: on };
     emit(next);
   },
 

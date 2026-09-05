@@ -48,6 +48,18 @@ def _detect_mime(data: bytes, name: str = "") -> str:
         return "application/octet-stream"
 
 
+def _wants_json(config: Any) -> bool:
+    """True when the bullet declared ``config(output_format="json")``.
+
+    pbt validates the answer either way — it parses the response and fails the
+    model if it will not parse. This is the other half: where a provider has a
+    JSON mode of its own, turn it on, so the model is *made* to comply rather
+    than only checked afterwards. Anthropic has no such mode; there the
+    instruction in the prompt is the whole of it.
+    """
+    return bool(config) and config.get("output_format") == "json"
+
+
 def _is_template(config: Any) -> bool:
     """True for nodes the editor marked as ``model_type="template"``.
 
@@ -94,6 +106,9 @@ def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Ca
             resp = client.models.generate_content(
                 model=os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"),
                 contents=parts,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
+                if _wants_json(config)
+                else None,
             )
             return resp.text or ""
 
@@ -112,6 +127,9 @@ def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Ca
             resp = client.chat.completions.create(
                 model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
                 messages=[{"role": "user", "content": prompt}],
+                # JSON mode refuses a prompt that never says "JSON"; the server
+                # appends that instruction to every JSON bullet, so it does.
+                **({"response_format": {"type": "json_object"}} if _wants_json(config) else {}),
             )
             return resp.choices[0].message.content or ""
 
