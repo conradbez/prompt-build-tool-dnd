@@ -12,11 +12,6 @@ RUN yarn install --immutable && yarn build
 # ---- Stage 2: Python server (serves /run + the built dist/) ----
 FROM python:3.12-slim
 WORKDIR /app
-# git is needed so pip can install prompt-build-tool from its GitHub source
-# (the required release isn't published to PyPI yet).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
 COPY server/requirements.txt ./server/requirements.txt
 RUN pip install --no-cache-dir -r server/requirements.txt
 COPY server ./server
