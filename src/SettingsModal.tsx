@@ -1,10 +1,16 @@
 import { useEffect } from 'react';
+import { PROVIDERS, type Provider } from './api';
 import { NAME_RE, setPromptVars, usePromptVars, type PromptVar } from './lib/promptdata';
 
 interface Props {
   value: string;
   onChange: (v: string) => void;
   onClose: () => void;
+  /** Which provider runs the graph, and the key for it — see `Toolbar`. */
+  provider: Provider;
+  apiKey: string;
+  onProviderChange: (p: Provider) => void;
+  onKeyChange: (v: string) => void;
 }
 
 /**
@@ -12,11 +18,25 @@ interface Props {
  * Escape close it, and what you type is saved as you type — there is nothing
  * to confirm, so the modal has no buttons of its own.
  *
- * Two settings: the global instruction, which the server renders into every
- * prompt bullet's prompt (pbt's `global_instruction`), and the run variables it
- * hands to pbt as `promptdata`.
+ * Everything a run needs that is not the graph itself: the provider and its
+ * key, the global instruction the server renders into every prompt bullet
+ * (pbt's `global_instruction`), and the run variables it hands to pbt as
+ * `promptdata`.
+ *
+ * The provider and key are *also* in the toolbar on a wide screen, both views
+ * of the one piece of state. On a narrow one the toolbar drops them (there is
+ * no room for a select, a key field, Run and the gear at once) and this is
+ * where they live — which is why they are here rather than only there.
  */
-export function SettingsModal({ value, onChange, onClose }: Props) {
+export function SettingsModal({
+  value,
+  onChange,
+  onClose,
+  provider,
+  apiKey,
+  onProviderChange,
+  onKeyChange,
+}: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -40,11 +60,40 @@ export function SettingsModal({ value, onChange, onClose }: Props) {
 
         <div className="res-modal__cols">
           <section className="res-col">
+            <h3 className="res-col__head">Model</h3>
+            <div className="res-col__body pd-model">
+              <select
+                className="pd-select"
+                value={provider}
+                onChange={(e) => onProviderChange(e.target.value as Provider)}
+              >
+                {PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="pd-input"
+                type="password"
+                placeholder={`${provider} API key`}
+                value={apiKey}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => onKeyChange(e.target.value)}
+              />
+            </div>
+            <p className="res-col__note">
+              Kept in this browser, one key per provider. Leave it empty to use the key the server
+              was started with.
+            </p>
+          </section>
+
+          <section className="res-col">
             <h3 className="res-col__head">Global instruction prepended to every LLM call</h3>
             <textarea
               className="res-col__edit"
               value={value}
-              autoFocus
               spellCheck={false}
               placeholder="e.g. Answer in British English, and keep it under 200 words."
               onChange={(e) => onChange(e.target.value)}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   ReactFlow,
   Background,
@@ -87,15 +87,14 @@ const TOUCH_ONLY = {
  *   - drag from the `+` circle ..... start a link; the circle is always
  *                                    visible and 26px across, and a link may
  *                                    end anywhere on the target node
- *   - tap a link ................... delete it (confirms first) — standing in
- *                                    for the Backspace binding
+ *   - tap a link ................... delete it (confirms first; on a mouse the
+ *                                    click deletes it outright)
  *   - one finger ................... pan; two fingers pinch to zoom
  */
 export function MindMap() {
   const state = useOutline();
   // Coarse pointer = touch. Read once: this doesn't change under you in
   // practice, and re-reading it per render would churn the canvas props.
-  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const touch = useMemo(
     () => (typeof window !== 'undefined' ? window.matchMedia?.('(pointer: coarse)').matches === true : false),
     [],
@@ -148,7 +147,7 @@ export function MindMap() {
         for (const c of b.children) {
           if (state.bullets[c]) {
             const id = `e-${b.id}-${c}`;
-            list.push({ id, source: b.id, target: c, selected: id === selectedEdge });
+            list.push({ id, source: b.id, target: c });
           }
         }
       }
@@ -160,14 +159,13 @@ export function MindMap() {
             source: b.id,
             target: r,
             animated: true,
-            selected: id === selectedEdge,
             style: { stroke: '#a855f7', strokeDasharray: '5 5' },
           });
         }
       }
     }
     return list;
-  }, [state, selectedEdge]);
+  }, [state]);
 
   /**
    * Dropping a link on a node either adopts it or references it:
@@ -247,43 +245,36 @@ export function MindMap() {
   };
 
   // Deleting a parent→child link makes the child a top-level node; deleting a
-  // reference (dashed) link just drops the reference. On a pointer device this
-  // runs from React Flow's own Delete/Backspace handling; on touch, from a tap.
+  // reference (dashed) link just drops the reference. A link is the only thing
+  // on the canvas whose click has nothing else to mean — a node's click focuses
+  // it, the `+` adds a child — so clicking one removes it, with no select-then-
+  // delete step in between.
   const deleteEdge = (e: Edge) => {
     if (e.id.startsWith('r-')) actions.removeRef(e.source, e.target);
     else actions.reparent(e.target, null);
   };
-  const onEdgesDelete = (deleted: Edge[]) => {
-    setSelectedEdge(null);
-    deleted.forEach(deleteEdge);
-  };
+  const onEdgesDelete = (deleted: Edge[]) => deleted.forEach(deleteEdge);
 
   /**
-   * Clicking the canvas or a link hands keyboard focus back to it.
-   *
-   * The outline keeps a focused textarea whenever a bullet has the caret, and
-   * React Flow deliberately ignores its keys while an input is focused — so
-   * without this, selecting a link and pressing Delete would do nothing at all.
+   * Clicking the canvas hands keyboard focus back to it, so React Flow's own
+   * key bindings (which it ignores while an input is focused) can fire.
    * Clicking a *node* is different: that focuses its bullet on purpose.
    */
   const releaseOutlineFocus = () => {
     if (getState().focus) actions.setFocus(null);
   };
 
-  /**
-   * Select a link, and take the caret out of the outline so the Delete key
-   * reaches the canvas. The selected id is ours rather than React Flow's
-   * because every store change rebuilds `edges`, which would drop its flag.
-   */
-  const onEdgeSelect = (_: unknown, edge: Edge) => {
-    setSelectedEdge(edge.id);
-    releaseOutlineFocus();
-  };
-
-  // Touch has no Delete key, so a tap on a link removes it (after confirming).
-  const onEdgeTap = (_: unknown, edge: Edge) => {
-    const isRef = edge.id.startsWith('r-');
-    const msg = isRef ? 'Remove this reference?' : 'Detach this node to the top level?';
+  // A click removes the link. On touch it asks first: a stray tap is a great
+  // deal likelier than a stray click, and there is no hover to warn you which
+  // link you are about to lose.
+  const onEdgeClick = (_: unknown, edge: Edge) => {
+    if (!touch) {
+      deleteEdge(edge);
+      return;
+    }
+    const msg = edge.id.startsWith('r-')
+      ? 'Remove this reference?'
+      : 'Detach this node to the top level?';
     if (window.confirm(msg)) deleteEdge(edge);
   };
 
@@ -308,14 +299,9 @@ export function MindMap() {
         // click-to-connect would swallow the click on the `+` circle, and that
         // click is how you add a child node.
         connectOnClick={false}
-        onPaneClick={() => {
-          setSelectedEdge(null);
-          releaseOutlineFocus();
-        }}
+        onEdgeClick={onEdgeClick}
+        onPaneClick={releaseOutlineFocus}
         {...(touch ? TOUCH_ONLY : {})}
-        {...(touch
-          ? { onEdgeClick: onEdgeTap }
-          : { onEdgeClick: onEdgeSelect })}
       >
         <Background gap={20} color="#e5e7eb" />
         {/* Top-left: the provider/key/Run toolbar now sits bottom-left. */}

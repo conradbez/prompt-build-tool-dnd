@@ -23,8 +23,13 @@ bullet graph as JSON and returns each bullet's result after flowing through
 
 ```jsonc
 // response — outputs keyed by the bullet id you sent
-{ "outputs": { "a": "…", "b": "…" }, "errors": [] }
+{ "outputs": { "a": "…", "b": "…" }, "errors": [], "needsKey": false }
 ```
+
+`needsKey` is the one refusal that happens *before* the graph is built: there
+is no key for the chosen provider, neither sent in `apiKey` nor set on the
+server, so nothing ran. The UI flashes its settings gear rather than printing a
+failure against every bullet.
 
 Each bullet becomes a pbt model. A node **auto-includes its children's outputs**
 (children feed up into the parent) plus any explicit `@` references (`refs`) —

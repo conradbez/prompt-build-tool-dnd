@@ -27,6 +27,8 @@ export interface NodePayload {
 }
 
 export interface RunResponse {
+  /** The run never started: no key for this provider, here or on the server. */
+  needsKey?: boolean;
   outputs: Record<string, string>;
   /** The prompt each bullet was actually sent, keyed the same way. */
   prompts: Record<string, string>;

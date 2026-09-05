@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PROVIDERS, runGraph, type Provider } from './api';
 import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
@@ -25,6 +25,10 @@ export function Toolbar() {
   // Settings: one instruction the server prepends to every LLM call in a run.
   // Remembered here, sent with each run — the server keeps no state.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Set when a run stopped for want of a key. It flashes the gear — the way to
+  // the key on any screen, and the *only* way on a narrow one, where the field
+  // is not in the toolbar at all.
+  const [needsKey, setNeedsKey] = useState(false);
   const [globalInstruction, setGlobalInstruction] = useState<string>(
     () => localStorage.getItem(GLOBAL_INSTRUCTION_STORAGE) || '',
   );
@@ -46,13 +50,27 @@ export function Toolbar() {
   const onKeyChange = (v: string) => {
     setApiKey(v);
     localStorage.setItem(keyStorage(provider), v);
+    if (v.trim()) setNeedsKey(false); // asked and answered
   };
+
+  // The prompt is a nudge, not a state to dismiss: it says its piece and goes.
+  useEffect(() => {
+    if (!needsKey) return;
+    const t = setTimeout(() => setNeedsKey(false), 6000);
+    return () => clearTimeout(t);
+  }, [needsKey]);
 
   const run = async () => {
     actions.setRunning(true);
     try {
       const nodes = buildNodePayloads(getState());
       const res = await runGraph(nodes, provider, apiKey, globalInstruction, vars);
+      if (res.needsKey) {
+        // Nothing ran, so the last run's answers stand; the flash says why.
+        setNeedsKey(true);
+        actions.setRunResult(getState().results, [], getState().prompts);
+        return;
+      }
       actions.setRunResult(res.outputs || {}, res.errors || [], res.prompts || {});
     } catch (err) {
       actions.setRunResult(
@@ -65,6 +83,12 @@ export function Toolbar() {
 
   return (
     <div className="tb">
+      {needsKey && (
+        <div className="tb__flash" role="status">
+          Enter an API key to run models
+        </div>
+      )}
+
       <div className="tb__row">
         <select
           className="tb__select"
@@ -92,7 +116,7 @@ export function Toolbar() {
         <button
           className={`tb__gear${settingsOpen ? ' tb__gear--on' : ''}${
             globalInstruction.trim() || Object.keys(vars).length ? ' tb__gear--set' : ''
-          }`}
+          }${needsKey ? ' tb__gear--wants' : ''}`}
           onClick={() => setSettingsOpen((v) => !v)}
           title="Settings"
           aria-label="Settings"
@@ -107,6 +131,10 @@ export function Toolbar() {
           value={globalInstruction}
           onChange={onInstructionChange}
           onClose={() => setSettingsOpen(false)}
+          provider={provider}
+          apiKey={apiKey}
+          onProviderChange={onProviderChange}
+          onKeyChange={onKeyChange}
         />
       )}
 

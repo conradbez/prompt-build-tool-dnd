@@ -14,6 +14,7 @@ branches in parallel.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
 from typing import Any, Optional
@@ -32,7 +33,7 @@ import pbt
 
 import files as attachments
 import modal_exec  # registers `model_type="python_modal"` with pbt on import
-from llm import make_llm_call
+from llm import ENV_KEYS, make_llm_call
 
 # The built frontend (repo-root `dist/`), if it was shipped alongside the
 # server. When present it is served at `/`, so one deployment hosts both the
@@ -139,12 +140,23 @@ class RunRequest(BaseModel):
 
 
 class RunResponse(BaseModel):
+    # Set when the run stopped before it started because there is no key for
+    # the chosen provider — neither sent from the UI nor set on the server. The
+    # UI points at its settings rather than printing a failure per bullet.
+    needsKey: bool = False
     # Keyed by the bullet id the client sent, so the UI can map results back.
     outputs: dict[str, str] = {}
     # The prompt each bullet was actually sent, same keys. The UI shows it
     # beside the answer, so "why did it say that" has an answer on screen.
     prompts: dict[str, str] = {}
     errors: list[str] = []
+
+
+def _has_key(provider: str, api_key: Optional[str]) -> bool:
+    """Whether this run has a key at all: sent from the UI, or in the server's
+    environment. The same two places `llm.py` looks, checked before the graph is
+    built so "no key" is one answer rather than an error on every bullet."""
+    return bool(api_key or os.environ.get(ENV_KEYS.get(provider, "")))
 
 
 def _slug(node_id: str) -> str:
@@ -438,6 +450,9 @@ def remove_file(req: FileRequest) -> dict:
 async def run(req: RunRequest) -> RunResponse:
     if req.provider not in PROVIDERS:
         return RunResponse(errors=[f"Unsupported provider: {req.provider}"])
+
+    if not _has_key(req.provider, req.apiKey):
+        return RunResponse(needsKey=True, errors=["Enter an API key to run models."])
 
     global_instruction = req.globalInstruction.strip()
     # The variables the run may use. `@name`s in the bullets are rewritten

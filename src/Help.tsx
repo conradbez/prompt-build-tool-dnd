@@ -25,12 +25,12 @@ const MAP: Row[] = [
   { keys: '＋ on a node', desc: 'Add a child node — a child feeds its output up into this node' },
   { keys: 'Drag a node', desc: 'Move it — the node then keeps that spot instead of following the layout' },
   { keys: 'Drag from ＋', desc: 'Link to another node; drop on empty canvas to make a new child there' },
-  { keys: 'Click a link, Backspace', desc: 'Solid link → detach the child to top level; dashed link → remove the reference (on touch, tap the link)' },
+  { keys: 'Click a link', desc: 'Removes it — solid link → detach the child to top level; dashed link → drop the reference. It goes red under the pointer first (on touch, a tap asks before removing)' },
   { keys: 'Drag / scroll / pinch', desc: 'Pan and zoom the map' },
 ];
 
 const RUNNING: Row[] = [
-  { keys: 'Provider + key + Run', desc: 'Runs the graph through prompt-build-tool and shows each result under its node' },
+  { keys: 'Provider + key + Run', desc: 'Runs the graph through prompt-build-tool and shows each result under its node. Both live in Settings (⚙) as well as the toolbar — and only in Settings on a narrow screen' },
   { keys: '@Bullet', desc: 'Reference another (non-child) node — its output is included in this prompt (a dashed link appears)' },
   { keys: '@variable', desc: 'A run variable from Settings (⚙), shown in teal — its value is substituted into the prompt. Same @ menu as bullets; add or edit the values in the settings table' },
   { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed. The bullet's own text comes first, then each child's output below it" },

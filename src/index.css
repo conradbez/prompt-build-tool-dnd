@@ -486,12 +486,13 @@ body,
 }
 
 /* One column, filling the panel: the three-way split is the answer modal's
-   layout, not this one's. The settings stack instead — the instruction gets a
-   writing-sized box, the variables table takes the rest and scrolls. */
+   layout, not this one's. The settings stack instead — the model row is as
+   tall as its fields, the instruction gets a writing-sized box, and the
+   variables table takes the rest and scrolls. */
 .res-modal__panel--narrow .res-modal__cols {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(120px, auto) minmax(0, 1fr);
-  height: min(520px, 76vh);
+  grid-template-rows: auto minmax(110px, auto) minmax(0, 1fr);
+  height: min(600px, 84vh);
 }
 
 .res-modal__panel--narrow .res-col + .res-col {
@@ -997,6 +998,30 @@ body,
   opacity: 0.65;
 }
 
+/* ----------------------------------------------------------- settings: model */
+
+/* Provider and key on one line: which model runs the graph, and what it is
+   allowed to run with. The same pair sits in the toolbar on a wide screen. */
+.pd-model {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  overflow: visible;
+}
+
+.pd-select {
+  flex: 0 0 auto;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 0 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+
 /* ------------------------------------------------------- settings: variables */
 
 /* The table has no "add" button: its last row is blank, and filling it in is
@@ -1082,6 +1107,17 @@ body,
 }
 
 /* ------------------------------------------------------------------ mindmap */
+
+/* A click on a link removes it, so the link says so before it is clicked:
+   the pointer changes and the line goes red under it. */
+.react-flow__edge {
+  cursor: pointer;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #dc2626;
+  stroke-width: 2.5;
+}
 
 /* ---------------------------------------------------------- template nodes */
 
@@ -1345,6 +1381,42 @@ body,
   cursor: default;
 }
 
+/* "You need a key" — shown above the row, pointing down at the gear it wants
+   you to open. It pulses rather than sits there: a run was refused, which is a
+   moment, not a condition, and it clears itself. */
+.tb__flash {
+  margin-bottom: 6px;
+  padding: 7px 11px;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  animation: tb-flash 2s ease-in-out 3;
+}
+
+/* A slow breath rather than a blink: three of these fill the six seconds the
+   message is up, and each one is legible on its way past. */
+@keyframes tb-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* A person who has asked not to be moved gets the colour without the pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .tb__flash,
+  .tb__gear--wants {
+    animation: none;
+  }
+}
+
 .tb__errors {
   margin-top: 6px;
   padding: 8px 10px;
@@ -1386,6 +1458,28 @@ body,
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+
+/* A run was refused for want of a key. The gear goes red and *stays* red for
+   as long as the message beside it is up — the colour is the state, and it has
+   to beat `--set`, which is already accent-filled whenever settings hold
+   anything. The pulse is a halo rather than the button's own opacity, so the
+   colour never fades out from under the thing it is saying. */
+.tb__gear--wants {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+  animation: tb-ring 2s ease-in-out 3;
+}
+
+@keyframes tb-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(220, 38, 38, 0);
+  }
 }
 
 
@@ -1617,6 +1711,15 @@ body,
    character per line. Wrap the answer onto its own line under the bullet
    instead, indented to line up with the text it belongs to. */
 @media (max-width: 720px) {
+  /* The toolbar keeps only what a run needs *now* — the button, and the gear
+     that leads to everything else. A select and a key field beside them leave
+     Run a sliver wide, and neither is touched between runs, so both move into
+     the settings panel, where they are anyway. */
+  .tb__select,
+  .tb__key {
+    display: none;
+  }
+
   .ol-row {
     flex-wrap: wrap;
     /* Rows that have no answer yet still render an empty `.ol-result`; without

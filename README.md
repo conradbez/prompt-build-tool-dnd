@@ -59,18 +59,19 @@ exception: the `+` circle.
 | Drop the link on a node | Link them — see *child vs reference* below |
 | Drop the link on empty canvas | Create a new node there, as a child |
 | Click the `+` circle | Create a child node — **the exception**: React Flow would start a click-connection here |
-| Click a link, then `Backspace` | Remove it — React Flow's own selection and its default delete key (`Backspace`; `Delete` is not bound) |
+| Click a link | Remove it — the link goes red under the pointer to say so |
 | Space-drag, scroll, ctrl-scroll | Pan and zoom, per React Flow's defaults |
 
-That `Backspace` never eats an edit: React Flow ignores keypresses while a
-textarea has focus — and clicking the canvas takes the caret out of the outline,
-which is what lets the binding fire at all.
+A link is the one thing on the canvas whose click has nothing else to mean — a
+node's click focuses its bullet, the `+` circle adds a child — so it needs no
+select-then-delete step.
 
 **Touch** has no keyboard and no hover, so it gets its own set: tap a node to
 focus it, drag a node to move it, drag from the `+` circle (always visible on
 touch, 26 px across) to start a link — which may end anywhere on the target
-node, not just its dot — **tap a link to delete it** (standing in for the
-`Backspace` binding), one finger pans and two fingers pinch to zoom.
+node, not just its dot — **tap a link to delete it** (it asks first: a
+stray tap is likelier than a stray click, and there is no hover to warn you
+which link you are about to lose), one finger pans and two fingers pinch to zoom.
 
 **Child vs reference.** Dropping a link on a node that has **no parent** makes
 it a *child* of the source — dragging a loose node under another one is how you
