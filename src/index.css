@@ -52,8 +52,10 @@ body,
 
 .app__corner {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  /* env() is 0px where there are no insets, so this is the plain 12px on
+     everything but a notched phone. */
+  top: calc(12px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
   z-index: 30;
   display: flex;
   flex-direction: column;
@@ -208,6 +210,9 @@ body,
 }
 
 .ol-row {
+  /* Width of the gutter plus the row's gap — how far in the bullet's own text
+     starts. The narrow layout indents the wrapped answer by it. */
+  --ol-gutter-w: 50px;
   display: flex;
   align-items: flex-start;
   gap: 4px;
@@ -1144,10 +1149,12 @@ body,
 .tb {
   /* Bottom-left, level with the help button in the opposite corner. */
   position: fixed;
-  bottom: 16px;
-  left: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  left: calc(16px + env(safe-area-inset-left));
   z-index: 40;
-  max-width: calc(100% - 32px);
+  max-width: calc(
+    100% - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)
+  );
 }
 
 .tb__row {
@@ -1163,6 +1170,9 @@ body,
 }
 
 .tb__select {
+  /* The row never wraps, so everything but the key field is unshrinkable —
+     otherwise a narrow (phone) window squeezes the gear down to a sliver. */
+  flex: 0 0 auto;
   height: 30px;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -1173,6 +1183,10 @@ body,
 }
 
 .tb__key {
+  /* The one elastic item in the row: it gives up width so the buttons keep
+     theirs. `min-width: 0` lets it shrink past its intrinsic size. */
+  flex: 1 1 auto;
+  min-width: 0;
   height: 30px;
   width: 190px;
   max-width: 40vw;
@@ -1188,6 +1202,7 @@ body,
 }
 
 .tb__run {
+  flex: 0 0 auto;
   height: 30px;
   padding: 0 16px;
   border: none;
@@ -1223,6 +1238,7 @@ body,
 }
 
 .tb__gear {
+  flex: 0 0 auto;
   height: 30px;
   width: 30px;
   border: 1px solid var(--border);
@@ -1256,13 +1272,60 @@ body,
     height: 40px;
     font-size: 17px;
   }
+  /* The gutter is the only way to indent, reorder or add a bullet without a
+     keyboard, so on touch its controls get real finger targets. The gutter box
+     grows from the title's 20px first line to 28px and is pulled up by half the
+     difference, which keeps the dot centred on that line. */
+  .ol-gutter {
+    height: 28px;
+    margin-top: -4px;
+  }
   .ol-caret {
-    width: 26px;
+    width: 30px;
+    height: 28px;
     font-size: 14px;
   }
   .ol-menu,
   .ol-menu__btn {
-    width: 24px;
+    width: 30px;
+    height: 28px;
+  }
+  /* This popup is how you indent, reorder and add bullets without a keyboard,
+     so its items get a full-height touch target. */
+  .ol-menu__pop button {
+    padding: 11px 12px;
+    font-size: 14px;
+  }
+  /* The dot is a 28px target painting an 11px circle: the button itself goes
+     transparent and `::before` draws what you see. The modifiers move to the
+     pseudo-element with it. */
+  .ol-dot {
+    position: relative;
+    background: none;
+    box-shadow: none;
+    opacity: 1;
+  }
+  .ol-dot::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--muted);
+    opacity: 0.65;
+  }
+  .ol-dot--full::before {
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+    opacity: 1;
+  }
+  .ol-dot--selected::before {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    opacity: 1;
   }
   /* Fat targets for dragging a link between nodes with a finger. */
   .mm-handle {
@@ -1274,11 +1337,15 @@ body,
     font-size: 11px;
   }
   .ol-dot {
-    width: 11px;
-    height: 11px;
+    width: 28px;
+    height: 28px;
   }
   .ol-scroll {
     padding-left: 12px;
+  }
+  /* Restated for the wider touch gutter: 30 + 2 + 30 + 2 + 28, plus the row gap. */
+  .ol-row {
+    --ol-gutter-w: 96px;
   }
   .tb__select,
   .tb__key,
@@ -1308,8 +1375,8 @@ body,
 
 .help__fab {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(16px + env(safe-area-inset-bottom));
   z-index: 40;
   width: 40px;
   height: 40px;
@@ -1413,5 +1480,49 @@ body,
   }
   .help__keys {
     flex-basis: auto;
+  }
+}
+
+/* ------------------------------------------------ narrow (phone) layout */
+
+/* Below the compact breakpoint there is no room for the bullet and its answer
+   side by side: the answer column is rigid (see `.ol-result`), so keeping it
+   inline collapses `.ol-fields` to zero width and wraps the bullet text one
+   character per line. Wrap the answer onto its own line under the bullet
+   instead, indented to line up with the text it belongs to. */
+@media (max-width: 720px) {
+  .ol-row {
+    flex-wrap: wrap;
+    /* Rows that have no answer yet still render an empty `.ol-result`; without
+       this the wrapped empty line would pad every bullet. */
+    row-gap: 0;
+  }
+  /* A zero basis, so wrapping is decided by the answer below and never by how
+     long this bullet's text happens to be — `flex: 1 1 auto` would push the
+     text onto its own line under the gutter. */
+  .ol-fields {
+    flex: 1 1 0;
+  }
+  .ol-result {
+    flex: 1 0 100%;
+    height: auto;
+    padding-left: var(--ol-gutter-w);
+  }
+
+  /* Clear the corner buttons, which now sit top-right in both views. On a wide
+     screen the parked thumbnail is held off with `padding-right` instead — see
+     the `min-width: 721px` rule — but 92px of permanent right margin is more
+     than a phone can spare, so buy the clearance vertically. */
+  .ol-scroll {
+    padding-top: 64px;
+  }
+
+  /* The help button shares the bottom band with the toolbar, which spans the
+     full width here — bottom-right would sit on top of the settings gear. Park
+     it beside the view toggle in the opposite corner instead. */
+  .help__fab {
+    top: calc(12px + env(safe-area-inset-top));
+    bottom: auto;
+    right: calc(60px + env(safe-area-inset-right));
   }
 }

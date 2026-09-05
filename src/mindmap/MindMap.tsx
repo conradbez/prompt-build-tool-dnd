@@ -59,7 +59,10 @@ const TOUCH_ONLY = {
  * -----------------
  * With a mouse the canvas behaves like any React Flow canvas — its own
  * defaults, keybindings included — with exactly one exception, the `+` circle:
- *   - click a node ................. focus that bullet in the outline
+ *   - click a node ................. select it, and focus that bullet in the
+ *                                    outline
+ *   - double-click a node .......... open it — the modal where its text is
+ *                                    edited and its answer read
  *   - drag a node .................. move it; the node keeps that spot
  *                                    (`bullet.pos`) instead of following the
  *                                    auto-layout
@@ -77,7 +80,8 @@ const TOUCH_ONLY = {
  *   - Space-drag / scroll / ctrl .. pan and zoom, per React Flow's defaults
  *
  * Touch has no keyboard and no hover, so it gets its own set (`TOUCH_ONLY`):
- *   - tap a node ................... focus that bullet
+ *   - tap a node ................... select it, and focus that bullet
+ *   - double-tap a node ............ open it
  *   - drag a node .................. move it
  *   - drag from the `+` circle ..... start a link; the circle is always
  *                                    visible and 26px across, and a link may
@@ -223,11 +227,18 @@ export function MindMap() {
     actions.setPos(node.id, snapToGrid(node.position));
   };
 
-  // A node has no editor of its own on the canvas, so a click opens the bullet
-  // — the same modal its `success` tag opens, which is where its text is
-  // edited and its answer read. Focus follows, so the outline agrees about
-  // which bullet is current.
+  // A single click only selects: it focuses the bullet, so the outline and the
+  // map agree about which one is current, and leaves it at that. Opening the
+  // modal here made every click on the way to a drag or a link throw a panel
+  // over the canvas.
   const onNodeClick: NodeMouseHandler = (_, node) => {
+    actions.setFocus({ id: node.id, caret: 'end' });
+  };
+
+  // A node has no editor of its own on the canvas, so opening it is a second
+  // click: the same modal its `success` tag opens, which is where its text is
+  // edited and its answer read.
+  const onNodeDoubleClick: NodeMouseHandler = (_, node) => {
     actions.setFocus({ id: node.id, caret: 'end' });
     actions.openResult(node.id);
   };
@@ -281,6 +292,7 @@ export function MindMap() {
         onNodesChange={onNodesChange}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
+        onNodeDoubleClick={onNodeDoubleClick}
         onConnect={onConnect}
         onConnectStart={onConnectStart}
         onConnectEnd={onConnectEnd}
