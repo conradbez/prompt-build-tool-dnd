@@ -4,6 +4,8 @@ import { displayToRaw, toDisplay } from '../lib/mentions';
 import { usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
 import { actions, firstLine, getState, titleMap } from '../store';
 import { PYTHON_CAPTION, type Bullet } from '../types';
+import { BulletMenu } from './BulletMenu';
+import { JsonChip, KindChip } from '../mindmap/BulletNode';
 
 interface Props {
   bullet: Bullet;
@@ -27,6 +29,11 @@ interface Props {
  * The first column is the live bullet, not a copy of it: reading the three side
  * by side is exactly when you work out what the prompt should have said, and
  * having to close the modal to act on that is the wrong shape.
+ *
+ * The head carries the same `•••` menu the outline row does, and the same chips,
+ * for the same reason: what a bullet *is* — template, loop, python, held to JSON
+ * — is half the answer to "why did it say that", and changing it is the other
+ * half. Neither should need the modal closed first.
  */
 export function ResultModal({ bullet, prompt, result }: Props) {
   const close = () => actions.openResult(null);
@@ -47,9 +54,14 @@ export function ResultModal({ bullet, prompt, result }: Props) {
     <div className="res-modal" onClick={close} role="dialog" aria-modal="true">
       <div className="res-modal__panel" onClick={(e) => e.stopPropagation()}>
         <div className="res-modal__head">
+          <div className="res-modal__menu">
+            <BulletMenu bullet={bullet} />
+          </div>
           <h2 className="res-modal__title" title={title}>
             {title}
           </h2>
+          <KindChip kind={bullet.kind} />
+          {bullet.jsonOutput && <JsonChip />}
           <button className="res-modal__close" onClick={close} aria-label="Close">
             ✕
           </button>

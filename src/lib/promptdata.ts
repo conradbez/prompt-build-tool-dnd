@@ -33,15 +33,102 @@ export const NAME_RE = /^[A-Za-z0-9_]+$/;
  */
 export const varRefRe = () => /(?<![^\s([{])@([A-Za-z0-9_]+)/g;
 
+/**
+ * The one variable the *server* reads as well as renders: a comma-separated
+ * list of packages a python bullet's sandbox installs before it runs. It stays
+ * an ordinary variable, so `@python_depn` in the prompt that writes the
+ * script tells the model what it may import in the same breath as telling the
+ * sandbox what to install.
+ */
+export const PYTHON_DEPS_VAR = 'python_depn';
+
+/**
+ * The boilerplate for a prompt that asks a model for a script: that its answer
+ * is executed rather than read, what the sandbox already has, and how to ask
+ * for more (a PEP 723 header). It needs no row — the *server* writes its value
+ * on the way past, because only the server knows which packages that sandbox
+ * actually has. Whatever is sent under this name is replaced.
+ */
+export const STANDARD_INSTRUCTIONS_VAR = 'coding_instructions';
+
+/**
+ * The variables the app knows by name. They are always in the table, in this
+ * order and above the rest: their *value* is yours to set, their name is not —
+ * the server looks them up by name, so a renamed one is simply a variable the
+ * server no longer finds, which is a silent failure rather than an edit.
+ * Deleting one would be the same thing, so they cannot be deleted either.
+ */
+export interface ReservedVar {
+  name: string;
+  /** Shown on hover, and in place of the value when it is empty. */
+  hint: string;
+  placeholder: string;
+}
+
+export const RESERVED: ReservedVar[] = [
+  {
+    name: PYTHON_DEPS_VAR,
+    hint:
+      'Comma-separated packages every python bullet’s sandbox installs before ' +
+      'it runs, on top of numpy, pandas and requests.',
+    placeholder: 'beautifulsoup4, lxml, scipy==1.*',
+  },
+  {
+    name: STANDARD_INSTRUCTIONS_VAR,
+    hint:
+      'What to tell a model being asked for a script: that its answer is run ' +
+      'rather than read, which packages the sandbox has, and how to ask for ' +
+      'more with a PEP 723 header. Left empty, the server writes it — and only ' +
+      'the server knows the real package list. Fill it in to say your own thing.',
+    placeholder: 'Left empty, the server writes this for you',
+  },
+];
+
+export function isReserved(name: string): boolean {
+  return RESERVED.some((r) => r.name === name);
+}
+
+export function reservedVar(name: string): ReservedVar | undefined {
+  return RESERVED.find((r) => r.name === name);
+}
+
+/** What a variable's tooltip should say — its value, or why it has none yet. */
+export function describeVar(name: string, value: string): string {
+  if (value) return value;
+  const reserved = reservedVar(name);
+  return reserved ? reserved.hint : '(empty)';
+}
+
 const STORAGE_KEY = 'wm.promptdata';
 
 /** The table always ends in a blank row — that empty row *is* the "add" control. */
 const BLANK: PromptVar = { name: '', value: '' };
 
-/** Rows with exactly one blank row at the end, whatever came in. */
+/**
+ * The table's rows: the reserved ones first — always, even empty — then
+ * whatever a person added, then one blank row to type the next into.
+ *
+ * Every write goes through here, which is what makes the reserved rows
+ * permanent: deleting one, or clearing both its fields, just puts it back.
+ */
 export function withBlankRow(rows: PromptVar[]): PromptVar[] {
-  const filled = rows.filter((r) => r.name !== '' || r.value !== '');
-  return [...filled, { ...BLANK }];
+  const byName = new Map(rows.filter((r) => r.name !== '').map((r) => [r.name, r]));
+  const reserved = RESERVED.map((r) => ({ name: r.name, value: byName.get(r.name)?.value ?? '' }));
+  const rest = rows.filter(
+    (r) => !isReserved(r.name) && (r.name !== '' || r.value !== ''),
+  );
+  return [...reserved, ...rest, { ...BLANK }];
+}
+
+/** Names these variables used to have, and what they are called now. */
+export const RENAMED: Record<string, string> = {
+  avail_python_depn: PYTHON_DEPS_VAR,
+  standard_coding_instructions: STANDARD_INSTRUCTIONS_VAR,
+};
+
+/** Carry a stored name across a rename. Unknown names come back unchanged. */
+export function renamed(name: string): string {
+  return RENAMED[name] ?? name;
 }
 
 function load(): PromptVar[] {
@@ -53,7 +140,7 @@ function load(): PromptVar[] {
     return withBlankRow(
       parsed
         .filter((r) => r && typeof r === 'object')
-        .map((r) => ({ name: String(r.name ?? ''), value: String(r.value ?? '') })),
+        .map((r) => ({ name: renamed(String(r.name ?? '')), value: String(r.value ?? '') })),
     );
   } catch {
     return withBlankRow([]);

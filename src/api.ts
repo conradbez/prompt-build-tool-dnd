@@ -16,7 +16,11 @@ import { getSessionId } from './lib/session';
 
 export interface NodePayload {
   id: string;
-  /** The bullet's markdown text, with `@` mentions expanded to full titles. */
+  /**
+   * The bullet's markdown text, mention tokens and all. The server replaces
+   * each with the referenced bullet's output *in place* — the mention marks
+   * where that output belongs, which a name would only stand in front of.
+   */
   text: string;
   parentId: string | null;
   refs: string[];
@@ -74,14 +78,29 @@ export function getServerUrl(): string {
   return (saved || envUrl || fallback).replace(/\/+$/, '');
 }
 
-/** Whether the server can run `python` bullets (Modal configured). */
-export async function pythonEnabled(): Promise<boolean> {
+export interface PythonInfo {
+  /** Whether the server can run `python` bullets at all (Modal configured). */
+  enabled: boolean;
+  /** What the sandbox image installs — chosen on the server, shown here so the
+   *  prompt that writes the script can be written against it. */
+  packages: string[];
+  /** Entries in the server's `MODAL_PACKAGES` that are not requirements. */
+  rejected: string[];
+}
+
+export async function pythonInfo(): Promise<PythonInfo> {
+  const none: PythonInfo = { enabled: false, packages: [], rejected: [] };
   try {
     const res = await fetch(`${getServerUrl()}/python/enabled`);
-    if (!res.ok) return false;
-    return !!(await res.json()).enabled;
+    if (!res.ok) return none;
+    const data = await res.json();
+    return {
+      enabled: !!data.enabled,
+      packages: Array.isArray(data.packages) ? data.packages : [],
+      rejected: Array.isArray(data.rejected) ? data.rejected : [],
+    };
   } catch {
-    return false;
+    return none;
   }
 }
 
@@ -132,6 +151,59 @@ export async function deleteFile(key: string): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ key, sessionId: getSessionId() }),
   }).catch(() => undefined);
+}
+
+export type ExportTarget = 'script' | 'project';
+
+export interface ExportResult {
+  filename: string;
+  text: string;
+  /** What could not come along — attachments, custom model kinds. */
+  warnings: string[];
+  errors: string[];
+}
+
+/**
+ * Ask the server for this graph as a pbt project you can run without the app.
+ *
+ * The server builds it from the same function a run uses, so an export is the
+ * graph as it actually runs rather than a second rendering that can drift —
+ * which is also why this is a round trip rather than something assembled here.
+ */
+export async function exportGraph(
+  target: ExportTarget,
+  name: string,
+  nodes: NodePayload[],
+  provider: Provider,
+  globalInstruction?: string,
+  promptdata?: Record<string, string>,
+): Promise<ExportResult> {
+  const url = `${getServerUrl()}/export`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      target,
+      name,
+      nodes,
+      provider,
+      sessionId: getSessionId(),
+      globalInstruction: globalInstruction || '',
+      promptdata: promptdata || {},
+    }),
+  }).catch((err) => {
+    throw new Error(
+      `Could not reach the server at ${url} (${err instanceof Error ? err.message : String(err)}).`,
+    );
+  });
+  if (!res.ok) throw new Error(`Server ${res.status} ${res.statusText} at ${url}`);
+  const data = await res.json();
+  return {
+    filename: data.filename || 'mindmap.py',
+    text: data.text || '',
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+    errors: Array.isArray(data.errors) ? data.errors : [],
+  };
 }
 
 export async function runGraph(

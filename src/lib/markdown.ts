@@ -10,7 +10,7 @@
  */
 
 import { mentionLabel, type TitleMap } from './mentions';
-import { varRefRe, type PromptVarMap } from './promptdata';
+import { describeVar, varRefRe, type PromptVarMap } from './promptdata';
 
 const ESCAPES: Record<string, string> = {
   '&': '&amp;',
@@ -197,7 +197,7 @@ function restore(
       // The value goes in `data-title`, so hovering a variable reads it out
       // through the same tooltip a mention uses.
       return `<span class="md-var" data-title="${escapeHtml(
-        vars[name] || '(empty)',
+        describeVar(name, vars[name]),
       )}">@${escapeHtml(name)}</span>`;
     });
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { PROVIDERS, runGraph, type Provider } from './api';
 import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
-import { usePromptVarMap } from './lib/promptdata';
+import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';
 
 const PROVIDER_STORAGE = 'wm.provider';
 const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
@@ -33,8 +33,12 @@ export function Toolbar() {
     () => localStorage.getItem(GLOBAL_INSTRUCTION_STORAGE) || '',
   );
   // The variables keep themselves (see `lib/promptdata`); the toolbar only
-  // sends them, and marks the gear when there is something behind it.
-  const vars = usePromptVarMap();
+  // sends them, and marks the gear when there is something behind it. The mark
+  // counts the *rows a person wrote* — the reserved variables are always in the
+  // map, and a dot that is always on says nothing.
+  const rows = usePromptVars();
+  const vars = promptVarMap(rows);
+  const written = rows.filter((r) => NAME_RE.test(r.name)).length;
 
   const onInstructionChange = (v: string) => {
     setGlobalInstruction(v);
@@ -115,7 +119,7 @@ export function Toolbar() {
         </button>
         <button
           className={`tb__gear${settingsOpen ? ' tb__gear--on' : ''}${
-            globalInstruction.trim() || Object.keys(vars).length ? ' tb__gear--set' : ''
+            globalInstruction.trim() || written ? ' tb__gear--set' : ''
           }${needsKey ? ' tb__gear--wants' : ''}`}
           onClick={() => setSettingsOpen((v) => !v)}
           title="Settings"

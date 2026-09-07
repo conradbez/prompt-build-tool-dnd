@@ -21,6 +21,7 @@ const EDITING: Row[] = [
 ];
 
 const MAP: Row[] = [
+  { keys: 'Double-click a node', desc: 'Open it — your text, what the model was sent, and what came back. The ••• menu and the kind chips are in its head, so a bullet can be converted without closing it' },
   { keys: 'Click a node', desc: 'Focus that bullet in the outline (and vice-versa)' },
   { keys: '＋ on a node', desc: 'Add a child node — a child feeds its output up into this node' },
   { keys: 'Drag a node', desc: 'Move it — the node then keeps that spot instead of following the layout' },
@@ -29,13 +30,21 @@ const MAP: Row[] = [
   { keys: 'Drag / scroll / pinch', desc: 'Pan and zoom the map' },
 ];
 
+const KEEPING: Row[] = [
+  { keys: '⚙ → Save', desc: 'Keeps this map in this browser under the name beside it, and opens it — edits then go into it as you make them. The ▴ next to it is where else it can go: a pbt pipeline (.py), a `pbt serve` project (.py), or the clipboard as JSON' },
+  { keys: '⚙ → Load', desc: 'Puts the named save back on screen; the ▴ loads JSON from the clipboard instead. Either replaces what is on screen — the button asks first, and the map it replaces is kept as “Before last load”' },
+];
+
 const RUNNING: Row[] = [
   { keys: 'Provider + key + Run', desc: 'Runs the graph through prompt-build-tool and shows each result under its node. Both live in Settings (⚙) as well as the toolbar — and only in Settings on a narrow screen' },
-  { keys: '@Bullet', desc: 'Reference another (non-child) node — its output is included in this prompt (a dashed link appears)' },
+  { keys: '@Bullet', desc: 'Reference another (non-child) node — its answer is rendered exactly where you wrote the @, so the mention is the placeholder for the content (a dashed link appears)' },
   { keys: '@variable', desc: 'A run variable from Settings (⚙), shown in teal — its value is substituted into the prompt. Same @ menu as bullets; add or edit the values in the settings table' },
-  { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed. The bullet's own text comes first, then each child's output below it" },
+  { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed. A child has no @ marking where it belongs, so its output goes below the bullet's text" },
   { keys: 'An empty bullet', desc: 'Kept, not skipped, when anything below it has text — a blank bullet just hands its children\u2019s outputs upward' },
   { keys: '••• → Convert to template', desc: 'TPL — not sent to the LLM: the text, with every reference filled in, is the output' },
+  { keys: '••• → Convert to loop', desc: 'LOOP — sent to the LLM once per item of an upstream JSON list (give it an input with JSON enforced); its answer is the list of answers' },
+  { keys: '@coding_instructions', desc: 'Drop into a prompt that asks for a script: the server fills in that the answer is executed, which packages the sandbox has, and how to ask for more (a PEP 723 header). Its row is filled in for you unless you type your own' },
+  { keys: '@python_depn', desc: 'A variable the server reads too: comma-separated packages every python bullet\u2019s sandbox installs before it runs (on top of numpy, pandas, requests)' },
   { keys: '••• → Convert to python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output' },
   { keys: '••• → Enforce JSON output', desc: 'JSON — the answer is parsed and validated (pbt\u2019s output_format="json"); one that is not JSON fails the bullet instead of flowing on as prose. Works on any kind of bullet' },
 ];
@@ -88,6 +97,7 @@ export function Help() {
             <Section title="Editing bullets" rows={EDITING} />
             <Section title="Mind map" rows={MAP} />
             <Section title="Running &amp; references" rows={RUNNING} />
+            <Section title="Keeping &amp; exporting" rows={KEEPING} />
           </div>
         </div>
       )}

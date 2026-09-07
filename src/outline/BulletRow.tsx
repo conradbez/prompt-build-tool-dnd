@@ -14,7 +14,7 @@ import {
   type Segment,
   type TitleMap,
 } from '../lib/mentions';
-import { usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
+import { describeVar, usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
 import { renderInlineMarkdown, renderMarkdown } from '../lib/markdown';
 import { deleteFile, fileLink } from '../api';
 import { INDENT } from './dragDrop';
@@ -173,7 +173,13 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
     // ---- Enter makes the next bullet; Shift+Enter is a newline ----
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      actions.addSiblingAfter(id);
+      // At the very start of a bullet that has something in it, the new bullet
+      // goes *above*: Enter there is making room for a line before this one,
+      // not leaving it. The caret stays with the text, which moves down. An
+      // empty bullet has no start to speak of — both ends are the same place —
+      // so it keeps the ordinary "next bullet, and take me to it".
+      if (caretAtStart(el) && bullet.text !== '') actions.addSiblingBefore(id);
+      else actions.addSiblingAfter(id);
       return;
     }
 
@@ -444,7 +450,7 @@ function Mirror({
             {sg.text}
           </span>
         ) : sg.name ? (
-          <span key={i} className="ol-var" data-title={vars[sg.name] || '(empty)'}>
+          <span key={i} className="ol-var" data-title={describeVar(sg.name, vars[sg.name])}>
             {sg.text}
           </span>
         ) : (

@@ -36,17 +36,30 @@ Each bullet becomes a pbt model. A node **auto-includes its children's outputs**
 both become `{{ ref('…') }}` dependencies. pbt resolves ordering and runs
 independent branches in parallel.
 
-The prompt is assembled in this order:
+An `@` reference is substituted **where it stands**. The mention marks the place
+in the sentence that the referenced bullet's answer belongs, so it becomes that
+bullet's `{{ ref('…') }}` and the answer is rendered inline — nothing about the
+reference is spelled out, because the name was only ever a placeholder for its
+content:
 
 ```
-<the bullet's own text>
+Which libraries suit these datasets @[[<id>]]
+    ↓
+Which libraries suit these datasets {"datasets": ["geophysics", "drilling"]}
+```
+
+Everything else follows the text:
+
+```
+<the bullet's own text, with its @ references filled in>
 <child 1's output>
 <child 2's output>
-<each @ reference's output>
+<any @ reference that had no place of its own to go>
 ```
 
 The bullet's own text comes **first** and the material it is about follows, so
-"summarise what follows" means what it says.
+"summarise what follows" means what it says. A reference already standing in the
+sentence is not also pasted underneath it.
 
 An **empty bullet is not skipped** when anything beneath it has text: a blank
 bullet is how you write "hand my children's outputs upward", and a child
@@ -72,6 +85,15 @@ points at `promptdata` instead.
 
 The `prompts` in the response show variables **filled in**, not as the Jinja
 call they compiled to — that column answers "what did the model actually see".
+
+A bullet pbt **skipped** — because something it depends on failed — gets that
+said at the top of its entry instead. Its inputs are missing from the
+reconstruction because they were never produced, and a prompt that does not
+admit it was never sent reads as a bug in whatever fed it.
+
+Errors name a bullet by its first line, not by its pbt model name: `n_gT4b9…` is
+the right name for the run and the wrong one for the sentence a person reads
+when it fails.
 
 One ambiguity is left standing, since both features share the `@`: an `@`
 mention arrives here already expanded to the target's title (`@[[id]]` →
@@ -106,6 +128,34 @@ JSON (what a person reads) while `prompts` shows the mapping form (what actually
 reached the next model). They differ on purpose: the point of that column is to
 say what was really sent.
 
+## Exporting (`POST /export`)
+
+`POST /export` returns the graph as a pbt project you can run without this app.
+Same body as `/run` plus a `target`:
+
+```jsonc
+{ "target": "script",   // or "project"
+  "name": "Ore datasets",
+  "nodes": [ ... ], "promptdata": { ... }, "globalInstruction": "..." }
+// → { "filename": "ore_datasets_pipeline.py", "text": "...", "warnings": [] }
+```
+
+* **`script`** — one file: the models as a dict, a small `llm_call`, and
+  `pbt.async_run` over them.
+* **`project`** — one file that *writes* `models/<name>.prompt` per bullet plus
+  a `client.py`, which is the layout `pbt serve` expects. `pbt serve` cannot be
+  handed a dict, so the export has to be the thing that lays the project out.
+
+The sources come from `_build_source`, the same function a run uses, so an
+export is the graph **as it actually runs** rather than a second rendering that
+can drift. What differs is naming: a run uses `n_<bullet id>`, an export names
+each model after its bullet's first line, because these become file names and
+`ref('…')` calls a person will read.
+
+`warnings` says what could not come along — attachments (the bytes stay in this
+server's bucket) and python bullets (they need the `python_modal` kind, which is
+this server's, not pbt's). Nothing is dropped silently.
+
 ## Bullet kinds
 
 Each node carries a `kind`, which decides what running it does:
@@ -114,7 +164,25 @@ Each node carries a `kind`, which decides what running it does:
 |------------|------------------------------------------------------------------|
 | `prompt`   | Sent to the LLM. The default.                                     |
 | `template` | Never sent: the rendered text, with every upstream output substituted in, *is* the output. |
+| `loop`     | Sent to the LLM **once per item** of an upstream JSON list; its output is the list of answers. pbt's own fan-out kind. |
 | `python`   | Runs the code its **one child** produced, in a **Modal sandbox** — not on this server. |
+
+A **loop** bullet is emitted with `{{ config(model_type="loop") }}` and is
+otherwise shaped like a prompt: the `{{ ref('…') }}` lines it already carries are
+what pbt renders, and on a loop model `ref()` yields the **current item**, so a
+loop bullet needs no syntax of its own.
+
+Only a JSON bullet can produce a list, so its inputs are where the list comes
+from. When exactly one input has JSON enforced the server pins
+`loop_over="<that model>"`, which settles the ambiguity before the run instead of
+after — pbt raises when two upstreams both come back as lists, and by then the
+rest of the graph has been sent to a model and paid for. When **no** input could
+produce one, `POST /run` refuses the whole run and says so, rather than letting
+that surface mid-run.
+
+A loop's `prompts` entry shows the **first pass**, headed by a line saying how
+many there were: a loop bullet has no single prompt, and showing one nobody was
+sent would be worse than saying which one this is.
 
 `template` needs no model type of its own: pbt parses `{{ config(...) }}` into
 `model.config` and hands it to `llm_call`, where `llm.py` short-circuits into a
@@ -143,15 +211,112 @@ run, with the traceback — and the line numbers in it are the script's own.
 Because its text is inert, a python bullet with nothing beneath it is dropped
 from the run like any other empty subtree, rather than failing.
 
-The sandbox image is fixed: `numpy`, `pandas`, `requests`. There is
-deliberately no way for a bullet to request more — the code is written
-upstream, usually by an LLM, so a package name would be chosen upstream too,
-and install-time code runs before the script does.
+The sandbox image always has `numpy`, `pandas` and `requests`. Add to it with
+**`MODAL_PACKAGES`** on the server:
+
+```ini
+MODAL_PACKAGES=scipy, pillow==11.*, beautifulsoup4
+```
+
+Comma- or space-separated, each entry a plain requirement — a name, optional
+`[extras]`, optional version pin. Anything else (an index URL, a flag, a path, a
+git reference) is **refused**, and a python bullet then fails with a message
+naming it rather than running with the package quietly missing: that would
+surface as an ImportError from a script nobody wrote, a long way from the
+environment variable that caused it. The image is held for the life of the
+process, so a change needs a restart, and costs one image build on the next run.
+
+### Per-run packages: `python_depn`
+
+A run can add to that image with the **`python_depn`** variable — a fixed
+row at the top of the settings table, comma-separated:
+
+```
+python_depn = beautifulsoup4, lxml, scipy==1.*
+```
+
+The server reads it on the way past and writes it into each python bullet's
+config line — `{{ config(model_type="python_modal", packages="…") }}` — so it
+travels *in the model source*, not in a module-level variable: the server
+answers requests concurrently, and a global would let one run's packages end up
+in another's sandbox. Entries are held to the same rule as `MODAL_PACKAGES` (a
+name, optional `[extras]`, optional pin) and the bullet fails naming anything
+else, rather than passing it to `uv pip install` as an argument.
+
+It stays a variable like any other, so `@python_depn` written into the
+prompt that *generates* the script tells the model what it may import, in the
+same breath as telling the sandbox what to install.
+
+### A script asking for its own packages: PEP 723
+
+A script may also declare what it needs itself, in the standard
+[PEP 723](https://peps.python.org/pep-0723/) inline-metadata block — the one
+`uv run` and `pipx run` read:
+
+```python
+# /// script
+# dependencies = ["httpx", "rich>=13"]
+# ///
+```
+
+`modal_exec` parses it out of the child's output and installs those on top of
+everything else. Using the standard rather than a marker of our own means a
+script written here runs unchanged anywhere else, and a model asked for "a PEP
+723 header" already knows what that is. A script with no block, or an
+unparseable one, asks for nothing: a comment that is not valid metadata is a
+comment. A block naming something that is not a requirement fails the bullet.
+
+### `@coding_instructions`
+
+The three things a model writing one of these scripts cannot know — that its
+answer is executed rather than read, what is already installed, and how to ask
+for more. Put `@coding_instructions` in the prompt that asks for the
+script and the server fills it in:
+
+```
+Write Python only — the file is run exactly as you write it, so no explanation
+outside comments. A ``` fence around it is fine.
+These are already installed: numpy, pandas, requests, beautifulsoup4.
+For anything else, declare it in a PEP 723 block at the top of the file and it
+will be installed before the script runs:
+
+# /// script
+# dependencies = ["httpx", "rich"]
+# ///
+```
+
+It has a fixed row of its own in the variables table, left empty by default. The
+server fills an empty one in — the package list is then the real one for this
+server and this run, so the default cannot drift from the sandbox it describes
+the way a hand-written paragraph would. A value typed into that row is a
+deliberate override and is passed through untouched.
+
+Both of these rows are the server's by name: it looks them up by it, so neither
+can be renamed or deleted in the table — only filled in. A renamed reserved
+variable would simply be one the server never finds, which fails silently.
+
+A per-run package the image already has is dropped rather than reinstalled: an
+extra name means a different image, and a different image means a build, for a
+package that was there all along.
+
+The packages are part of that bullet's cache key: `{{ config(...) }}` renders to
+nothing, so the environment a script ran against is invisible in the rendered
+prompt, and the same script against a different environment is a different run.
+
+**This is a real widening of who chooses.** `MODAL_PACKAGES` needs deploy
+access; `python_depn` needs only the ability to POST a graph, and `pip`
+runs a package's own build code before the script does. On a server anyone can
+reach, that is arbitrary code execution in your Modal account. It is off no
+switch — if that matters for a deployment, do not expose that server.
+
+`GET /python/enabled` reports the list, because the packages are chosen on the
+server while the prompt that writes the script is written in the browser — the
+`•••` → *Convert to python* tooltip names them.
 
 Attachments never reach a python bullet: the sandbox is a different machine.
 
-`GET /python/enabled` reports whether Modal is configured; the UI hides the
-"Convert to python" action when it is not.
+`GET /python/enabled` reports whether Modal is configured (and what the sandbox
+has installed); the UI annotates the "Convert to python" action when it is not.
 
 `GET /healthz` is a health check. `GET /` serves the built frontend when a
 `dist/` folder sits next to `server/` (see Docker below); otherwise it 404s and
@@ -173,6 +338,7 @@ the UI. Modal is server-side only:
 GEMINI_API_KEY=...
 MODAL_TOKEN_ID=ak-...
 MODAL_TOKEN_SECRET=as-...
+MODAL_PACKAGES=scipy, pillow   # optional — on top of numpy/pandas/requests
 ```
 
 `modal token new` (or `modal token set --token-id … --token-secret …`) writes

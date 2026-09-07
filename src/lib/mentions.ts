@@ -93,15 +93,6 @@ export function toDisplay(raw: string, titles: TitleMap): string {
   return raw.replace(tokenRe(), (_, id) => mentionLabel(titles[id]));
 }
 
-/** Every mention expanded to the target's full title — what the server sends
- *  to the LLM, so a prompt reads naturally instead of carrying raw ids. */
-export function resolveMentions(raw: string, titles: TitleMap): string {
-  return raw.replace(tokenRe(), (_, id) => {
-    const t = (titles[id] ?? '').replace(/\s+/g, ' ').trim();
-    return t ? `@${t}` : '';
-  });
-}
-
 /**
  * What the user typed (labels) → raw (ids), the inverse of `toDisplay`.
  *

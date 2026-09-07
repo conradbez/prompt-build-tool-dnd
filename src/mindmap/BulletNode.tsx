@@ -101,13 +101,18 @@ export function JsonChip({ className = '' }: { className?: string }) {
   );
 }
 
-/** The `TPL` / `PY` badge. A prompt bullet is the default and wears nothing. */
+/** The `TPL` / `PY` / `LOOP` badge. A prompt is the default and wears nothing. */
 export function KindChip({ kind, className = '' }: { kind: BulletKind; className?: string }) {
   if (kind === 'prompt') return null;
   const [label, title] =
     kind === 'template'
       ? ['TPL', 'Not sent to the LLM — its text, with refs filled in, is its output']
-      : ['PY', 'Runs its child\u2019s code in a Modal sandbox — what it prints is its output'];
+      : kind === 'loop'
+        ? [
+            'LOOP',
+            'Sent to the LLM once per item of an upstream JSON list — its output is the list of answers',
+          ]
+        : ['PY', 'Runs its child\u2019s code in a Modal sandbox — what it prints is its output'];
   return (
     <span className={`tpl-chip tpl-chip--${kind} ${className}`} title={title}>
       {label}

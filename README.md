@@ -94,7 +94,12 @@ Each bullet becomes one pbt model. A node **auto-includes its children's
 outputs** — children run first and feed up into the parent — and any `@`
 references you add. These become `{{ ref('…') }}` dependencies that pbt resolves
 (running independent branches in parallel). So `@` is only needed to reference a
-*non-child* node. The API key is remembered per provider in this browser's
+*non-child* node.
+
+An `@` reference is filled in **where you wrote it**: it marks the spot the
+referenced bullet's answer belongs, so that answer is rendered in its place —
+you get the content, not the name. A child's output, which has no such spot,
+goes below the text. The API key is remembered per provider in this browser's
 `localStorage` and sent with the request.
 
 - **Server + Railway deploy:** see [`server/README.md`](server/README.md). The
@@ -111,11 +116,81 @@ references you add. These become `{{ ref('…') }}` dependencies that pbt resolv
 
 To keep this simple, several main-branch features are **not** implemented:
 
-- **Loop nodes** — a bullet is either a prompt or a template (`•••` → *Convert
-  to template*), with no map/reduce loop type.
 - **In-browser execution** (PyScript) and **in-browser LLMs** (WebLLM) — running
   always goes through the server.
-- Per-session storage and parallel-loop map/reduce.
+- Per-session storage.
+
+## Python sandbox packages
+
+`•••` → *Convert to python* runs a bullet's child's script in a Modal sandbox,
+which always has `numpy`, `pandas` and `requests`. Add to it per run with the
+**`python_depn`** row at the top of the Settings variables table —
+comma-separated, e.g. `beautifulsoup4, lxml`. It is a variable like any other,
+so `@python_depn` in the prompt that writes the script also tells the
+model what it may import.
+
+A script can also ask for its own, in the standard **PEP 723** block that
+`uv run` reads — declared at the top of the file, installed before it runs:
+
+```python
+# /// script
+# dependencies = ["httpx", "rich"]
+# ///
+```
+
+And **`@coding_instructions`** drops the whole convention into the
+prompt that asks for the script: that the answer is executed rather than read,
+which packages the sandbox already has, and that PEP 723 block. Its row is left
+empty by default and the server writes it at run time, so it always names the
+real sandbox — type into it to say your own thing instead.
+
+Both rows are fixed: the server looks them up by name, so they cannot be renamed
+or deleted, only filled in.
+
+Note what per-run packages mean: anyone who can post a graph to the server
+chooses what gets installed, and `pip` runs a package's own build code.
+`MODAL_PACKAGES` on the server is the deploy-access-only version — see
+[`server/README.md`](server/README.md).
+
+## Saving and exporting
+
+Everything lives in Settings (`⚙`), under **This map**:
+
+Two verbs, and everything else is a choice of *where*:
+
+| | |
+|---|---|
+| **Save** | keeps this map in this browser under the name in the dropdown — and **opens** it: from then on your edits go into it as you make them |
+| **Save ▴** | **Export to pbt** (a `.py` running `pbt.async_run` over every bullet) · **Export to server** (a `.py` that writes `models/*.prompt` + `client.py`, the layout `pbt serve` expects) · **Copy to clipboard** as JSON |
+| **Load** | puts the named save back on screen |
+| **Load ▴** | JSON on the clipboard |
+
+Saving or loading a name makes that save the document you are working in, and
+edits flow back into it (coalesced, not per keystroke) — a save that goes stale
+the moment you carry on typing is a save you cannot trust. Nothing is open until
+you save or load one; a map pasted from the clipboard opens nothing, since it is
+not any of the saves.
+
+Loading replaces what is on screen, so the button asks first — and keeps the map
+it replaced as *“Before last load”*, so there is always one step back. The
+question lapses after ten seconds rather than sitting there waiting to catch a
+later click.
+
+Both exports are built by the server from the same sources a run uses, so what
+you take away is what was running — see [`server/README.md`](server/README.md).
+A browser that will not hand over the clipboard gets a box to paste into
+instead, rather than a button that appears to do nothing.
+
+## Looping over a list
+
+`•••` → **Convert to loop** marks a bullet `LOOP`. It is sent to the LLM **once
+per item** of an upstream JSON list, and its answer is the list of answers —
+pbt's own `model_type="loop"`.
+
+The list comes from an input with **JSON enforced** (a child, or an `@`
+reference) that returns an array; on each pass that input's `ref()` renders one
+item, so nothing new has to be written in the bullet. A loop with no such input
+is refused before the run, with a message saying what it needs.
 
 ## Enforcing JSON
 

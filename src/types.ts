@@ -8,8 +8,11 @@
  * - `python`   — its text is Python, run in a Modal sandbox rather than on the
  *   server. Whatever it prints is its output, and the upstream outputs arrive
  *   as `inputs`. Emitted as `{{ config(model_type="python_modal") }}`.
+ * - `loop`     — sent to the LLM *once per item* of an upstream JSON list, and
+ *   its output is the list of answers. Emitted as
+ *   `{{ config(model_type="loop") }}`; pbt's own fan-out kind.
  */
-export type BulletKind = 'prompt' | 'template' | 'python';
+export type BulletKind = 'prompt' | 'template' | 'python' | 'loop';
 
 /**
  * What a python bullet shows instead of text. It has none: it is an operator,

@@ -485,14 +485,29 @@ body,
   width: min(560px, 100%);
 }
 
-/* One column, filling the panel: the three-way split is the answer modal's
-   layout, not this one's. The settings stack instead — the model row is as
-   tall as its fields, the instruction gets a writing-sized box, and the
-   variables table takes the rest and scrolls. */
+/* One column: the three-way split is the answer modal's layout, not this
+   one's. The settings stack, each section as tall as it needs to be, and the
+   *panel* scrolls. Dividing a fixed height between them instead squeezed
+   whichever section was flexible until its fields were cut in half — which
+   only shows up once a section above it grows a line.
+
+   `.res-col__body` is a scroll container everywhere else, and a scroll
+   container's min-content height is zero, so it has to stop being one here or
+   `min-content` rows collapse it to nothing. */
 .res-modal__panel--narrow .res-modal__cols {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(110px, auto) minmax(0, 1fr);
-  height: min(600px, 84vh);
+  grid-auto-rows: min-content;
+  max-height: min(680px, 84vh);
+  overflow-y: auto;
+}
+
+.res-modal__panel--narrow .res-col__body {
+  overflow: visible;
+}
+
+/* A lone textarea collapses to one line, so the instruction asks for room. */
+.res-modal__panel--narrow .res-col__edit {
+  min-height: 88px;
 }
 
 .res-modal__panel--narrow .res-col + .res-col {
@@ -517,6 +532,26 @@ body,
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* The row's `•••` lives in a gutter that reveals it on hover; there is no row
+   here to hover, so in the modal head it is simply always there. */
+.res-modal__menu .ol-menu__btn {
+  opacity: 1;
+  font-size: 11px;
+  width: 22px;
+}
+
+.res-modal__menu .ol-menu__pop {
+  left: 0;
+  right: auto;
+}
+
+/* The title already takes the slack (`flex: 1 1 auto` above), so the chips just
+   have to refuse to be squeezed by it. */
+.res-modal__head .tpl-chip {
+  flex: 0 0 auto;
+  margin-right: 0;
 }
 
 .res-modal__close {
@@ -1022,6 +1057,195 @@ body,
   cursor: pointer;
 }
 
+/* --------------------------------------------------- settings: save / export */
+
+.pd-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  overflow: visible;
+}
+
+/* Two rows: what the document is called, then what to do with it. They wrap
+   rather than shrink — a squeezed button says nothing. */
+.pd-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pd-select--wide {
+  flex: 0 1 auto;
+  max-width: 220px;
+}
+
+.pd-row .pd-input {
+  flex: 1 1 140px;
+  width: auto;
+}
+
+.pd-btn {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.pd-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Save and Load are the two verbs; where the map goes or comes from is a choice
+   inside each. The popup hangs off its own button, so the row can wrap. */
+.pd-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+/* One control, two targets: the verb, and where else it could point. They share
+   an edge so they read as a pair rather than as two buttons that happen to be
+   adjacent. */
+.pd-split {
+  display: flex;
+}
+
+.pd-split > .pd-btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.pd-btn--caret {
+  padding: 0 7px;
+  border-left: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* The seam belongs to whichever half is not being hovered, so hovering one
+   half never makes the pair look broken in the middle. */
+.pd-btn--caret:hover:not(:disabled) {
+  border-left: none;
+}
+
+.pd-pop {
+  position: absolute;
+  z-index: 60;
+  /* Upward: this row is the last thing in a panel that scrolls, so a menu
+     hanging below it is clipped by the panel's own edge. There is always room
+     above — the sections it covers are the ones you are not using. */
+  bottom: calc(100% + 4px);
+  left: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  min-width: 200px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.pd-pop button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pd-pop button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.pd-pop button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* A button mid-question: it is asking, so it looks like it wants an answer.
+   Stated again for `:hover`, which is more specific and would otherwise paint
+   the accent colour over the alarm at exactly the moment you are reading it —
+   the pointer is on the button, that being how it got there. */
+.pd-btn--confirm,
+.pd-btn--confirm:hover:not(:disabled) {
+  border-color: #dc2626;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.pd-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* What just happened, in the place it happened. It replaces itself rather than
+   accumulating: this is a receipt, not a log. */
+/* A word in a sentence that happens to be a button — used where the thing being
+   named is also the thing you want to add. */
+.pd-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.pd-link:hover code {
+  background: var(--accent-soft);
+}
+
+/* The fallback for a clipboard the browser will not read out. */
+.pd-paste {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 70px;
+  resize: vertical;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.pd-paste:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pd-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.pd-status--bad {
+  color: #b91c1c;
+}
+
 /* ------------------------------------------------------- settings: variables */
 
 /* The table has no "add" button: its last row is blank, and filling it in is
@@ -1054,9 +1278,10 @@ body,
   vertical-align: middle;
 }
 
-/* Name and value get a third and two thirds; the × column takes what it needs. */
+/* The name column fits the longest name the app itself uses — a reserved name
+   that reads as `standard_coding_instr…` is one nobody can check. */
 .pd-table th:nth-child(1) {
-  width: 34%;
+  width: 44%;
 }
 
 .pd-table th:nth-child(3) {
@@ -1085,6 +1310,13 @@ body,
 .pd-input--name {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #0f766e;
+}
+
+/* A name the server owns: readable, selectable, not editable. */
+.pd-input--fixed {
+  background: #f5f7fa;
+  color: #3e4c59;
+  cursor: default;
 }
 
 .pd-input--bad {
@@ -1153,6 +1385,13 @@ body,
   background: #d8ecfb;
 }
 
+/* A loop bullet runs many times over a list — green, the odd one out among the
+   kinds, because it is the only one whose answer is a collection. */
+.tpl-chip--loop {
+  color: #2f6f3e;
+  background: #d9f2e0;
+}
+
 /* JSON is a constraint on the answer, not a kind of bullet, so it wears the
    amber of a rule being enforced rather than either kind's colour. */
 .tpl-chip--json {
@@ -1166,6 +1405,13 @@ body,
 .ol-row--python .ol-md {
   padding-right: 38px;
   color: #3e4c59;
+}
+
+/* A loop bullet *is* an ordinary prompt — it just runs once per item — so it
+   keeps a prompt's ink and only makes room for its chip. */
+.ol-row--loop .ol-text,
+.ol-row--loop .ol-md {
+  padding-right: 44px;
 }
 
 /* Code reads badly in the body font, so the row and the node both switch. */

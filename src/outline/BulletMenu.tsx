@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Bullet } from '../types';
 import { actions, canTakeChild, getState } from '../store';
-import { filesEnabled, pythonEnabled, uploadFile } from '../api';
+import { filesEnabled, pythonInfo, uploadFile } from '../api';
 
 interface Props {
   bullet: Bullet;
@@ -16,7 +16,7 @@ interface Props {
 export function BulletMenu({ bullet }: Props) {
   const [open, setOpen] = useState(false);
   const [canUpload, setCanUpload] = useState(false);
-  const [canPython, setCanPython] = useState(false);
+  const [python, setPython] = useState({ enabled: false, packages: [] as string[] });
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const picker = useRef<HTMLInputElement | null>(null);
@@ -30,7 +30,7 @@ export function BulletMenu({ bullet }: Props) {
     if (!open) return;
     let live = true;
     filesEnabled().then((yes) => live && setCanUpload(yes));
-    pythonEnabled().then((yes) => live && setCanPython(yes));
+    pythonInfo().then((info) => live && setPython(info));
     return () => {
       live = false;
     };
@@ -152,18 +152,32 @@ export function BulletMenu({ bullet }: Props) {
               </button>
             </li>
           )}
+          {bullet.kind !== 'loop' && (
+            <li>
+              <button
+                role="menuitem"
+                title="Loop bullets are sent to the LLM once per item of an upstream JSON list — give one a child (or an @ reference) with JSON enforced, and ref() hands it one item at a time."
+                onClick={() => run(() => actions.setKind(id, 'loop'))}
+              >
+                Convert to loop
+              </button>
+            </li>
+          )}
           {bullet.kind !== 'python' && (
             <li>
               <button
                 role="menuitem"
                 title={
-                  canPython
-                    ? 'Python nodes take no text of their own — they run the code their one child produced, in a Modal sandbox, and whatever it prints is the output.'
+                  python.enabled
+                    ? 'Python nodes take no text of their own — they run the code their one child produced, in a Modal sandbox, and whatever it prints is the output.' +
+                      (python.packages.length
+                        ? ` The sandbox has: ${python.packages.join(', ')}.`
+                        : '')
                     : 'Python nodes run their child\u2019s code in a Modal sandbox, which this server has not reported as configured — running one will say what is missing.'
                 }
                 onClick={() => run(() => actions.setKind(id, 'python'))}
               >
-                Convert to python{canPython ? '' : ' (server not ready)'}
+                Convert to python{python.enabled ? '' : ' (server not ready)'}
               </button>
             </li>
           )}

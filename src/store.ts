@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import { nanoid } from 'nanoid';
 import type { Bullet, BulletKind, FileRef, Focus, OutlineState, FlatBullet } from './types';
-import { mentionIds, mentionToken, resolveMentions, stripMention } from './lib/mentions';
+import { mentionIds, mentionToken, stripMention } from './lib/mentions';
+import { RENAMED } from './lib/promptdata';
 
 /**
  * A tiny external store shared by the outline (right) and the mind map (left).
@@ -54,39 +55,84 @@ function fresh(): { bullets: Record<string, Bullet>; rootIds: string[] } {
   return { bullets: { [root.id]: root, [a.id]: a, [b.id]: b }, rootIds: [root.id] };
 }
 
-/** Load a saved document, tolerating older/partial shapes; null if none/invalid. */
-function loadDoc(): { bullets: Record<string, Bullet>; rootIds: string[] } | null {
+/** A document on its own: what is saved, exported and pasted around. */
+export interface Doc {
+  bullets: Record<string, Bullet>;
+  rootIds: string[];
+}
+
+/**
+ * Read a document out of anything — localStorage, a named save, the clipboard —
+ * tolerating older and partial shapes. `null` when it is not a document.
+ *
+ * Every field is taken defensively because the source may be a hand-edited
+ * paste, not just this app's own writing.
+ */
+export function parseDoc(value: unknown): Doc | null {
   try {
-    for (const k of STALE_KEYS) localStorage.removeItem(k);
-    const raw = localStorage.getItem(DOC_KEY);
-    if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (!d || typeof d !== 'object' || !d.bullets || !Array.isArray(d.rootIds) || d.rootIds.length === 0) {
-      return null;
-    }
+    const d = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!d || typeof d !== 'object') return null;
+    const raw = d as { bullets?: unknown; rootIds?: unknown };
+    if (!raw.bullets || typeof raw.bullets !== 'object') return null;
+    if (!Array.isArray(raw.rootIds) || raw.rootIds.length === 0) return null;
+
     const bullets: Record<string, Bullet> = {};
-    for (const [id, raw] of Object.entries(d.bullets as Record<string, Record<string, unknown>>)) {
+    for (const [id, b] of Object.entries(raw.bullets as Record<string, Record<string, unknown>>)) {
+      if (!b || typeof b !== 'object') continue;
       bullets[id] = makeBullet({
         id,
-        text: typeof raw.text === 'string' ? raw.text : '',
-        children: Array.isArray(raw.children) ? (raw.children as string[]) : [],
-        parentId: typeof raw.parentId === 'string' ? raw.parentId : null,
-        collapsed: !!raw.collapsed,
-        refs: Array.isArray(raw.refs) ? (raw.refs as string[]) : [],
-        files: Array.isArray(raw.files) ? (raw.files as FileRef[]) : [],
-        pos: isPos(raw.pos) ? raw.pos : null,
-        kind: isKind(raw.kind) ? raw.kind : 'prompt',
-        jsonOutput: !!raw.jsonOutput,
+        text: typeof b.text === 'string' ? renameVars(b.text) : '',
+        children: Array.isArray(b.children) ? (b.children as string[]) : [],
+        parentId: typeof b.parentId === 'string' ? b.parentId : null,
+        collapsed: !!b.collapsed,
+        refs: Array.isArray(b.refs) ? (b.refs as string[]) : [],
+        files: Array.isArray(b.files) ? (b.files as FileRef[]) : [],
+        pos: isPos(b.pos) ? b.pos : null,
+        kind: isKind(b.kind) ? b.kind : 'prompt',
+        jsonOutput: !!b.jsonOutput,
       });
     }
-    return { bullets, rootIds: d.rootIds.filter((id: string) => bullets[id]) };
+    // A child naming a parent that did not come with it would strand it, so
+    // both directions are filtered down to bullets that actually arrived.
+    for (const b of Object.values(bullets)) {
+      b.children = b.children.filter((c) => bullets[c]);
+      if (b.parentId && !bullets[b.parentId]) b.parentId = null;
+      b.refs = b.refs.filter((r) => bullets[r]);
+    }
+    const rootIds = (raw.rootIds as string[]).filter((id) => bullets[id]);
+    return rootIds.length ? { bullets, rootIds } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Carry a bullet's `@name`s across a variable rename.
+ *
+ * A one-time rewrite, not a migration: the old names resolve to nothing now, so
+ * a bullet still carrying one would quietly go back to being prose — the kind
+ * of breakage you find out about from a prompt that read differently than you
+ * thought it did.
+ */
+function renameVars(text: string): string {
+  return Object.entries(RENAMED).reduce(
+    (out, [from, to]) => out.replace(new RegExp(`@${from}\\b`, 'g'), `@${to}`),
+    text,
+  );
+}
+
+/** Load the live document from localStorage; null if none or invalid. */
+function loadDoc(): Doc | null {
+  try {
+    for (const k of STALE_KEYS) localStorage.removeItem(k);
+    return parseDoc(localStorage.getItem(DOC_KEY));
   } catch {
     return null;
   }
 }
 
 function isKind(v: unknown): v is BulletKind {
-  return v === 'prompt' || v === 'template' || v === 'python';
+  return v === 'prompt' || v === 'template' || v === 'python' || v === 'loop';
 }
 
 function isPos(v: unknown): v is { x: number; y: number } {
@@ -125,6 +171,11 @@ function emit(next: OutlineState) {
   listeners.forEach((l) => l());
 }
 
+/** Be told when anything in the document changes. Returns the unsubscribe. */
+export function subscribeStore(l: () => void): () => void {
+  return subscribe(l);
+}
+
 function subscribe(l: () => void) {
   listeners.add(l);
   return () => listeners.delete(l);
@@ -157,16 +208,27 @@ export function focusOrder(s: OutlineState = state): Focus[] {
 /** All bullets as flat run payloads for the server (parentId lets the child
  * auto-include its parent's output; refs are extra @-references). */
 export function buildNodePayloads(s: OutlineState = state) {
-  const titles = titleMap(s);
   return Object.values(s.bullets).map((b) => ({
     id: b.id,
-    text: resolveMentions(b.text, titles),
+    // Raw, mention tokens and all: the server puts each referenced bullet's
+    // output where its mention stands, so the position has to survive the trip.
+    text: b.text,
     files: b.files,
     parentId: b.parentId,
     refs: b.refs.filter((r) => s.bullets[r]),
     kind: b.kind,
     jsonOutput: b.jsonOutput,
   }));
+}
+
+/** The live document, as it is saved and copied — pretty-printed for a person. */
+export function docJson(s: OutlineState = state): string {
+  return JSON.stringify({ bullets: s.bullets, rootIds: s.rootIds }, null, 2);
+}
+
+/** The live document, for handing to a named save. */
+export function currentDoc(s: OutlineState = state): Doc {
+  return { bullets: s.bullets, rootIds: s.rootIds };
 }
 
 /**
@@ -283,7 +345,7 @@ export const actions = {
     emit(next);
   },
 
-  /** Make a bullet a prompt, a template, or python — see `BulletKind`. */
+  /** Make a bullet a prompt, a template, python or a loop — see `BulletKind`. */
   setKind(id: string, kind: BulletKind) {
     const b = state.bullets[id];
     if (!b || b.kind === kind) return;
@@ -293,6 +355,28 @@ export const actions = {
     // it here is what keeps the row honest: what you see is what runs.
     next.bullets[id] = kind === 'python' ? { ...b, kind, text: '', refs: [] } : { ...b, kind };
     emit(next);
+  },
+
+  /**
+   * Replace the whole document — a named save being loaded, or a paste.
+   *
+   * Everything derived from a run is dropped with it: results and prompts
+   * belong to the bullets that produced them, and keeping them against a
+   * different document would attach one map's answers to another's bullets.
+   */
+  replaceDoc(doc: Doc) {
+    const firstId = doc.rootIds[0];
+    emit({
+      ...state,
+      bullets: doc.bullets,
+      rootIds: doc.rootIds,
+      focus: { id: firstId, caret: 'end' },
+      selectedId: firstId,
+      results: {},
+      prompts: {},
+      runErrors: [],
+      openResultId: null,
+    });
   },
 
   /** Turn JSON enforcement on or off for one bullet — see `Bullet.jsonOutput`. */
@@ -470,6 +554,36 @@ export const actions = {
     }
     next.focus = focusFor(state, id);
     emit(next);
+  },
+
+  /**
+   * Create a new empty sibling directly *before* `id`, leaving the caret where
+   * it was — in `id`, which has moved down a line.
+   *
+   * This is Enter pressed at the very start of a bullet: the intent is to make
+   * room above what you are looking at, not to leave it and start something
+   * else, so the caret stays put instead of following the new bullet the way
+   * `addSiblingAfter` makes it follow.
+   *
+   * Focus is re-asserted on `id` rather than left alone. Leaving it alone
+   * *looks* like it should work — the row keeps its element and the store's
+   * focus never changed — but a row inserted above this one moves it in the
+   * DOM, and the caret does not reliably survive that. Saying where the caret
+   * goes is the only way to know where it went.
+   */
+  addSiblingBefore(id: string): string {
+    if (!canTakeChild(state, state.bullets[id]?.parentId ?? null)) return '';
+    const next = clone(state);
+    const { list, index, parentId } = siblingsOf(next, id);
+    const nb = makeBullet({ id: nanoid(), parentId });
+    next.bullets[nb.id] = nb;
+    const newList = [...list];
+    newList.splice(index, 0, nb.id);
+    setChildren(next, parentId, newList);
+    next.focus = { id, caret: 'start' };
+    next.selectedId = id;
+    emit(next);
+    return nb.id;
   },
 
   /** Create a new empty sibling directly after `id`; focus it. */
