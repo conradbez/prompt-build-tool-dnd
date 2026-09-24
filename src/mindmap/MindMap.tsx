@@ -113,6 +113,7 @@ export function MindMap() {
         canAddChild: canTakeChild(state, b.id),
         collapsed: b.collapsed,
         kind: b.kind,
+        mcpServer: b.mcpServer,
         jsonOutput: b.jsonOutput,
         fileCount: b.files.length,
         hasResult: state.results[p.id] !== undefined,

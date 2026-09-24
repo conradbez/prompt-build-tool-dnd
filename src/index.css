@@ -1392,6 +1392,13 @@ body,
   background: #d9f2e0;
 }
 
+/* An agent works on its own for many steps — violet, apart from the kinds that
+   make a single call. */
+.tpl-chip--agent {
+  color: #5b3a8a;
+  background: #ece3fa;
+}
+
 /* JSON is a constraint on the answer, not a kind of bullet, so it wears the
    amber of a rule being enforced rather than either kind's colour. */
 .tpl-chip--json {
@@ -1412,6 +1419,13 @@ body,
 .ol-row--loop .ol-text,
 .ol-row--loop .ol-md {
   padding-right: 44px;
+}
+
+/* An agent bullet's text is a task in prose, like a prompt's. Its chip is the
+   widest, `AGENT+MCP`. */
+.ol-row--agent .ol-text,
+.ol-row--agent .ol-md {
+  padding-right: 72px;
 }
 
 /* Code reads badly in the body font, so the row and the node both switch. */

@@ -166,6 +166,7 @@ Each node carries a `kind`, which decides what running it does:
 | `template` | Never sent: the rendered text, with every upstream output substituted in, *is* the output. |
 | `loop`     | Sent to the LLM **once per item** of an upstream JSON list; its output is the list of answers. pbt's own fan-out kind. |
 | `python`   | Runs the code its **one child** produced, in a **Modal sandbox** — not on this server. |
+| `agent`    | Its rendered text is a **task** for a coding agent (mini-swe-agent) in a Modal sandbox, with bash and, optionally, an **MCP server**'s tools. The agent's submitted answer is the output. See below. |
 
 A **loop** bullet is emitted with `{{ config(model_type="loop") }}` and is
 otherwise shaped like a prompt: the `{{ ref('…') }}` lines it already carries are
@@ -317,6 +318,89 @@ Attachments never reach a python bullet: the sandbox is a different machine.
 
 `GET /python/enabled` reports whether Modal is configured (and what the sandbox
 has installed); the UI annotates the "Convert to python" action when it is not.
+
+## Agent bullets (`agent`, optionally with an MCP server)
+
+An agent bullet is shaped like a prompt — its text, `@` references filled in
+where they stand, children's outputs below, the global instruction on top — but
+instead of one model call, that rendered text is handed to
+[mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) as a task. The
+agent works in a fresh Modal sandbox with bash as its only tool until it submits
+an answer, and that answer is the bullet's output, flowing on downstream like
+any other.
+
+A node may name an **MCP server**: any command that starts one over stdio.
+
+```jsonc
+{ "id": "a", "kind": "agent", "text": "Make a 60x40x6mm plate…",
+  "mcpServer": "uvx --python 3.12 build123d-mcp@latest" }
+```
+
+It is emitted as `{{ config(model_type="agent_modal", mcp_server="…") }}`, a
+kind `agent_exec.py` registers with pbt on import. Everything lives inside one
+sandbox — nothing is hosted and no ports are exposed:
+
+```
+Modal sandbox
+├── mcp_daemon.py   (main process) launches the MCP server over stdio,
+│                   holds one session open, listens on /tmp/mcp.sock
+├── mcp-call        tiny CLI; the agent runs it through bash
+└── run_agent.py    mini-swe-agent loop (bash is its only tool)
+```
+
+mini-swe-agent runs each command in a fresh shell, so it cannot hold an MCP
+session itself. The daemon holds it, which keeps the server's state (open files,
+CAD sessions, DB connections) alive across steps; the agent just runs
+`mcp-call <tool> '<json>'`. With **no** MCP server the main process is a plain
+`sleep` and the agent has bash alone. The sources are in `server/agent/`.
+
+| Server type | `mcpServer` |
+|---|---|
+| Python package (PyPI) | `uvx package-name` |
+| Node package (npm) | `npx -y @scope/server …args` |
+| Needs system libraries / API keys | the same, plus `AGENT_APT_PACKAGES` / `AGENT_MODAL_SECRETS` below |
+
+The agent uses the **run's provider and key** — the same ones prompt bullets
+use, as `<provider>/<*_MODEL>` through litellm. The key never goes into the
+model source (it would land in the cache key and in exports): `main.run` binds
+it in a context variable for the tasks pbt spawns, and it reaches the sandbox as
+a Modal secret made for that one sandbox. The MCP server inherits the sandbox's
+environment, key included — the agent can read it anyway.
+
+A server that fails to start fails the bullet with what it printed. An agent
+that stops without submitting (step or cost limit, a crash) fails the bullet
+with its exit status and the last thing it said, rather than passing on half an
+answer.
+
+Images a tool returns are **shown to the model**: the daemon saves each to
+`/tmp/mcp_out/`, and `mcp-call` inlines it with mini-swe-agent v2's multimodal
+tag, which the agent turns into an image block on the way to the model. That
+needs a vision-capable model, and every image stays in the conversation — each
+costs tokens on every later step — so the agent is told to ask for renders
+sparingly. `AGENT_INLINE_IMAGES=0` prints the paths instead. Other binary
+content (audio, resources) is only reported as `[type content]`.
+
+Server-side settings, all optional:
+
+| Variable | Default | |
+|---|---|---|
+| `AGENT_MODEL` | provider's model | a litellm model id, overriding the run's provider for every agent |
+| `AGENT_STEP_LIMIT` | `30` | model calls per agent — the limit that always holds |
+| `AGENT_COST_LIMIT` | `1.0` | USD per agent, where litellm can price the model |
+| `AGENT_INLINE_IMAGES` | `1` | `0` to give the agent image paths instead of the images |
+| `AGENT_TIMEOUT_SECONDS` | `900` | the sandbox's whole lifetime |
+| `AGENT_MCP_START_SECONDS` | `180` | how long an MCP server may take to come up (`uvx`/`npx` download first) |
+| `AGENT_APT_PACKAGES` | — | system packages an MCP server needs, e.g. `libgl1 libxrender1` |
+| `AGENT_PIP_PACKAGES` | — | extra Python packages in the agent image |
+| `AGENT_MODAL_SECRETS` | — | Modal secret names attached to every agent sandbox, for an MCP server's own keys |
+
+As with `MODAL_PACKAGES`, the image and the secrets are the **deployment's** to
+choose; nothing that arrives over HTTP adds to them. The MCP command itself does
+arrive over HTTP — it runs inside the sandbox, which also runs whatever commands
+the agent picks, so the sandbox is the boundary: don't attach a secret to it you
+would mind the agent reading.
+
+`GET /agent/enabled` reports whether Modal is configured for them.
 
 `GET /healthz` is a health check. `GET /` serves the built frontend when a
 `dist/` folder sits next to `server/` (see Docker below); otherwise it 404s and

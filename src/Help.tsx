@@ -46,6 +46,7 @@ const RUNNING: Row[] = [
   { keys: '@coding_instructions', desc: 'Drop into a prompt that asks for a script: the server fills in that the answer is executed, which packages the sandbox has, and how to ask for more (a PEP 723 header). Its row is filled in for you unless you type your own' },
   { keys: '@python_depn', desc: 'A variable the server reads too: comma-separated packages every python bullet\u2019s sandbox installs before it runs (on top of numpy, pandas, requests)' },
   { keys: '••• → Convert to python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output' },
+  { keys: '••• → Convert to agent', desc: 'AGENT — the text, with its inputs filled in, is a task for a coding agent in a sandbox: it works with bash until it submits an answer, which is the output. ••• → Set MCP server… gives it a stdio MCP server\u2019s tools too (e.g. uvx some-mcp-server)' },
   { keys: '••• → Enforce JSON output', desc: 'JSON — the answer is parsed and validated (pbt\u2019s output_format="json"); one that is not JSON fails the bullet instead of flowing on as prose. Works on any kind of bullet' },
 ];
 

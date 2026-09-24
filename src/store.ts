@@ -21,6 +21,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     pos: null,
     kind: 'prompt',
     jsonOutput: false,
+    mcpServer: '',
     ...partial,
   };
 }
@@ -90,6 +91,7 @@ export function parseDoc(value: unknown): Doc | null {
         pos: isPos(b.pos) ? b.pos : null,
         kind: isKind(b.kind) ? b.kind : 'prompt',
         jsonOutput: !!b.jsonOutput,
+        mcpServer: typeof b.mcpServer === 'string' ? b.mcpServer : '',
       });
     }
     // A child naming a parent that did not come with it would strand it, so
@@ -132,7 +134,7 @@ function loadDoc(): Doc | null {
 }
 
 function isKind(v: unknown): v is BulletKind {
-  return v === 'prompt' || v === 'template' || v === 'python' || v === 'loop';
+  return v === 'prompt' || v === 'template' || v === 'python' || v === 'loop' || v === 'agent';
 }
 
 function isPos(v: unknown): v is { x: number; y: number } {
@@ -218,6 +220,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     refs: b.refs.filter((r) => s.bullets[r]),
     kind: b.kind,
     jsonOutput: b.jsonOutput,
+    mcpServer: b.mcpServer,
   }));
 }
 
@@ -345,7 +348,7 @@ export const actions = {
     emit(next);
   },
 
-  /** Make a bullet a prompt, a template, python or a loop — see `BulletKind`. */
+  /** Make a bullet a prompt, a template, python, a loop or an agent — see `BulletKind`. */
   setKind(id: string, kind: BulletKind) {
     const b = state.bullets[id];
     if (!b || b.kind === kind) return;
@@ -377,6 +380,16 @@ export const actions = {
       runErrors: [],
       openResultId: null,
     });
+  },
+
+  /** Set the MCP server an agent bullet starts — see `Bullet.mcpServer`. */
+  setMcpServer(id: string, command: string) {
+    const b = state.bullets[id];
+    const value = command.trim();
+    if (!b || b.mcpServer === value) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, mcpServer: value };
+    emit(next);
   },
 
   /** Turn JSON enforcement on or off for one bullet — see `Bullet.jsonOutput`. */

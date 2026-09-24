@@ -10,6 +10,8 @@ export interface BulletNodeData {
   canAddChild: boolean;
   collapsed: boolean;
   kind: BulletKind;
+  /** An agent node's MCP server command, named in its chip's tooltip. */
+  mcpServer: string;
   /** Whether this bullet's answer is validated as JSON — shown as a chip. */
   jsonOutput: boolean;
   /** How many files are attached — shown as a paperclip count. */
@@ -26,7 +28,7 @@ export function BulletNode({ id, data, selected }: NodeProps) {
       <Handle type="target" position={Position.Top} className="mm-handle" />
       {(d.kind !== 'prompt' || d.jsonOutput || d.fileCount > 0) && (
         <div className="mm-node__flags">
-          {d.kind !== 'prompt' && <KindChip kind={d.kind} />}
+          {d.kind !== 'prompt' && <KindChip kind={d.kind} mcpServer={d.mcpServer} />}
           {d.jsonOutput && <JsonChip />}
           {d.fileCount > 0 && (
             <span className="mm-node__files" title={`${d.fileCount} attached file(s)`}>
@@ -101,8 +103,16 @@ export function JsonChip({ className = '' }: { className?: string }) {
   );
 }
 
-/** The `TPL` / `PY` / `LOOP` badge. A prompt is the default and wears nothing. */
-export function KindChip({ kind, className = '' }: { kind: BulletKind; className?: string }) {
+/** The `TPL` / `PY` / `LOOP` / `AGENT` badge. A prompt is the default and wears nothing. */
+export function KindChip({
+  kind,
+  mcpServer = '',
+  className = '',
+}: {
+  kind: BulletKind;
+  mcpServer?: string;
+  className?: string;
+}) {
   if (kind === 'prompt') return null;
   const [label, title] =
     kind === 'template'
@@ -112,7 +122,13 @@ export function KindChip({ kind, className = '' }: { kind: BulletKind; className
             'LOOP',
             'Sent to the LLM once per item of an upstream JSON list — its output is the list of answers',
           ]
-        : ['PY', 'Runs its child\u2019s code in a Modal sandbox — what it prints is its output'];
+        : kind === 'agent'
+          ? [
+              mcpServer ? 'AGENT+MCP' : 'AGENT',
+              'A coding agent works on this text as its task, in a Modal sandbox — its final answer is the output. ' +
+                (mcpServer ? `MCP server: ${mcpServer}` : 'No MCP server: bash only.'),
+            ]
+          : ['PY', 'Runs its child\u2019s code in a Modal sandbox — what it prints is its output'];
   return (
     <span className={`tpl-chip tpl-chip--${kind} ${className}`} title={title}>
       {label}

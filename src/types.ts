@@ -11,8 +11,12 @@
  * - `loop`     — sent to the LLM *once per item* of an upstream JSON list, and
  *   its output is the list of answers. Emitted as
  *   `{{ config(model_type="loop") }}`; pbt's own fan-out kind.
+ * - `agent`    — its rendered text is a *task* for a coding agent
+ *   (mini-swe-agent) working in a Modal sandbox with bash and, optionally, an
+ *   MCP server's tools; its submitted answer is the output. Emitted as
+ *   `{{ config(model_type="agent_modal") }}`.
  */
-export type BulletKind = 'prompt' | 'template' | 'python' | 'loop';
+export type BulletKind = 'prompt' | 'template' | 'python' | 'loop' | 'agent';
 
 /**
  * What a python bullet shows instead of text. It has none: it is an operator,
@@ -59,6 +63,12 @@ export interface Bullet {
    * parsed value is what flows downstream.
    */
   jsonOutput: boolean;
+  /**
+   * An agent bullet's MCP server: the command that starts it over stdio, e.g.
+   * `uvx some-mcp-server` or `npx -y @scope/server`. Empty means none — the
+   * agent works with bash alone. Ignored on every other kind.
+   */
+  mcpServer: string;
 }
 
 export interface Focus {

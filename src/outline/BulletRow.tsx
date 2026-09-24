@@ -298,7 +298,7 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
 
       <div className="ol-fields">
         <div className={`ol-field-wrap ${hasHighlight ? 'ol-has-mention' : ''}`}>
-          <KindChip kind={bullet.kind} className="tpl-chip--outline" />
+          <KindChip kind={bullet.kind} mcpServer={bullet.mcpServer} className="tpl-chip--outline" />
           {bullet.jsonOutput && <JsonChip className="tpl-chip--outline" />}
 
           {/* Read view and editor are stacked in one grid cell and *both*

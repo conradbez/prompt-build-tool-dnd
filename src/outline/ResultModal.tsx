@@ -60,7 +60,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
           <h2 className="res-modal__title" title={title}>
             {title}
           </h2>
-          <KindChip kind={bullet.kind} />
+          <KindChip kind={bullet.kind} mcpServer={bullet.mcpServer} />
           {bullet.jsonOutput && <JsonChip />}
           <button className="res-modal__close" onClick={close} aria-label="Close">
             ✕

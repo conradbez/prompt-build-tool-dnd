@@ -192,6 +192,21 @@ reference) that returns an array; on each pass that input's `ref()` renders one
 item, so nothing new has to be written in the bullet. A loop with no such input
 is refused before the run, with a message saying what it needs.
 
+## Agents with MCP tools
+
+`•••` → **Convert to agent** marks a bullet `AGENT`. Its text — with its inputs
+filled in, exactly as a prompt's would be — becomes a **task** for a small
+coding agent ([mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent))
+working in a Modal sandbox. It runs bash commands until it submits an answer,
+and that answer is the bullet's output.
+
+`•••` → **Set MCP server…** gives the agent any stdio MCP server's tools as
+well: type the command that starts it (`uvx some-mcp-server`,
+`npx -y @scope/server`), and the chip becomes `AGENT+MCP`. Leave it empty for
+an agent with bash alone. The agent uses the provider and key in the toolbar.
+See [`server/README.md`](server/README.md) for the sandbox layout and what the
+server can configure.
+
 ## Enforcing JSON
 
 `•••` → **Enforce JSON output** marks a bullet `JSON`. The server emits pbt's

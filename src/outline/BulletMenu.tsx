@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Bullet } from '../types';
 import { actions, canTakeChild, getState } from '../store';
-import { filesEnabled, pythonInfo, uploadFile } from '../api';
+import { agentEnabled, filesEnabled, pythonInfo, uploadFile } from '../api';
 
 interface Props {
   bullet: Bullet;
@@ -17,6 +17,7 @@ export function BulletMenu({ bullet }: Props) {
   const [open, setOpen] = useState(false);
   const [canUpload, setCanUpload] = useState(false);
   const [python, setPython] = useState({ enabled: false, packages: [] as string[] });
+  const [agent, setAgent] = useState(false);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const picker = useRef<HTMLInputElement | null>(null);
@@ -31,6 +32,7 @@ export function BulletMenu({ bullet }: Props) {
     let live = true;
     filesEnabled().then((yes) => live && setCanUpload(yes));
     pythonInfo().then((info) => live && setPython(info));
+    agentEnabled().then((yes) => live && setAgent(yes));
     return () => {
       live = false;
     };
@@ -178,6 +180,42 @@ export function BulletMenu({ bullet }: Props) {
                 onClick={() => run(() => actions.setKind(id, 'python'))}
               >
                 Convert to python{python.enabled ? '' : ' (server not ready)'}
+              </button>
+            </li>
+          )}
+          {bullet.kind !== 'agent' && (
+            <li>
+              <button
+                role="menuitem"
+                title={
+                  'Agent nodes hand their text (with inputs filled in) to a coding agent as its task. It works in a Modal sandbox with bash — and an MCP server\u2019s tools, if you set one — and its final answer is the output.' +
+                  (agent ? '' : ' This server has not reported Modal as configured — running one will say what is missing.')
+                }
+                onClick={() => run(() => actions.setKind(id, 'agent'))}
+              >
+                Convert to agent{agent ? '' : ' (server not ready)'}
+              </button>
+            </li>
+          )}
+          {bullet.kind === 'agent' && (
+            <li>
+              <button
+                role="menuitem"
+                title={
+                  'The command that starts a stdio MCP server in the agent\u2019s sandbox, e.g. `uvx some-mcp-server` or `npx -y @scope/server`. Leave it empty for none.' +
+                  (bullet.mcpServer ? ` Now: ${bullet.mcpServer}` : '')
+                }
+                onClick={() =>
+                  run(() => {
+                    const next = window.prompt(
+                      'MCP server command (stdio), e.g. "uvx some-mcp-server" — empty for none',
+                      bullet.mcpServer,
+                    );
+                    if (next !== null) actions.setMcpServer(id, next);
+                  })
+                }
+              >
+                {bullet.mcpServer ? 'Change MCP server…' : 'Set MCP server…'}
               </button>
             </li>
           )}
