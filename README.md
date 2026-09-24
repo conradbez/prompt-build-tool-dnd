@@ -56,7 +56,7 @@ exception: the `+` circle.
 | Click a node | Focus that bullet in the outline (and vice-versa) |
 | Drag a node | Move it — the node keeps that spot instead of following the auto-layout |
 | Drag from the `+` circle | Start a link into that node (the `+` is its input) |
-| Drag from the bottom dot | Link this node's output into another node |
+| Drag from the right dot | Link this node's output into another node |
 | Drop the link on a node | Link them — see *child vs reference* below |
 | Drop the link on empty canvas | Create a new node there, as a child |
 | Click the `+` circle | Create a child node — **the exception**: React Flow would start a click-connection here |
@@ -75,8 +75,8 @@ stray tap is likelier than a stray click, and there is no hover to warn you
 which link you are about to lose), one finger pans and two fingers pinch to zoom.
 
 **Links point the way data runs.** A child runs first and feeds its parent, so
-it sits *above* the parent: its link leaves its bottom dot and enters the `+`
-on top of the parent.
+it sits *left of* the parent: its link leaves its right dot and enters the `+`
+on the parent's left side.
 
 **Child vs reference.** Linking a node that has **no parent** into another
 makes it a *child* of that node — linking a loose node in is how you build the

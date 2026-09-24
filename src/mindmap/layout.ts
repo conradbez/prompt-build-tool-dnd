@@ -37,56 +37,66 @@ export function snapToGrid(pos: { x: number; y: number }): { x: number; y: numbe
 const RESULT_HEIGHT = 168; // extra room a node needs when it shows a run result
 
 /**
- * Simple bottom-up tidy tree: leaves are packed left-to-right, each parent is
- * centred under its children, and depth maps to the vertical axis — roots on
- * the bottom row, the deepest children on top. That is the direction data
- * runs: a child runs first and its output feeds its parent, so with the parent
- * below, every link reads top-to-bottom as input → output.
- * Multiple roots are laid out side by side. Collapsed bullets render as leaves.
+ * Simple right-to-left tidy tree: leaves are stacked top-to-bottom, each parent
+ * is centred beside its children, and depth maps to the horizontal axis — roots
+ * in the rightmost column, the deepest children on the left. That is the
+ * direction data runs: a child runs first and its output feeds its parent, so
+ * every link reads left-to-right as input → output.
+ * Multiple roots are stacked one under another. Collapsed bullets render as leaves.
  *
- * Row heights adapt per depth: a level that shows run results is given extra
- * vertical room so tall output cards don't overlap the level below.
+ * A node that shows a run result is taller, so its leaf slot is given extra
+ * vertical room and its output card doesn't overlap the node below.
  */
 export function layout(state: OutlineState): LaidOutNode[] {
-  const placed: { id: string; x: number; depth: number }[] = [];
-  let cursor = 0; // next free leaf slot (in node-width units)
-  const slot = NODE_WIDTH + H_GAP;
-  let maxDepth = 0;
+  const placed: { id: string; y: number; depth: number }[] = [];
+  let cursor = 0; // next free y
 
   const place = (id: string, depth: number): number => {
     const b = state.bullets[id];
-    if (!b) return cursor * slot;
-    maxDepth = Math.max(maxDepth, depth);
+    if (!b) return cursor;
     const kids = b.collapsed ? [] : b.children.filter((c) => state.bullets[c]);
+    const height = NODE_HEIGHT + (state.results[id] ? RESULT_HEIGHT : 0);
 
-    let x: number;
+    let y: number;
     if (kids.length === 0) {
-      x = cursor * slot;
-      cursor += 1;
+      y = cursor;
+      cursor += height + V_GAP;
     } else {
-      const childXs = kids.map((c) => place(c, depth + 1));
-      x = (childXs[0] + childXs[childXs.length - 1]) / 2;
+      const childYs = kids.map((c) => place(c, depth + 1));
+      y = (childYs[0] + childYs[childYs.length - 1]) / 2;
+      // A parent taller than its stack of children still needs its room.
+      cursor = Math.max(cursor, y + height + V_GAP);
     }
-    placed.push({ id, x, depth });
-    return x;
+    placed.push({ id, y, depth });
+    return y;
   };
 
   for (const rootId of state.rootIds) place(rootId, 0);
 
-  // Height of each depth = base node height, plus result room if any node on
-  // that level currently has a result.
-  const rowHeight: number[] = new Array(maxDepth + 1).fill(NODE_HEIGHT);
-  for (const p of placed) {
-    if (state.results[p.id]) rowHeight[p.depth] = NODE_HEIGHT + RESULT_HEIGHT;
-  }
+  // Roots at x = 0, each level one column further left. Anchored on the root
+  // rather than the deepest level, so adding a grandchild grows the tree
+  // leftwards instead of shoving every existing column to the right.
+  const auto = new Map(placed.map((p) => [p.id, { x: -p.depth * SLOT_X, y: p.y }]));
 
-  // Cumulative y offset per depth.
-  const yOffset: number[] = new Array(maxDepth + 1).fill(0);
-  for (let d = 1; d <= maxDepth; d++) {
-    yOffset[d] = yOffset[d - 1] + rowHeight[d - 1] + V_GAP;
-  }
+  // A dragged node keeps its spot (`bullet.pos`), and whatever hangs off it
+  // comes along: an unpinned node sits where the auto-layout puts it *relative
+  // to its nearest pinned ancestor*. Otherwise a child added to a node you had
+  // moved would appear back where that node used to be.
+  const pinnedAnchor = (id: string): string | null => {
+    for (let cur = state.bullets[id]?.parentId ?? null; cur; cur = state.bullets[cur]?.parentId ?? null) {
+      if (state.bullets[cur]?.pos) return cur;
+    }
+    return null;
+  };
 
-  // Flipped: the deepest row at y = 0, the roots at the bottom.
-  const bottom = yOffset[maxDepth];
-  return placed.map((p) => ({ id: p.id, x: p.x, y: bottom - yOffset[p.depth], depth: p.depth }));
+  return placed.map((p) => {
+    const own = state.bullets[p.id].pos;
+    if (own) return { id: p.id, ...own, depth: p.depth };
+    const a = auto.get(p.id)!;
+    const anchor = pinnedAnchor(p.id);
+    if (!anchor) return { id: p.id, ...a, depth: p.depth };
+    const at = state.bullets[anchor].pos!;
+    const from = auto.get(anchor)!;
+    return { id: p.id, x: at.x + a.x - from.x, y: at.y + a.y - from.y, depth: p.depth };
+  });
 }

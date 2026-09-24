@@ -4,6 +4,7 @@ import {
   Background,
   Controls,
   ConnectionMode,
+  MarkerType,
   useNodesState,
   type Node,
   type Edge,
@@ -57,8 +58,8 @@ const TOUCH_ONLY = {
  * right. Parent→child links are solid; `@` references are dashed.
  *
  * Every link points the way data runs: from the node whose output is used,
- * out of its bottom dot, into the `+` on top of the node that uses it. So a
- * child sits *above* its parent, and a referenced node feeds the one that
+ * out of its right dot, into the `+` on the left of the node that uses it. So
+ * a child sits *left of* its parent, and a referenced node feeds the one that
  * mentions it.
  *
  * Interaction model
@@ -76,7 +77,7 @@ const TOUCH_ONLY = {
  *   - drop the link on a node ...... link them (see `onConnect` for whether
  *                                    that means "child of" or "@ reference")
  *   - drop the link on the canvas .. create a new node there, as a child
- *   - drag from the bottom dot ..... link this node's output into another
+ *   - drag from the right dot ...... link this node's output into another
  *   - click the `+` circle ......... create a child node — **the exception**;
  *                                    React Flow would start a click-connection
  *                                    here, so `connectOnClick` is off
@@ -127,7 +128,7 @@ export function MindMap() {
       return {
         id: p.id,
         type: 'bullet',
-        position: b.pos ?? { x: p.x, y: p.y },
+        position: { x: p.x, y: p.y },
         data,
         selected: state.selectedId === p.id,
         deletable: false,
@@ -148,6 +149,8 @@ export function MindMap() {
   const [nodes, setNodes, onNodesChange] = useNodesState(computedNodes);
   useEffect(() => setNodes(computedNodes), [computedNodes, setNodes]);
 
+  // Arrowheads sit on the input end, so each link reads as child → parent:
+  // the direction a child's output runs.
   const edges = useMemo<Edge[]>(() => {
     const list: Edge[] = [];
     for (const b of Object.values(state.bullets)) {
@@ -155,7 +158,7 @@ export function MindMap() {
         for (const c of b.children) {
           if (state.bullets[c]) {
             const id = `e-${b.id}-${c}`;
-            list.push({ id, source: c, target: b.id });
+            list.push({ id, source: c, target: b.id, markerEnd: { type: MarkerType.ArrowClosed } });
           }
         }
       }
@@ -168,6 +171,7 @@ export function MindMap() {
             target: b.id,
             animated: true,
             style: { stroke: '#a855f7', strokeDasharray: '5 5' },
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#a855f7' },
           });
         }
       }
@@ -216,15 +220,15 @@ export function MindMap() {
     if (Math.hypot(p.clientX - from.x, p.clientY - from.y) < DRAG_SLOP) return; // a click, not a drag
     const id = actions.addChild(conn.fromNode.id);
     if (!id || !conn.to) return;
-    // Keep the x you dropped at, but take the y from the nodes it is joining,
+    // Keep the y you dropped at, but take the x from the nodes it is joining,
     // so a new child lines up with the children already sitting beside it
     // rather than hanging wherever the pointer happened to be.
     const parentId = conn.fromNode.id;
-    const siblingY = nodes
+    const siblingX = nodes
       .filter((n) => n.id !== id && state.bullets[n.id]?.parentId === parentId)
-      .map((n) => n.position.y);
-    const y = siblingY.length ? Math.min(...siblingY) : conn.to.y;
-    actions.setPos(id, snapToGrid({ x: conn.to.x - NODE_WIDTH / 2, y }));
+      .map((n) => n.position.x);
+    const x = siblingX.length ? Math.min(...siblingX) : conn.to.x - NODE_WIDTH;
+    actions.setPos(id, snapToGrid({ x, y: conn.to.y - NODE_HEIGHT / 2 }));
   };
 
   /**
