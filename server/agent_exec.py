@@ -158,7 +158,8 @@ def _lookup():
             modal.Image.debian_slim(python_version="3.12")
             # Node for `npx` servers, git and curl because an agent reaches for them.
             .apt_install("nodejs", "npm", "git", "curl", *apt)
-            .uv_pip_install("mini-swe-agent>=2,<3", "mcp>=1.0,<2", "uv", "pyyaml", *pip)
+            # mcp 2.x renamed and changed the client APIs the daemon uses.
+            .uv_pip_install("mini-swe-agent>=2.4,<3", "mcp>=1.20,<2", "uv", "pyyaml", *pip)
             .env(
                 {
                     # litellm has no price for every model, and mini-swe-agent
@@ -194,6 +195,7 @@ def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
         "AGENT_MODEL": model,
         "AGENT_STEP_LIMIT": str(STEP_LIMIT),
         "AGENT_COST_LIMIT": str(COST_LIMIT),
+        "MCP_INLINE_IMAGES": os.environ.get("AGENT_INLINE_IMAGES", "1"),
     }
 
 

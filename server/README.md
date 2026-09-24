@@ -370,16 +370,24 @@ environment, key included — the agent can read it anyway.
 A server that fails to start fails the bullet with what it printed. An agent
 that stops without submitting (step or cost limit, a crash) fails the bullet
 with its exit status and the last thing it said, rather than passing on half an
-answer. Images a tool returns are saved to `/tmp/mcp_out/`; the agent reads
-text only.
+answer.
+
+Images a tool returns are **shown to the model**: the daemon saves each to
+`/tmp/mcp_out/`, and `mcp-call` inlines it with mini-swe-agent v2's multimodal
+tag, which the agent turns into an image block on the way to the model. That
+needs a vision-capable model, and every image stays in the conversation — each
+costs tokens on every later step — so the agent is told to ask for renders
+sparingly. `AGENT_INLINE_IMAGES=0` prints the paths instead. Other binary
+content (audio, resources) is only reported as `[type content]`.
 
 Server-side settings, all optional:
 
 | Variable | Default | |
 |---|---|---|
 | `AGENT_MODEL` | provider's model | a litellm model id, overriding the run's provider for every agent |
-| `AGENT_STEP_LIMIT` | `30` | model calls per agent |
+| `AGENT_STEP_LIMIT` | `30` | model calls per agent — the limit that always holds |
 | `AGENT_COST_LIMIT` | `1.0` | USD per agent, where litellm can price the model |
+| `AGENT_INLINE_IMAGES` | `1` | `0` to give the agent image paths instead of the images |
 | `AGENT_TIMEOUT_SECONDS` | `900` | the sandbox's whole lifetime |
 | `AGENT_MCP_START_SECONDS` | `180` | how long an MCP server may take to come up (`uvx`/`npx` download first) |
 | `AGENT_APT_PACKAGES` | — | system packages an MCP server needs, e.g. `libgl1 libxrender1` |

@@ -19,6 +19,7 @@ from minisweagent.agents.default import DefaultAgent
 from minisweagent.config import builtin_config_dir
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models import get_model
+from minisweagent.models.utils.openai_multimodal import DEFAULT_MULTIMODAL_REGEX
 
 ANSWER = "/root/answer.md"
 
@@ -33,8 +34,28 @@ persists between commands, so state carries over from one call to the next.
 - `mcp-call <tool> '<json args>'`    call a tool (single-quote the JSON)
 
 Start with `mcp-call list`, and `describe` a tool before calling it.
-Images returned by tools are saved to /tmp/mcp_out/; you cannot view them.
+Images returned by tools are shown to you directly (and saved to /tmp/mcp_out/).
+Each one costs tokens for the rest of the run, so only ask for renders or
+screenshots at key steps.
 """
+
+# mini.yaml's own template runs the output through `tojson`, which escapes `<`
+# and `>` and so breaks the multimodal tags, and it trims anything over 10k
+# characters, which would cut an image's base64 in half. So: images pass
+# through untouched, and other long output is trimmed to head and tail.
+OBSERVATION_TEMPLATE = """<returncode>{{ output.returncode }}</returncode>
+{% if output.exception_info %}<exception>{{ output.exception_info }}</exception>
+{% endif -%}
+{%- if 'MSWEA_MULTIMODAL_CONTENT' in output.output or output.output | length < 10000 -%}
+<output>
+{{ output.output }}</output>
+{%- else -%}
+<output_head>
+{{ output.output[:5000] }}</output_head>
+<elided_chars>{{ output.output | length - 10000 }}</elided_chars>
+<output_tail>
+{{ output.output[-5000:] }}</output_tail>
+{%- endif -%}"""
 
 # Our own, rather than mini.yaml's: that one is written for fixing an issue in a
 # repository, and its finishing rule ("do not combine it with any other
@@ -81,9 +102,20 @@ def main(task_path: str, result_path: str) -> None:
         wall_time_limit_seconds=int(os.environ.get("AGENT_WALL_SECONDS", "0")),
     )
 
-    model = get_model(os.environ["AGENT_MODEL"], config.get("model", {}))
+    model = get_model(
+        os.environ["AGENT_MODEL"],
+        config.get("model", {})
+        | {
+            "observation_template": OBSERVATION_TEMPLATE,
+            "multimodal_regex": DEFAULT_MULTIMODAL_REGEX,
+            # A model litellm cannot price would otherwise stop the run. The
+            # cost limit then cannot bite, which is what the step limit is for.
+            "cost_tracking": "ignore_errors",
+        },
+    )
+    # 300s a command, not the default 30: MCP tool calls (renders, exports) are slow.
     env = LocalEnvironment(
-        **{**config.get("environment", {}), "cwd": "/root", "timeout": 120}
+        **{**config.get("environment", {}), "cwd": "/root", "timeout": 300}
     )
     agent = DefaultAgent(model, env, **agent_config)
 
