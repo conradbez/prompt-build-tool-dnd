@@ -74,6 +74,13 @@ def warnings(nodes: list["Node"]) -> list[str]:
             "server's, not pbt's. Copy `server/modal_exec.py` next to the export "
             "and import it, or those bullets will fail as an unknown model type."
         )
+    if any(n.kind == "agent" for n in nodes):
+        out.append(
+            "Agent bullets need the `agent_modal` model kind, which is this "
+            "server's, not pbt's. Copy `server/agent_exec.py` and `server/agent/` "
+            "next to the export and import it, and call `agent_exec.use_provider` "
+            "before running, or those bullets will fail."
+        )
     return out
 
 

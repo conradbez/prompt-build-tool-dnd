@@ -33,6 +33,7 @@ import pbt
 
 import export as exporter
 import files as attachments
+import agent_exec  # registers `model_type="agent_modal"` with pbt on import
 import modal_exec  # registers `model_type="python_modal"` with pbt on import
 from llm import ENV_KEYS, make_llm_call
 
@@ -185,9 +186,12 @@ class Node(BaseModel):
     files: list[FileRef] = []
     parentId: Optional[str] = None
     refs: list[str] = []
-    # "prompt" | "template" | "python" | "loop" — see `_build_source`. Else
-    # treated as a prompt rather than rejected: a bullet is not worth a 422.
+    # "prompt" | "template" | "python" | "loop" | "agent" — see `_build_source`.
+    # Else treated as a prompt rather than rejected: a bullet is not worth a 422.
     kind: str = "prompt"
+    # An agent bullet's MCP server: the command that starts it over stdio, e.g.
+    # `uvx some-mcp-server`. Empty means the agent has bash alone.
+    mcpServer: str = ""
     # Hold this bullet's answer to JSON — pbt's `output_format="json"`.
     jsonOutput: bool = False
 
@@ -286,7 +290,9 @@ def _build_source(
     A python node gets the `python_modal` config line instead, and its refs go
     into a Jinja *comment* — see `_python_source`. A loop node keeps the ordinary
     shape and adds pbt's `model_type="loop"`: its ref lines are what render the
-    current item on each pass.
+    current item on each pass. So does an agent node — its rendered text is the
+    agent's task — plus the `agent_modal` config line naming its MCP server, if
+    any (see `agent_exec.py`).
 
     Any `@name` naming a run variable becomes `{{ promptdata("name") }}` on the
     way through, which is how the values reach the prompt (see `_as_promptdata`).
@@ -312,6 +318,9 @@ def _build_source(
         source = _loop_config_line(_loop_over(node, dep_ids, id_to_slug, json_ids)) + "\n" + source
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
+    if node.kind == "agent":
+        # The sandbox never sees attachments, so none are declared either.
+        return agent_exec.config_line(node.mcpServer) + "\n" + source
     keys = _node_file_keys(node, session_id)
     if keys:
         source = _promptfiles_line(keys) + "\n" + source
@@ -337,12 +346,13 @@ def _loop_over(
 def _json_body(node: Node, text: str) -> str:
     """A JSON bullet's text, with the instruction that goes with the rule.
 
-    Only a *prompt* asks a model for anything: a template's rendered text is its
-    own output, so an instruction appended to one would come out in the answer,
-    and a python bullet's text never runs at all. Both still carry the config
-    line — the validation applies to whatever they produce.
+    Only a *prompt* or an agent's task asks a model for anything: a template's
+    rendered text is its own output, so an instruction appended to one would
+    come out in the answer, and a python bullet's text never runs at all. Both
+    still carry the config line — the validation applies to whatever they
+    produce.
     """
-    if not node.jsonOutput or node.kind != "prompt":
+    if not node.jsonOutput or node.kind not in ("prompt", "agent"):
         return text
     return "\n".join([text, JSON_INSTRUCTION]) if text else JSON_INSTRUCTION
 
@@ -631,6 +641,12 @@ def python_enabled() -> dict:
     }
 
 
+@app.get("/agent/enabled")
+def agent_enabled() -> dict:
+    """Whether agent bullets can run here — they need Modal, as python does."""
+    return {"enabled": agent_exec.enabled(), "rejected": agent_exec.rejected()}
+
+
 @app.post("/files")
 async def upload(
     sessionId: str = Form(...),
@@ -811,14 +827,17 @@ async def run(req: RunRequest) -> RunResponse:
     promptfiles: dict[str, Any] = {}
     try:
         for n in nodes:
-            if n.kind == "python":
-                continue  # the sandbox never sees attachments — don't fetch them
+            if n.kind in ("python", "agent"):
+                continue  # a sandbox never sees attachments — don't fetch them
             for key in _node_file_keys(n, req.sessionId):
                 if key not in promptfiles:
                     promptfiles[key] = attachments.get(key)
     except Exception as exc:  # noqa: BLE001 — a missing object shouldn't 500
         return RunResponse(errors=[f"Could not read an attached file: {exc}"])
 
+    # Agent bullets call the model from inside their sandbox, so they need this
+    # run's provider and key too — bound for the tasks pbt spawns, not globally.
+    provider_token = agent_exec.use_provider(req.provider, req.apiKey)
     try:
         llm = make_llm_call(api_key=req.apiKey, provider=req.provider)
         outputs = await pbt.async_run(
@@ -834,6 +853,8 @@ async def run(req: RunRequest) -> RunResponse:
         )
     except Exception as exc:  # noqa: BLE001 — surface any failure to the client
         return RunResponse(errors=[str(exc)])
+    finally:
+        agent_exec.reset_provider(provider_token)
 
     results, errors, skipped_slugs = _serialise(
         outputs, {id_to_slug[n.id]: _title(n) for n in nodes}

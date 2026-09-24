@@ -18,6 +18,20 @@ ENV_KEYS = {
     "anthropic": "ANTHROPIC_API_KEY",
 }
 
+# The model each provider runs, overridable per deployment. Shared with the
+# agent bullets (`agent_exec.py`), so both kinds answer with the same model.
+MODEL_ENV = {
+    "gemini": ("GEMINI_MODEL", "gemini-3.6-flash"),
+    "openai": ("OPENAI_MODEL", "gpt-4o-mini"),
+    "anthropic": ("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+}
+
+
+def model_name(provider: str) -> str:
+    """The model id this server uses for *provider*."""
+    var, default = MODEL_ENV[provider]
+    return os.environ.get(var, default)
+
 
 def _read_files(files: Any) -> list[tuple[bytes, str]]:
     """Read pbt's file objects into (bytes, mime type) pairs."""
@@ -104,7 +118,7 @@ def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Ca
             ]
             parts.append(prompt)
             resp = client.models.generate_content(
-                model=os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"),
+                model=model_name("gemini"),
                 contents=parts,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
                 if _wants_json(config)
@@ -125,7 +139,7 @@ def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Ca
 
             client = openai.OpenAI(api_key=key)
             resp = client.chat.completions.create(
-                model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+                model=model_name("openai"),
                 messages=[{"role": "user", "content": prompt}],
                 # JSON mode refuses a prompt that never says "JSON"; the server
                 # appends that instruction to every JSON bullet, so it does.
@@ -138,7 +152,7 @@ def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Ca
 
             client = anthropic.Anthropic(api_key=key)
             msg = client.messages.create(
-                model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+                model=model_name("anthropic"),
                 max_tokens=4096,
                 messages=[{"role": "user", "content": prompt}],
             )

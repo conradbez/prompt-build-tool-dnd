@@ -24,8 +24,10 @@ export interface NodePayload {
   text: string;
   parentId: string | null;
   refs: string[];
-  /** Prompt, template, or python — decides how the server runs it. */
+  /** Prompt, template, python, loop or agent — decides how the server runs it. */
   kind: BulletKind;
+  /** An agent bullet's MCP server command; empty for none. */
+  mcpServer: string;
   /** Validate this bullet's answer as JSON (pbt's `output_format="json"`). */
   jsonOutput: boolean;
   /** Attachments, sent to the model along with this bullet's prompt. */
@@ -101,6 +103,16 @@ export async function pythonInfo(): Promise<PythonInfo> {
     };
   } catch {
     return none;
+  }
+}
+
+/** Whether the server can run `agent` bullets (Modal configured, as for python). */
+export async function agentEnabled(): Promise<boolean> {
+  try {
+    const res = await fetch(`${getServerUrl()}/agent/enabled`);
+    return res.ok && !!(await res.json()).enabled;
+  } catch {
+    return false;
   }
 }
 
