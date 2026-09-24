@@ -35,7 +35,7 @@ import export as exporter
 import files as attachments
 import agent_exec  # registers `model_type="agent_modal"` with pbt on import
 import modal_exec  # registers `model_type="python_modal"` with pbt on import
-from llm import ENV_KEYS, make_llm_call
+from llm import make_llm_call
 
 # The built frontend (repo-root `dist/`), if it was shipped alongside the
 # server. When present it is served at `/`, so one deployment hosts both the
@@ -249,10 +249,10 @@ class RunResponse(BaseModel):
 
 
 def _has_key(provider: str, api_key: Optional[str]) -> bool:
-    """Whether this run has a key at all: sent from the UI, or in the server's
-    environment. The same two places `llm.py` looks, checked before the graph is
-    built so "no key" is one answer rather than an error on every bullet."""
-    return bool(api_key or os.environ.get(ENV_KEYS.get(provider, "")))
+    """Whether the UI sent a key — the only place `llm.py` looks, checked before
+    the graph is built so "no key" is one answer rather than an error on every
+    bullet."""
+    return bool(api_key)
 
 
 def _slug(node_id: str) -> str:

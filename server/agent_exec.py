@@ -204,12 +204,9 @@ def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
     litellm reads each provider's own key variable, so the key goes in under
     the same name this server reads it from.
     """
-    key = api_key or os.environ.get(ENV_KEYS[provider], "")
+    key = api_key or ""
     if not key:
-        raise RuntimeError(
-            f"No API key for '{provider}'. Enter one in the toolbar or set "
-            f"{ENV_KEYS[provider]} on the server."
-        )
+        raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
     model = os.environ.get("AGENT_MODEL") or f"{_LITELLM_PREFIX[provider]}/{model_name(provider)}"
     return {
         ENV_KEYS[provider]: key,

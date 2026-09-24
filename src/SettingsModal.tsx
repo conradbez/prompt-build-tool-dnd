@@ -112,10 +112,6 @@ export function SettingsModal({
                 onChange={(e) => onKeyChange(e.target.value)}
               />
             </div>
-            <p className="res-col__note">
-              Kept in this browser, one key per provider. Leave it empty to use the key the server
-              was started with.
-            </p>
           </section>
 
           <section className="res-col">

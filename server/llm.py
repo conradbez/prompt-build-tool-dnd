@@ -88,8 +88,8 @@ def _is_template(config: Any) -> bool:
 def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Callable[..., str]:
     """Return an ``llm_call(prompt, files=None, config=None)`` bound to a provider.
 
-    The key is taken from ``api_key`` (sent from the UI) or, if absent, the
-    matching environment variable on the server.
+    The key is only ever ``api_key`` (sent from the UI) — the server's own
+    environment keys are never used, so a public deploy can't spend them.
     """
 
     def llm_call(prompt: str, files: Any = None, config: Any = None) -> str:
@@ -99,12 +99,9 @@ def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Ca
             # {{ config(...) }} line renders to an empty first line.
             return prompt.strip()
 
-        key = api_key or os.environ.get(ENV_KEYS[provider])
+        key = api_key
         if not key:
-            raise RuntimeError(
-                f"No API key for '{provider}'. Enter one in the toolbar or set "
-                f"{ENV_KEYS[provider]} on the server."
-            )
+            raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
 
         file_data = _read_files(files)
 

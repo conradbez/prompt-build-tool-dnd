@@ -12,7 +12,7 @@ bullet graph as JSON and returns each bullet's result after flowing through
 // request
 {
   "provider": "anthropic",          // gemini | openai | anthropic
-  "apiKey": "sk-...",               // optional; falls back to server env var
+  "apiKey": "sk-...",               // required; the server never uses its own keys
   "promptdata": { "tone": "formal" },  // optional; run variables, see below
   "nodes": [
     { "id": "a", "text": "# Topic\nPick a topic", "refs": [] },
@@ -27,8 +27,8 @@ bullet graph as JSON and returns each bullet's result after flowing through
 ```
 
 `needsKey` is the one refusal that happens *before* the graph is built: there
-is no key for the chosen provider, neither sent in `apiKey` nor set on the
-server, so nothing ran. The UI flashes its settings gear rather than printing a
+is no `apiKey` for the chosen provider, so nothing ran. Provider keys in the
+server's environment are never used — a public deploy can't spend them. The UI flashes its settings gear rather than printing a
 failure against every bullet.
 
 Each bullet becomes a pbt model. A node **auto-includes its children's outputs**
@@ -467,8 +467,9 @@ uvicorn main:app --port 8000 --reload
 ```
 
 Keys are read from the **repo-root `.env`** (loaded by `main.py` at import), or
-from the environment, or — for the LLM providers only — sent per request from
-the UI. Modal is server-side only:
+from the environment. LLM provider keys are the exception: they are only ever
+sent per request from the UI, never read from the server. Modal is server-side
+only:
 
 ```ini
 GEMINI_API_KEY=...
