@@ -13,7 +13,8 @@
  *   `{{ config(model_type="loop") }}`; pbt's own fan-out kind.
  * - `agent`    — its rendered text is a *task* for a coding agent
  *   (mini-swe-agent) working in a Modal sandbox with bash and, optionally, an
- *   MCP server's tools; its submitted answer is the output. Emitted as
+ *   MCP server's tools. Its output is `{output, logs, run_time}`: the answer,
+ *   the run end to end on Modal, and how long it took. Emitted as
  *   `{{ config(model_type="agent_modal") }}`.
  */
 export type BulletKind = 'prompt' | 'template' | 'python' | 'loop' | 'agent';

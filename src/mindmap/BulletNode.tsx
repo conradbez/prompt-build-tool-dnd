@@ -125,7 +125,7 @@ export function KindChip({
         : kind === 'agent'
           ? [
               mcpServer ? 'AGENT+MCP' : 'AGENT',
-              'A coding agent works on this text as its task, in a Modal sandbox — its final answer is the output. ' +
+              'A coding agent works on this text as its task, in a Modal sandbox — its output is {output, logs, run_time}. ' +
                 (mcpServer ? `MCP server: ${mcpServer}` : 'No MCP server: bash only.'),
             ]
           : ['PY', 'Runs its child\u2019s code in a Modal sandbox — what it prints is its output'];
