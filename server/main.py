@@ -343,6 +343,16 @@ def _loop_over(
     return id_to_slug[candidates[0]] if len(candidates) == 1 else ""
 
 
+def _list_sources(nodes: list[Node]) -> set[str]:
+    """The bullets that may hand a loop its list: those with JSON enforced.
+
+    Not an agent bullet, even with JSON enforced: its output is always the
+    `{output, logs, run_time}` object (see `agent_exec.py`), never a list, so
+    pinning a loop to it would only fail mid-run.
+    """
+    return {n.id for n in nodes if n.jsonOutput and n.kind != "agent"}
+
+
 def _json_body(node: Node, text: str) -> str:
     """A JSON bullet's text, with the instruction that goes with the rule.
 
@@ -710,7 +720,7 @@ def export(req: ExportRequest) -> ExportResponse:
 
     promptdata = _clean_promptdata(req.promptdata)
     var_names = set(promptdata)
-    json_ids = {n.id for n in nodes if n.jsonOutput}
+    json_ids = _list_sources(nodes)
 
     # Readable names, not `n_<id>`: these become file names and `ref('…')`
     # calls that a person is going to read and edit.
@@ -792,7 +802,7 @@ async def run(req: RunRequest) -> RunResponse:
         if n.parentId in children:
             children[n.parentId].append(n.id)
 
-    json_ids = {n.id for n in nodes if n.jsonOutput}
+    json_ids = _list_sources(nodes)
 
     # A loop repeats over a list, and only a JSON bullet can hand it one. Say so
     # here rather than letting pbt raise it mid-run, which is after the rest of
@@ -865,7 +875,7 @@ async def run(req: RunRequest) -> RunResponse:
     # A loop bullet's output is a list whether or not JSON was enforced on it.
     rendered = dict(by_id)
     for n in nodes:
-        if (n.jsonOutput or n.kind == "loop") and n.id in by_id:
+        if (n.jsonOutput or n.kind in ("loop", "agent")) and n.id in by_id:
             by_id[n.id], rendered[n.id] = _json_forms(by_id[n.id])
 
     prompts = {}

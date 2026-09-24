@@ -197,8 +197,11 @@ is refused before the run, with a message saying what it needs.
 `•••` → **Convert to agent** marks a bullet `AGENT`. Its text — with its inputs
 filled in, exactly as a prompt's would be — becomes a **task** for a small
 coding agent ([mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent))
-working in a Modal sandbox. It runs bash commands until it submits an answer,
-and that answer is the bullet's output.
+working in a Modal sandbox. It runs bash commands until it submits an answer.
+The bullet's output is a JSON object: `output` (the answer), `logs` (the whole
+run, timestamped, from sandbox start to teardown: every step, command and MCP
+tool call) and `run_time` (in seconds). Bullets downstream receive all of it,
+logs included.
 
 `•••` → **Set MCP server…** gives the agent any stdio MCP server's tools as
 well: type the command that starts it (`uvx some-mcp-server`,

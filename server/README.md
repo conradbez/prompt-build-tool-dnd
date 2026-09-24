@@ -166,7 +166,7 @@ Each node carries a `kind`, which decides what running it does:
 | `template` | Never sent: the rendered text, with every upstream output substituted in, *is* the output. |
 | `loop`     | Sent to the LLM **once per item** of an upstream JSON list; its output is the list of answers. pbt's own fan-out kind. |
 | `python`   | Runs the code its **one child** produced, in a **Modal sandbox** — not on this server. |
-| `agent`    | Its rendered text is a **task** for a coding agent (mini-swe-agent) in a Modal sandbox, with bash and, optionally, an **MCP server**'s tools. The agent's submitted answer is the output. See below. |
+| `agent`    | Its rendered text is a **task** for a coding agent (mini-swe-agent) in a Modal sandbox, with bash and, optionally, an **MCP server**'s tools. Its output is `{"output", "logs", "run_time"}`. See below. |
 
 A **loop** bullet is emitted with `{{ config(model_type="loop") }}` and is
 otherwise shaped like a prompt: the `{{ ref('…') }}` lines it already carries are
@@ -326,8 +326,60 @@ where they stand, children's outputs below, the global instruction on top — bu
 instead of one model call, that rendered text is handed to
 [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) as a task. The
 agent works in a fresh Modal sandbox with bash as its only tool until it submits
-an answer, and that answer is the bullet's output, flowing on downstream like
-any other.
+an answer.
+
+The bullet's output is a JSON object:
+
+```jsonc
+{
+  "output": "…the agent's answer…",   // parsed, when the bullet enforces JSON
+  "logs": [
+    "[    0.0s] modal: creating sandbox (app mindmap-agent, 2 cpu, 4096 MB, timeout 900s)",
+    "[    1.2s] modal: sandbox sb-… up",
+    "[    6.9s] mcp: 2 tools: bump, render",
+    "[    7.1s] agent: starting (anthropic/claude-sonnet-4-5, up to 30 steps), task of 94 chars",
+    "[    9.4s] agent: step 1 $ mcp-call bump '{\"by\": 3}'",
+    "[    9.5s] mcp-server: bumped to 3",
+    "[    9.5s] mcp: call bump {\"by\": 3} -> ok in 0.0s",
+    "[    9.5s] bash: exit 0\ncounter=3",
+    "…",
+    "[   21.2s] agent: finished: Submitted after 4 steps",
+    "[   21.3s] modal: sandbox terminated"
+  ],
+  "run_time": 21.3                    // seconds, sandbox created → terminated
+}
+```
+
+`logs` is the run end to end, one line per event at its offset from the start.
+Each line is tagged with where it came from:
+
+| Tag | What |
+|---|---|
+| `modal` | the sandbox being created and terminated, and the MCP server being started |
+| `mcp` | the daemon: the server coming up, its tool list, every call it served with its outcome and duration |
+| `mcp-server` | whatever the MCP server itself printed to stderr |
+| `agent` | each step's reasoning and command, and how the run finished (status, steps, cost) |
+| `bash` | each command's exit code and output |
+
+The sandbox's clock and this server's are lined up by the moment the agent is
+launched. Each step's text is clipped (600 chars of reasoning, 1,500 of output),
+an image a tool returned is logged as `[image shown to the model]`, and a log
+over 400 lines keeps its first and last 200. It is a summary of the run: the
+model saw everything.
+
+The object is returned to pbt as a structured value, so it passes on as one,
+and `outputs` shows it as pretty-printed JSON. With JSON enforced on the bullet,
+the agent is asked for JSON and `output` holds the answer *parsed*; an answer
+that won't parse fails the bullet. An agent bullet is never offered to a loop
+as its list, JSON or not, because its output is an object.
+
+**Everything downstream gets the whole object, logs included.** A parent bullet,
+or an `@` reference to an agent bullet, renders it in full, so the logs go into
+that prompt as well. That's the point when the next bullet is meant to judge
+the run. When it only needs the answer, it costs tokens.
+
+A failed run doesn't produce the object: the bullet fails, so pbt skips what
+depends on it. Its error message ends with the last 40 lines of the log.
 
 A node may name an **MCP server**: any command that starts one over stdio.
 
@@ -367,10 +419,10 @@ it in a context variable for the tasks pbt spawns, and it reaches the sandbox as
 a Modal secret made for that one sandbox. The MCP server inherits the sandbox's
 environment, key included — the agent can read it anyway.
 
-A server that fails to start fails the bullet with what it printed. An agent
-that stops without submitting (step or cost limit, a crash) fails the bullet
-with its exit status and the last thing it said, rather than passing on half an
-answer.
+A server that exits while starting fails the bullet at once, with what it
+printed. An agent that stops without submitting (step or cost limit, a crash)
+fails the bullet with its exit status and the last thing it said, rather than
+passing on half an answer.
 
 Images a tool returns are **shown to the model**: the daemon saves each to
 `/tmp/mcp_out/`, and `mcp-call` inlines it with mini-swe-agent v2's multimodal

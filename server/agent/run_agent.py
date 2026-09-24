@@ -12,7 +12,9 @@ key variable, which litellm reads) — set by `agent_exec.py` per run.
 """
 import json
 import os
+import re
 import sys
+import time
 
 import yaml
 from minisweagent.agents.default import DefaultAgent
@@ -87,7 +89,49 @@ After that command you cannot continue.
 """
 
 
+# How much of each step goes into the bullet's log. The log is for following
+# what happened, not a transcript: the model saw everything, the log a summary.
+THOUGHT_CHARS = 600
+OUTPUT_CHARS = 1500
+
+_IMAGE_TAG = re.compile(r"(?s)<MSWEA_MULTIMODAL_CONTENT>.*?</MSWEA_MULTIMODAL_CONTENT>")
+
+
+def _clip(text: str, limit: int) -> str:
+    text = _IMAGE_TAG.sub("[image shown to the model]", text or "").strip()
+    return text if len(text) <= limit else text[:limit] + f"… [{len(text) - limit} more chars]"
+
+
+def _events(messages: list[dict]) -> list[dict]:
+    """The run as `{ts, source, message}` events: each step's thought and
+    command, then what the command returned.
+
+    Taken from the messages after the fact rather than logged as the agent goes
+    — mini-swe-agent already timestamps every one, and a run that crashes
+    half-way still has the messages it got to.
+    """
+    out = []
+    step = 0
+    for m in messages:
+        extra = m.get("extra") or {}
+        ts = extra.get("timestamp") or time.time()
+        if m.get("role") == "assistant":
+            step += 1
+            thought = m.get("content")
+            if thought and isinstance(thought, str) and thought.strip():
+                out.append({"ts": ts, "source": "agent", "message": f"step {step}: {_clip(thought, THOUGHT_CHARS)}"})
+            for action in extra.get("actions") or []:
+                out.append({"ts": ts, "source": "agent", "message": f"step {step} $ {_clip(action.get('command', ''), OUTPUT_CHARS)}"})
+        elif m.get("role") in ("tool", "user") and "raw_output" in extra:
+            code = extra.get("returncode")
+            body = _clip(extra.get("raw_output", ""), OUTPUT_CHARS)
+            problem = f" ({extra['exception_info']})" if extra.get("exception_info") else ""
+            out.append({"ts": ts, "source": "bash", "message": f"exit {code}{problem}" + (f"\n{body}" if body else "")})
+    return out
+
+
 def main(task_path: str, result_path: str) -> None:
+    started = time.time()
     with open(task_path) as f:
         task = f.read()
 
@@ -138,6 +182,9 @@ def main(task_path: str, result_path: str) -> None:
         steps=agent.n_calls,
         cost=agent.cost,
         last_message=last if isinstance(last, str) else json.dumps(last)[:4000],
+        started=started,
+        model=os.environ["AGENT_MODEL"],
+        events=_events(agent.messages),
     )
     with open(result_path, "w") as f:
         json.dump(result, f)

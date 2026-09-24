@@ -28,6 +28,17 @@ The model's key does *not*: a key written into the source would end up in the
 cache key and in every export. It is carried per run in a context variable set
 by ``main.run`` (``use_provider``), which every task pbt spawns inherits, and
 reaches the sandbox as a Modal secret built on the spot.
+
+The bullet's output is a JSON object, not bare text:
+
+    {"output": <the agent's answer>, "logs": [...], "run_time": <seconds>}
+
+``logs`` is the run end to end, one line per event with its offset from the
+start: the sandbox being created, the MCP server coming up and each tool call it
+served, every agent step (its thought, its command, what the command returned),
+how the agent finished, and the teardown. ``run_time`` is wall-clock seconds from
+creating the sandbox to terminating it. When the bullet has JSON enforced,
+``output`` is the answer parsed, and an answer that will not parse fails it.
 """
 
 from __future__ import annotations
@@ -39,9 +50,11 @@ import os
 import pathlib
 import re
 import shlex
+import time
 from typing import Any
 
 import pbt
+from pbt.executor.run_context import parse_json_output as pbt_json
 
 import modal_exec
 from llm import ENV_KEYS, model_name
@@ -83,6 +96,14 @@ AGENT_DIR = pathlib.Path(__file__).resolve().parent / "agent"
 SOCK = "/tmp/mcp.sock"
 TASK_PATH = "/tmp/agent_task.md"
 RESULT_PATH = "/tmp/agent_result.json"
+# The daemon's own output — its timestamped request log, and whatever the MCP
+# server writes to stderr — teed here so it can be read back while the sandbox
+# is still up.
+DAEMON_LOG = "/tmp/mcp_daemon.log"
+
+# The log travels back to the browser and on to any bullet downstream. A run
+# that goes past this keeps its start and its end, which is where the story is.
+MAX_LOG_LINES = 400
 
 # The litellm prefix for each provider this server offers.
 _LITELLM_PREFIX = {"gemini": "gemini", "openai": "openai", "anthropic": "anthropic"}
@@ -199,6 +220,40 @@ def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
     }
 
 
+class _Log:
+    """The run's events, each at its offset in seconds from the start."""
+
+    def __init__(self) -> None:
+        self.t0 = time.time()
+        self.events: list[tuple[float, str, str]] = []
+
+    def add(self, source: str, message: str, at: float | None = None) -> None:
+        self.events.append(((at if at is not None else time.time()) - self.t0, source, message))
+
+    def lines(self) -> list[str]:
+        # Stable, so events stamped the same instant keep the order they came in.
+        ordered = sorted(self.events, key=lambda e: e[0])
+        out = [f"[{t:7.1f}s] {source}: {message}" for t, source, message in ordered]
+        if len(out) > MAX_LOG_LINES:
+            keep = MAX_LOG_LINES // 2
+            out = out[:keep] + [f"… {len(out) - 2 * keep} lines elided …"] + out[-keep:]
+        return out
+
+    def tail(self, n: int = 40) -> str:
+        return "\n".join(self.lines()[-n:])
+
+
+class AgentError(RuntimeError):
+    """A failed agent run, with the log up to where it stopped.
+
+    A failure is when the log matters most, and pbt reports a failed bullet by
+    its error message alone — so the tail of the log goes into the message.
+    """
+
+    def __init__(self, message: str, log: _Log) -> None:
+        super().__init__(f"{message}\n\nLog (last lines):\n{log.tail()}")
+
+
 def _output(sb) -> str:
     """Whatever the sandbox's main process said, for a server that failed to start."""
     parts = []
@@ -210,36 +265,81 @@ def _output(sb) -> str:
     return "\n".join(p.strip() for p in parts if p and p.strip())[-4000:]
 
 
-def _start_mcp(sb, command: list[str]) -> None:
+def _read(sb, path: str) -> str:
+    """A file in the sandbox, or "" if it is not there."""
+    p = sb.exec("cat", path)
+    text = p.stdout.read()
+    return text if p.wait() == 0 else ""
+
+
+def _daemon_events(text: str, offset: float, log: _Log) -> None:
+    """Merge the daemon's log in.
+
+    Its own lines carry an epoch timestamp, written when a request *completes*.
+    The MCP server's stderr carries none, and whatever it printed happened
+    during the request logged next — so it is held and filed just ahead of that
+    line. Anything after the last one is filed at the last one.
+    """
+    pending: list[str] = []
+    at = None
+    for line in text.splitlines():
+        stamp, _, rest = line.partition(" ")
+        try:
+            at = float(stamp) + offset
+        except ValueError:
+            if line.strip():
+                pending.append(line.rstrip()[:1000])
+            continue
+        for held in pending:
+            log.add("mcp-server", held, at)
+        pending = []
+        log.add("mcp", rest, at)
+    for held in pending:
+        log.add("mcp-server", held, at)
+
+
+def _start_mcp(sb, command: list[str], log: _Log) -> None:
     """Wait for the daemon's socket, then check the server answers at all."""
-    wait = sb.exec(
-        "sh",
-        "-c",
-        f"for i in $(seq {MCP_START_SECONDS}); do [ -S {SOCK} ] && exit 0; sleep 1; done; exit 1",
-    )
-    if wait.wait() != 0 or sb.poll() is not None:
-        detail = _output(sb) if sb.poll() is not None else "it is still starting"
-        raise RuntimeError(
-            f"The MCP server `{shlex.join(command)}` did not come up within "
-            f"{MCP_START_SECONDS}s — {detail or 'it printed nothing'}"
-        )
+    log.add("modal", f"starting MCP server: {shlex.join(command)}")
+    # Polled from here rather than waited on in the sandbox, so a server that
+    # dies on start fails the bullet then, not a whole start timeout later.
+    deadline = time.time() + MCP_START_SECONDS
+    while True:
+        if sb.poll() is not None:
+            log.add("mcp-server", _output(sb) or "it printed nothing")
+            raise AgentError(f"The MCP server `{shlex.join(command)}` exited while starting.", log)
+        if sb.exec("test", "-S", SOCK).wait() == 0:
+            break
+        if time.time() > deadline:
+            raise AgentError(
+                f"The MCP server `{shlex.join(command)}` did not come up within {MCP_START_SECONDS}s.",
+                log,
+            )
+        time.sleep(1)
     check = sb.exec("mcp-call", "list")
     listing = check.stdout.read()
     if check.wait() != 0:
-        raise RuntimeError(
-            f"The MCP server `{shlex.join(command)}` started but would not list "
-            f"its tools: {(check.stderr.read() or listing).strip()[-2000:]}"
-        )
+        log.add("mcp", (check.stderr.read() or listing).strip()[-2000:])
+        raise AgentError(f"The MCP server `{shlex.join(command)}` started but would not list its tools.", log)
+    tools = [line.split(" - ", 1)[0] for line in listing.splitlines() if line.strip()]
+    log.add("mcp", f"{len(tools)} tools: {', '.join(tools)}")
 
 
-def _run_sandbox(task: str, mcp_server: str, env: dict[str, str]) -> str:
+def _run_sandbox(task: str, mcp_server: str, env: dict[str, str], json_answer: bool) -> dict:
     """Run the agent on *task* in a fresh sandbox. Blocking — call it off the loop."""
     import modal
 
+    log = _Log()
     app, image = _lookup()
     command = shlex.split(mcp_server) if mcp_server.strip() else []
-    entry = ["python", "/opt/agent/mcp_daemon.py", *command] if command else ["sleep", "infinity"]
+    # `"$@"` hands the server command through untouched — no shell reads it.
+    entry = (
+        ["sh", "-c", f'python /opt/agent/mcp_daemon.py "$@" 2>&1 | tee {DAEMON_LOG}', "sh", *command]
+        if command
+        else ["sleep", "infinity"]
+    )
 
+    log.add("modal", f"creating sandbox (app {APP_NAME}, {CPU} cpu, {MEMORY_MB} MB, timeout {TIMEOUT_SECONDS}s)")
     sb = modal.Sandbox.create(
         *entry,
         app=app,
@@ -250,9 +350,12 @@ def _run_sandbox(task: str, mcp_server: str, env: dict[str, str]) -> str:
         memory=MEMORY_MB,
         secrets=[modal.Secret.from_dict(env), *(modal.Secret.from_name(s) for s in secrets())],
     )
+    log.add("modal", f"sandbox {sb.object_id} up")
+    result: dict[str, Any] = {}
+    offset = 0.0
     try:
         if command:
-            _start_mcp(sb, command)
+            _start_mcp(sb, command, log)
 
         # Through stdin, not argv: a rendered bullet can be long, and nothing
         # in it should be read by a shell.
@@ -261,37 +364,66 @@ def _run_sandbox(task: str, mcp_server: str, env: dict[str, str]) -> str:
         put.stdin.write_eof()
         put.stdin.drain()
         put.wait()
+
+        log.add("agent", f"starting ({env['AGENT_MODEL']}, up to {STEP_LIMIT} steps), task of {len(task)} chars")
+        launched = time.time()
         p = sb.exec("python", "/opt/agent/run_agent.py", TASK_PATH, RESULT_PATH)
-        log = p.stdout.read()
+        out = p.stdout.read()
         err = p.stderr.read()
         code = p.wait()
 
-        read = sb.exec("cat", RESULT_PATH)
-        raw = read.stdout.read()
-        if read.wait() != 0 or not raw.strip():
-            detail = (err or log or "").strip()[-4000:]
-            raise RuntimeError(f"The agent exited {code} without a result:\n{detail}")
+        raw = _read(sb, RESULT_PATH)
+        if not raw.strip():
+            log.add("agent", f"exited {code} without a result:\n{(err or out or '').strip()[-3000:]}")
+            raise AgentError(f"The agent exited {code} without a result.", log)
         result = json.loads(raw)
+        # The sandbox's clock is not this one. Its events are placed by lining
+        # up the agent's own start with the moment it was launched from here.
+        offset = launched - float(result.get("started", launched))
+        for e in result.get("events", []):
+            log.add(e.get("source", "agent"), e.get("message", ""), float(e["ts"]) + offset)
+        log.add(
+            "agent",
+            f"finished: {result.get('exit_status') or 'unknown'} after {result.get('steps', '?')} steps"
+            + (f", ${result['cost']:.4f}" if result.get("cost") else ""),
+        )
     finally:
+        if command:
+            try:
+                _daemon_events(_read(sb, DAEMON_LOG), offset, log)
+            except Exception as exc:  # noqa: BLE001 — a missing log must not hide the real error
+                log.add("mcp", f"could not read the daemon log: {exc}")
         sb.terminate()
+        log.add("modal", "sandbox terminated")
 
-    return _answer(result)
+    return {
+        "output": _answer(result, json_answer, log),
+        "logs": log.lines(),
+        "run_time": round(time.time() - log.t0, 1),
+    }
 
 
-def _answer(result: dict[str, Any]) -> str:
-    """The submission, or an error saying why there is none."""
+def _answer(result: dict[str, Any], json_answer: bool, log: _Log) -> Any:
+    """The submission — parsed, if the bullet enforces JSON — or an error saying
+    why there is none."""
     submission = (result.get("submission") or "").strip()
     if result.get("exit_status") == "Submitted" and submission:
-        return submission[:MAX_OUTPUT_CHARS]
+        if not json_answer:
+            return submission[:MAX_OUTPUT_CHARS]
+        try:
+            return pbt_json(submission)
+        except ValueError as exc:
+            raise AgentError(f"The agent's answer is not valid JSON: {exc}", log) from exc
     status = result.get("exit_status") or "an unknown reason"
     said = (result.get("error") or result.get("last_message") or "").strip()[-2000:]
-    raise RuntimeError(
-        f"The agent stopped without an answer ({status}, after "
-        f"{result.get('steps', '?')} steps)." + (f" Last it said:\n{said}" if said else "")
+    raise AgentError(
+        f"The agent stopped without an answer ({status}, after {result.get('steps', '?')} steps)."
+        + (f" Last it said:\n{said}" if said else ""),
+        log,
     )
 
 
-async def _run(task: str, mcp_server: str, env: dict[str, str]) -> str:
+async def _run(task: str, mcp_server: str, env: dict[str, str], json_answer: bool) -> str:
     if not enabled():
         raise RuntimeError(
             "Agent bullets run on Modal, which is not configured on this "
@@ -306,15 +438,21 @@ async def _run(task: str, mcp_server: str, env: dict[str, str]) -> str:
         raise RuntimeError("An agent bullet needs a task — its text, or something from below it.")
     # Modal's client is blocking, and pbt runs independent branches
     # concurrently — keep one agent from stalling the others.
-    return await asyncio.to_thread(_run_sandbox, task, mcp_server, env)
+    # Serialised here, parsed back in `execute`: `call.compute` caches what it
+    # is handed, and text is what a cache stores faithfully.
+    result = await asyncio.to_thread(_run_sandbox, task, mcp_server, env, json_answer)
+    return json.dumps(result, ensure_ascii=False)
 
 
 # Registered on import, like `modal_exec`: importing this module is what teaches
 # pbt the kind. The rendered text is a task in natural language, so the run's
 # global instruction is welcome here.
 @pbt.model_kind(MODEL_TYPE, config_keys={MCP_KEY})
-async def execute(rendered: str, call: pbt.ModelCall) -> str:
+async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     """Hand the rendered bullet to a coding agent, with its MCP server if it names one.
+
+    Returns ``{"output", "logs", "run_time"}`` — see the module docstring. A
+    structured value, so pbt passes it on as it is rather than parsing it.
 
     The key is resolved *outside* `call.compute`, so a missing one fails the
     bullet before anything is cached or started, and never enters the cache key.
@@ -326,5 +464,9 @@ async def execute(rendered: str, call: pbt.ModelCall) -> str:
     # `{{ config(...) }}` renders to nothing, so the server and the model are
     # invisible in `rendered` — and the same task with a different toolbox or a
     # different model is a different run.
-    cache_text = "\x00".join([rendered, mcp_server, env["AGENT_MODEL"]])
-    return await call.compute(cache_text, compute=lambda: _run(rendered.strip(), mcp_server, env))
+    json_answer = call.spec.output_format == "json"
+    cache_text = "\x00".join([rendered, mcp_server, env["AGENT_MODEL"], str(json_answer)])
+    raw = await call.compute(
+        cache_text, compute=lambda: _run(rendered.strip(), mcp_server, env, json_answer)
+    )
+    return json.loads(raw)
