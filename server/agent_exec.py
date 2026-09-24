@@ -198,22 +198,37 @@ def _lookup():
     return _app, _image
 
 
-def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
-    """What the sandbox needs to call the model: its name and the key.
+def current_provider() -> tuple[str, str | None]:
+    """This run's provider and the key sent with it, bound by `use_provider`."""
+    return _provider.get()
 
-    litellm reads each provider's own key variable, so the key goes in under
-    the same name this server reads it from.
-    """
+
+def api_key_for(provider: str, api_key: str | None) -> str:
+    """The key to call *provider* with: sent from the UI, else the server's."""
     key = api_key or os.environ.get(ENV_KEYS[provider], "")
     if not key:
         raise RuntimeError(
             f"No API key for '{provider}'. Enter one in the toolbar or set "
             f"{ENV_KEYS[provider]} on the server."
         )
-    model = os.environ.get("AGENT_MODEL") or f"{_LITELLM_PREFIX[provider]}/{model_name(provider)}"
+    return key
+
+
+def litellm_model(provider: str) -> str:
+    """The agent's model as litellm names it: `AGENT_MODEL`, else the one this
+    server uses for *provider*."""
+    return os.environ.get("AGENT_MODEL") or f"{_LITELLM_PREFIX[provider]}/{model_name(provider)}"
+
+
+def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
+    """What the sandbox needs to call the model: its name and the key.
+
+    litellm reads each provider's own key variable, so the key goes in under
+    the same name this server reads it from.
+    """
     return {
-        ENV_KEYS[provider]: key,
-        "AGENT_MODEL": model,
+        ENV_KEYS[provider]: api_key_for(provider, api_key),
+        "AGENT_MODEL": litellm_model(provider),
         "AGENT_STEP_LIMIT": str(STEP_LIMIT),
         "AGENT_COST_LIMIT": str(COST_LIMIT),
         "MCP_INLINE_IMAGES": os.environ.get("AGENT_INLINE_IMAGES", "1"),
@@ -458,7 +473,7 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     bullet before anything is cached or started, and never enters the cache key.
     """
     mcp_server = str(call.spec.config.get(MCP_KEY, ""))
-    provider, api_key = _provider.get()
+    provider, api_key = current_provider()
     env = _secret_env(provider, api_key)
 
     # `{{ config(...) }}` renders to nothing, so the server and the model are

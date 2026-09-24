@@ -8,4 +8,7 @@ openai>=1.40
 anthropic>=0.39
 boto3>=1.34
 modal>=1.0
+# The `agent_local` node runs mini-swe-agent's loop in this process. The `agent`
+# node installs its own copy in the sandbox image instead.
+mini-swe-agent>=2.4,<3
 python-dotenv>=1.0

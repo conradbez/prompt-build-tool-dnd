@@ -210,6 +210,11 @@ an agent with bash alone. The agent uses the provider and key in the toolbar.
 See [`server/README.md`](server/README.md) for the sandbox layout and what the
 server can configure.
 
+`•••` → **Convert to agent, loop on server** (`AGENT·LOCAL`) is the same idea
+without MCP: the agent's loop and its model calls run on the server, and only
+each bash command runs in a Modal sandbox. Your API key never enters the
+sandbox. It gives the same `{output, logs, run_time}` result.
+
 ## Enforcing JSON
 
 `•••` → **Enforce JSON output** marks a bullet `JSON`. The server emits pbt's

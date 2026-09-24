@@ -16,8 +16,12 @@
  *   MCP server's tools. Its output is `{output, logs, run_time}`: the answer,
  *   the run end to end on Modal, and how long it took. Emitted as
  *   `{{ config(model_type="agent_modal") }}`.
+ * - `agent_local` — the same, except the agent's loop (and every model call)
+ *   runs on the server and only its commands run on Modal. No MCP server; the
+ *   API key never enters the sandbox. Emitted as
+ *   `{{ config(model_type="agent_local_modal") }}`.
  */
-export type BulletKind = 'prompt' | 'template' | 'python' | 'loop' | 'agent';
+export type BulletKind = 'prompt' | 'template' | 'python' | 'loop' | 'agent' | 'agent_local';
 
 /**
  * What a python bullet shows instead of text. It has none: it is an operator,

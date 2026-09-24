@@ -167,6 +167,7 @@ Each node carries a `kind`, which decides what running it does:
 | `loop`     | Sent to the LLM **once per item** of an upstream JSON list; its output is the list of answers. pbt's own fan-out kind. |
 | `python`   | Runs the code its **one child** produced, in a **Modal sandbox** — not on this server. |
 | `agent`    | Its rendered text is a **task** for a coding agent (mini-swe-agent) in a Modal sandbox, with bash and, optionally, an **MCP server**'s tools. Its output is `{"output", "logs", "run_time"}`. See below. |
+| `agent_local` | The same task and output, but the agent's **loop runs on this server** and only each command runs in a Modal sandbox. No MCP. See below. |
 
 A **loop** bullet is emitted with `{{ config(model_type="loop") }}` and is
 otherwise shaped like a prompt: the `{{ ref('…') }}` lines it already carries are
@@ -453,6 +454,45 @@ the agent picks, so the sandbox is the boundary: don't attach a secret to it you
 would mind the agent reading.
 
 `GET /agent/enabled` reports whether Modal is configured for them.
+
+### `agent_local`: the loop here, the commands on Modal
+
+A second agent kind, emitted as `{{ config(model_type="agent_local_modal") }}`
+and registered by `agent_local_exec.py`. Same task, same prompts, same
+`{output, logs, run_time}` output. The difference is where the loop runs:
+
+```
+this server                               Modal sandbox (sleep infinity)
+┌───────────────────────────────┐
+│ DefaultAgent                  │   sb.exec(bash -c <command>)
+│   LitellmModel ── the model   │ ─────────────────────────────▶  bash
+│   ModalEnvironment.execute ───┼ ◀─────────────────────────────  output, exit code
+└───────────────────────────────┘
+```
+
+mini-swe-agent runs in this process with the Python bindings:
+`DefaultAgent(get_model(…), ModalEnvironment(sb, …))`. `ModalEnvironment`
+subclasses its `LocalEnvironment` and overrides only `execute`: each command
+goes to the sandbox as `timeout <n> bash -c "$2"`, passed as an argument rather
+than spliced into a shell string, with stderr merged into stdout as it is
+locally. Finishing is detected by `LocalEnvironment`'s own rule.
+
+- **The key never enters the sandbox.** It goes to litellm with each call
+  (`model_kwargs={"api_key": …}`), not through the sandbox's or even this
+  process's environment, so concurrent runs with different keys don't mix.
+- **No MCP.** Commands are one-shot, with no daemon to hold a session. Use
+  `agent` for that.
+- **One clock.** All log timestamps come from this process, with no files to
+  hand back and forth.
+- **The server does the work.** The loop takes a thread in this process for the
+  whole run, and a server restart ends it. Each step also pays one round trip
+  to Modal, which is small next to the model call it follows.
+
+It uses the `agent` node's image, limits and Modal app, so a script behaves the
+same in either. `AGENT_COMMAND_TIMEOUT` (default `300`) is each command's limit;
+a command that hits it exits `124` and the model is told it timed out.
+mini-swe-agent is installed on the server for this node, so it is in
+`requirements.txt`.
 
 `GET /healthz` is a health check. `GET /` serves the built frontend when a
 `dist/` folder sits next to `server/` (see Docker below); otherwise it 404s and

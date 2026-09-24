@@ -103,7 +103,7 @@ export function JsonChip({ className = '' }: { className?: string }) {
   );
 }
 
-/** The `TPL` / `PY` / `LOOP` / `AGENT` badge. A prompt is the default and wears nothing. */
+/** The `TPL` / `PY` / `LOOP` / `AGENT` / `AGENT·LOCAL` badge. A prompt is the default and wears nothing. */
 export function KindChip({
   kind,
   mcpServer = '',
@@ -128,7 +128,12 @@ export function KindChip({
               'A coding agent works on this text as its task, in a Modal sandbox — its output is {output, logs, run_time}. ' +
                 (mcpServer ? `MCP server: ${mcpServer}` : 'No MCP server: bash only.'),
             ]
-          : ['PY', 'Runs its child\u2019s code in a Modal sandbox — what it prints is its output'];
+          : kind === 'agent_local'
+            ? [
+                'AGENT·LOCAL',
+                'A coding agent works on this text as its task. Its loop runs on the server and each command runs in a Modal sandbox, so the API key never enters the sandbox. No MCP. Its output is {output, logs, run_time}.',
+              ]
+            : ['PY', 'Runs its child\u2019s code in a Modal sandbox — what it prints is its output'];
   return (
     <span className={`tpl-chip tpl-chip--${kind} ${className}`} title={title}>
       {label}

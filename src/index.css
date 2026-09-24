@@ -1394,7 +1394,8 @@ body,
 
 /* An agent works on its own for many steps — violet, apart from the kinds that
    make a single call. */
-.tpl-chip--agent {
+.tpl-chip--agent,
+.tpl-chip--agent_local {
   color: #5b3a8a;
   background: #ece3fa;
 }
@@ -1426,6 +1427,11 @@ body,
 .ol-row--agent .ol-text,
 .ol-row--agent .ol-md {
   padding-right: 72px;
+}
+
+.ol-row--agent_local .ol-text,
+.ol-row--agent_local .ol-md {
+  padding-right: 84px;
 }
 
 /* Code reads badly in the body font, so the row and the node both switch. */

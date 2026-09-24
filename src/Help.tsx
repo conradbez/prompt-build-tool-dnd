@@ -47,6 +47,7 @@ const RUNNING: Row[] = [
   { keys: '@python_depn', desc: 'A variable the server reads too: comma-separated packages every python bullet\u2019s sandbox installs before it runs (on top of numpy, pandas, requests)' },
   { keys: '••• → Convert to python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output' },
   { keys: '••• → Convert to agent', desc: 'AGENT — the text, with its inputs filled in, is a task for a coding agent in a sandbox: it works with bash until it submits an answer. Its output is JSON: output (the answer), logs (the run end to end on Modal) and run_time (seconds). ••• → Set MCP server… gives it a stdio MCP server\u2019s tools too (e.g. uvx some-mcp-server)' },
+  { keys: '••• → Convert to agent, loop on server', desc: 'AGENT·LOCAL — the same task, answer and {output, logs, run_time}, but the agent\u2019s loop and model calls run on the server and only each command runs in a Modal sandbox, so your API key never enters it. No MCP server' },
   { keys: '••• → Enforce JSON output', desc: 'JSON — the answer is parsed and validated (pbt\u2019s output_format="json"); one that is not JSON fails the bullet instead of flowing on as prose. Works on any kind of bullet' },
 ];
 

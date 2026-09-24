@@ -9,6 +9,11 @@ stdout, so stdout is no place to fish the answer out of.
 
 Model and key come from the environment (`AGENT_MODEL`, and the provider's own
 key variable, which litellm reads) — set by `agent_exec.py` per run.
+
+The server imports this module too, for the `agent_local` node, which runs the
+same loop in the server process with commands sent to a sandbox (see
+`agent_local_exec.py`). `agent_kwargs`, `model_config` and `_events` are shared
+so the two nodes prompt the same way and log the same way.
 """
 import json
 import os
@@ -130,43 +135,47 @@ def _events(messages: list[dict]) -> list[dict]:
     return out
 
 
-def main(task_path: str, result_path: str) -> None:
-    started = time.time()
-    with open(task_path) as f:
-        task = f.read()
+def mini_config() -> dict:
+    """mini-swe-agent's built-in `mini.yaml`: its system prompt, environment
+    variables and model settings are the starting point for both nodes."""
+    return yaml.safe_load((builtin_config_dir / "mini.yaml").read_text())
 
-    config = yaml.safe_load((builtin_config_dir / "mini.yaml").read_text())
-    agent_config = {
-        k: v for k, v in config.get("agent", {}).items() if k in ("system_template",)
+
+def agent_kwargs(config: dict, step_limit: int, cost_limit: float) -> dict:
+    """`DefaultAgent`'s settings: mini.yaml's system prompt, our task template.
+
+    v2 has no defaults for either template — `DefaultAgent(model, env)` alone
+    fails validation — so both are always passed.
+    """
+    return {
+        "system_template": config.get("agent", {})["system_template"],
+        "instance_template": INSTANCE_TEMPLATE,
+        "step_limit": step_limit,
+        "cost_limit": cost_limit,
     }
-    agent_config.update(
-        instance_template=INSTANCE_TEMPLATE,
-        step_limit=int(os.environ.get("AGENT_STEP_LIMIT", "30")),
-        cost_limit=float(os.environ.get("AGENT_COST_LIMIT", "1.0")),
-        wall_time_limit_seconds=int(os.environ.get("AGENT_WALL_SECONDS", "0")),
-    )
 
-    model = get_model(
-        os.environ["AGENT_MODEL"],
-        config.get("model", {})
-        | {
-            "observation_template": OBSERVATION_TEMPLATE,
-            "multimodal_regex": DEFAULT_MULTIMODAL_REGEX,
-            # A model litellm cannot price would otherwise stop the run. The
-            # cost limit then cannot bite, which is what the step limit is for.
-            "cost_tracking": "ignore_errors",
-        },
-    )
-    # 300s a command, not the default 30: MCP tool calls (renders, exports) are slow.
-    env = LocalEnvironment(
-        **{**config.get("environment", {}), "cwd": "/root", "timeout": 300}
-    )
-    agent = DefaultAgent(model, env, **agent_config)
 
-    has_mcp = os.path.exists(os.environ.get("MCP_SOCK", "/tmp/mcp.sock"))
-    result: dict = {}
+def model_config(config: dict, **model_kwargs) -> dict:
+    """The model's settings: mini.yaml's, with our observation template.
+
+    *model_kwargs* go to every litellm call — the server passes the API key
+    this way, per run, rather than through the process environment.
+    """
+    return config.get("model", {}) | {
+        "observation_template": OBSERVATION_TEMPLATE,
+        "multimodal_regex": DEFAULT_MULTIMODAL_REGEX,
+        # A model litellm cannot price would otherwise stop the run. The
+        # cost limit then cannot bite, which is what the step limit is for.
+        "cost_tracking": "ignore_errors",
+        "model_kwargs": config.get("model", {}).get("model_kwargs", {}) | model_kwargs,
+    }
+
+
+def run(agent, task: str, **template_vars) -> dict:
+    """Run *agent* on *task*, and say how it went: exit status, submission,
+    steps, cost, the last thing the model said, and the run's events."""
     try:
-        info = agent.run(task, mcp_tools=MCP_TOOLS if has_mcp else "")
+        info = agent.run(task, **template_vars)
         result = {
             "exit_status": info.get("exit_status", ""),
             "submission": info.get("submission", ""),
@@ -182,10 +191,32 @@ def main(task_path: str, result_path: str) -> None:
         steps=agent.n_calls,
         cost=agent.cost,
         last_message=last if isinstance(last, str) else json.dumps(last)[:4000],
-        started=started,
-        model=os.environ["AGENT_MODEL"],
         events=_events(agent.messages),
     )
+    return result
+
+
+def main(task_path: str, result_path: str) -> None:
+    started = time.time()
+    with open(task_path) as f:
+        task = f.read()
+
+    config = mini_config()
+    agent_config = agent_kwargs(
+        config,
+        step_limit=int(os.environ.get("AGENT_STEP_LIMIT", "30")),
+        cost_limit=float(os.environ.get("AGENT_COST_LIMIT", "1.0")),
+    )
+    model = get_model(os.environ["AGENT_MODEL"], model_config(config))
+    # 300s a command, not the default 30: MCP tool calls (renders, exports) are slow.
+    env = LocalEnvironment(
+        **{**config.get("environment", {}), "cwd": "/root", "timeout": 300}
+    )
+    agent = DefaultAgent(model, env, **agent_config)
+
+    has_mcp = os.path.exists(os.environ.get("MCP_SOCK", "/tmp/mcp.sock"))
+    result = run(agent, task, mcp_tools=MCP_TOOLS if has_mcp else "")
+    result.update(started=started, model=os.environ["AGENT_MODEL"])
     with open(result_path, "w") as f:
         json.dump(result, f)
 

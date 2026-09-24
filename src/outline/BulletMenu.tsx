@@ -197,6 +197,20 @@ export function BulletMenu({ bullet }: Props) {
               </button>
             </li>
           )}
+          {bullet.kind !== 'agent_local' && (
+            <li>
+              <button
+                role="menuitem"
+                title={
+                  'Like an agent node, but the agent\u2019s loop and its model calls run on the server; only each command runs in a Modal sandbox. The API key never enters the sandbox. No MCP server.' +
+                  (agent ? '' : ' This server has not reported Modal as configured — running one will say what is missing.')
+                }
+                onClick={() => run(() => actions.setKind(id, 'agent_local'))}
+              >
+                Convert to agent, loop on server{agent ? '' : ' (server not ready)'}
+              </button>
+            </li>
+          )}
           {bullet.kind === 'agent' && (
             <li>
               <button

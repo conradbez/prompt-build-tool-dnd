@@ -34,6 +34,7 @@ import pbt
 import export as exporter
 import files as attachments
 import agent_exec  # registers `model_type="agent_modal"` with pbt on import
+import agent_local_exec  # registers `model_type="agent_local_modal"` likewise
 import modal_exec  # registers `model_type="python_modal"` with pbt on import
 from llm import ENV_KEYS, make_llm_call
 
@@ -43,6 +44,11 @@ from llm import ENV_KEYS, make_llm_call
 DIST_DIR = pathlib.Path(__file__).resolve().parent.parent / "dist"
 
 PROVIDERS = {"gemini", "openai", "anthropic"}
+
+# The coding-agent kinds: the loop in a sandbox (`agent`), or the loop here with
+# commands on Modal (`agent_local`). Both take their text as a task and answer
+# with `{output, logs, run_time}`.
+AGENT_KINDS = ("agent", "agent_local")
 
 # Attachments are held in memory on the way through, so keep them modest.
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -186,11 +192,13 @@ class Node(BaseModel):
     files: list[FileRef] = []
     parentId: Optional[str] = None
     refs: list[str] = []
-    # "prompt" | "template" | "python" | "loop" | "agent" — see `_build_source`.
+    # "prompt" | "template" | "python" | "loop" | "agent" | "agent_local" — see
+    # `_build_source`.
     # Else treated as a prompt rather than rejected: a bullet is not worth a 422.
     kind: str = "prompt"
     # An agent bullet's MCP server: the command that starts it over stdio, e.g.
-    # `uvx some-mcp-server`. Empty means the agent has bash alone.
+    # `uvx some-mcp-server`. Empty means the agent has bash alone. Ignored on
+    # `agent_local`, which has no MCP.
     mcpServer: str = ""
     # Hold this bullet's answer to JSON — pbt's `output_format="json"`.
     jsonOutput: bool = False
@@ -321,6 +329,8 @@ def _build_source(
     if node.kind == "agent":
         # The sandbox never sees attachments, so none are declared either.
         return agent_exec.config_line(node.mcpServer) + "\n" + source
+    if node.kind == "agent_local":
+        return agent_local_exec.CONFIG_LINE + "\n" + source
     keys = _node_file_keys(node, session_id)
     if keys:
         source = _promptfiles_line(keys) + "\n" + source
@@ -346,11 +356,11 @@ def _loop_over(
 def _list_sources(nodes: list[Node]) -> set[str]:
     """The bullets that may hand a loop its list: those with JSON enforced.
 
-    Not an agent bullet, even with JSON enforced: its output is always the
-    `{output, logs, run_time}` object (see `agent_exec.py`), never a list, so
-    pinning a loop to it would only fail mid-run.
+    Not an agent bullet, of either kind, even with JSON enforced: its output is
+    always the `{output, logs, run_time}` object (see `agent_exec.py`), never a
+    list, so pinning a loop to it would only fail mid-run.
     """
-    return {n.id for n in nodes if n.jsonOutput and n.kind != "agent"}
+    return {n.id for n in nodes if n.jsonOutput and n.kind not in AGENT_KINDS}
 
 
 def _json_body(node: Node, text: str) -> str:
@@ -362,7 +372,7 @@ def _json_body(node: Node, text: str) -> str:
     still carry the config line — the validation applies to whatever they
     produce.
     """
-    if not node.jsonOutput or node.kind not in ("prompt", "agent"):
+    if not node.jsonOutput or node.kind not in ("prompt", *AGENT_KINDS):
         return text
     return "\n".join([text, JSON_INSTRUCTION]) if text else JSON_INSTRUCTION
 
@@ -837,7 +847,7 @@ async def run(req: RunRequest) -> RunResponse:
     promptfiles: dict[str, Any] = {}
     try:
         for n in nodes:
-            if n.kind in ("python", "agent"):
+            if n.kind in ("python", *AGENT_KINDS):
                 continue  # a sandbox never sees attachments — don't fetch them
             for key in _node_file_keys(n, req.sessionId):
                 if key not in promptfiles:
@@ -875,7 +885,7 @@ async def run(req: RunRequest) -> RunResponse:
     # A loop bullet's output is a list whether or not JSON was enforced on it.
     rendered = dict(by_id)
     for n in nodes:
-        if (n.jsonOutput or n.kind in ("loop", "agent")) and n.id in by_id:
+        if (n.jsonOutput or n.kind in ("loop", *AGENT_KINDS)) and n.id in by_id:
             by_id[n.id], rendered[n.id] = _json_forms(by_id[n.id])
 
     prompts = {}
