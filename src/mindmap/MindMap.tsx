@@ -56,6 +56,11 @@ const TOUCH_ONLY = {
  * Left panel: a mind map of the same bullet tree the outline shows on the
  * right. Parent→child links are solid; `@` references are dashed.
  *
+ * Every link points the way data runs: from the node whose output is used,
+ * out of its bottom dot, into the `+` on top of the node that uses it. So a
+ * child sits *above* its parent, and a referenced node feeds the one that
+ * mentions it.
+ *
  * Interaction model
  * -----------------
  * With a mouse the canvas behaves like any React Flow canvas — its own
@@ -67,10 +72,11 @@ const TOUCH_ONLY = {
  *   - drag a node .................. move it; the node keeps that spot
  *                                    (`bullet.pos`) instead of following the
  *                                    auto-layout
- *   - drag from the `+` circle ..... start a link from that node
+ *   - drag from the `+` circle ..... start a link into that node
  *   - drop the link on a node ...... link them (see `onConnect` for whether
  *                                    that means "child of" or "@ reference")
  *   - drop the link on the canvas .. create a new node there, as a child
+ *   - drag from the bottom dot ..... link this node's output into another
  *   - click the `+` circle ......... create a child node — **the exception**;
  *                                    React Flow would start a click-connection
  *                                    here, so `connectOnClick` is off
@@ -149,7 +155,7 @@ export function MindMap() {
         for (const c of b.children) {
           if (state.bullets[c]) {
             const id = `e-${b.id}-${c}`;
-            list.push({ id, source: b.id, target: c });
+            list.push({ id, source: c, target: b.id });
           }
         }
       }
@@ -158,8 +164,8 @@ export function MindMap() {
           const id = `r-${b.id}-${r}`;
           list.push({
             id,
-            source: b.id,
-            target: r,
+            source: r,
+            target: b.id,
             animated: true,
             style: { stroke: '#a855f7', strokeDasharray: '5 5' },
           });
@@ -170,20 +176,21 @@ export function MindMap() {
   }, [state]);
 
   /**
-   * Dropping a link on a node either adopts it or references it:
+   * A link runs from an output (`source`) into an input (`target`), whichever
+   * end the drag started from. The input side takes the output side as:
    *
-   * - the target has **no parent** → it becomes a child of the source. Dragging
-   *   a loose node under another one is how you build the tree, and a solid
-   *   edge is almost always what was meant.
-   * - the target already sits somewhere in the tree → an `@` reference, so the
-   *   existing parent link is left alone. That writes a mention into the source
+   * - a **child**, if that node has no parent. Linking a loose node into
+   *   another one is how you build the tree, and a solid edge is almost always
+   *   what was meant.
+   * - an `@` **reference**, if it already sits somewhere in the tree, so the
+   *   existing parent link is left alone. That writes a mention into the input
    *   bullet's text, which is what the dashed edge is drawn from.
    */
   const onConnect = (c: Connection) => {
     if (!c.source || !c.target || c.source === c.target) return;
-    const target = state.bullets[c.target];
-    if (target && target.parentId === null) actions.reparent(c.target, c.source);
-    else actions.addRef(c.source, c.target);
+    const input = state.bullets[c.source];
+    if (input && input.parentId === null) actions.reparent(c.source, c.target);
+    else actions.addRef(c.target, c.source);
   };
 
   /**
@@ -203,6 +210,7 @@ export function MindMap() {
     const from = dragStart.current;
     dragStart.current = null;
     if (!from || conn.toNode || !conn.fromNode) return; // landed on a node: onConnect has it
+    if (conn.fromHandle?.type !== 'target') return; // only the `+` (an input) grows a child
     const p = 'changedTouches' in e ? e.changedTouches[0] : e;
     if (!p) return;
     if (Math.hypot(p.clientX - from.x, p.clientY - from.y) < DRAG_SLOP) return; // a click, not a drag
@@ -252,8 +260,8 @@ export function MindMap() {
   // it, the `+` adds a child — so clicking one removes it, with no select-then-
   // delete step in between.
   const deleteEdge = (e: Edge) => {
-    if (e.id.startsWith('r-')) actions.removeRef(e.source, e.target);
-    else actions.reparent(e.target, null);
+    if (e.id.startsWith('r-')) actions.removeRef(e.target, e.source);
+    else actions.reparent(e.source, null);
   };
   const onEdgesDelete = (deleted: Edge[]) => deleted.forEach(deleteEdge);
 

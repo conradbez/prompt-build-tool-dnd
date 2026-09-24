@@ -55,7 +55,8 @@ exception: the `+` circle.
 |---------|------|
 | Click a node | Focus that bullet in the outline (and vice-versa) |
 | Drag a node | Move it — the node keeps that spot instead of following the auto-layout |
-| Drag from the `+` circle | Start a link from that node |
+| Drag from the `+` circle | Start a link into that node (the `+` is its input) |
+| Drag from the bottom dot | Link this node's output into another node |
 | Drop the link on a node | Link them — see *child vs reference* below |
 | Drop the link on empty canvas | Create a new node there, as a child |
 | Click the `+` circle | Create a child node — **the exception**: React Flow would start a click-connection here |
@@ -73,9 +74,13 @@ node, not just its dot — **tap a link to delete it** (it asks first: a
 stray tap is likelier than a stray click, and there is no hover to warn you
 which link you are about to lose), one finger pans and two fingers pinch to zoom.
 
-**Child vs reference.** Dropping a link on a node that has **no parent** makes
-it a *child* of the source — dragging a loose node under another one is how you
-build the tree. If the target already sits in the tree, you get an `@`
+**Links point the way data runs.** A child runs first and feeds its parent, so
+it sits *above* the parent: its link leaves its bottom dot and enters the `+`
+on top of the parent.
+
+**Child vs reference.** Linking a node that has **no parent** into another
+makes it a *child* of that node — linking a loose node in is how you build the
+tree. If the target already sits in the tree, you get an `@`
 reference instead (a dashed link), leaving its existing parent alone.
 
 **Deleting a link.** Deleting a parent→child link makes the child a **new

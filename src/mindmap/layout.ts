@@ -37,9 +37,12 @@ export function snapToGrid(pos: { x: number; y: number }): { x: number; y: numbe
 const RESULT_HEIGHT = 168; // extra room a node needs when it shows a run result
 
 /**
- * Simple top-down tidy tree: leaves are packed left-to-right, each parent is
- * centred over its children, and depth maps to the vertical axis. Multiple
- * roots are laid out side by side. Collapsed bullets render as leaves.
+ * Simple bottom-up tidy tree: leaves are packed left-to-right, each parent is
+ * centred under its children, and depth maps to the vertical axis — roots on
+ * the bottom row, the deepest children on top. That is the direction data
+ * runs: a child runs first and its output feeds its parent, so with the parent
+ * below, every link reads top-to-bottom as input → output.
+ * Multiple roots are laid out side by side. Collapsed bullets render as leaves.
  *
  * Row heights adapt per depth: a level that shows run results is given extra
  * vertical room so tall output cards don't overlap the level below.
@@ -83,5 +86,7 @@ export function layout(state: OutlineState): LaidOutNode[] {
     yOffset[d] = yOffset[d - 1] + rowHeight[d - 1] + V_GAP;
   }
 
-  return placed.map((p) => ({ id: p.id, x: p.x, y: yOffset[p.depth], depth: p.depth }));
+  // Flipped: the deepest row at y = 0, the roots at the bottom.
+  const bottom = yOffset[maxDepth];
+  return placed.map((p) => ({ id: p.id, x: p.x, y: bottom - yOffset[p.depth], depth: p.depth }));
 }

@@ -25,7 +25,31 @@ export function BulletNode({ id, data, selected }: NodeProps) {
   const d = data as BulletNodeData;
   return (
     <div className={`mm-node ${selected ? 'mm-node--selected' : ''} ${d.kind !== 'prompt' ? `mm-node--${d.kind}` : ''}`}>
-      <Handle type="target" position={Position.Top} className="mm-handle" />
+      {/*
+        One circle, two gestures: drag from it to start a link, click it to add
+        a child. They used to be separate controls sitting on top of each other
+        — the `+` button covering the connection handle — so a drag aimed at the
+        handle hit the button instead. The `+` now lives *inside* the handle.
+
+        It is the node's *input*, on top: children sit above their parent and
+        feed their output down into it, so adding a child means adding an input.
+      */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="mm-handle mm-handle--start"
+        title={
+          d.canAddChild
+            ? 'Drag to link, click to add a child'
+            : 'A python node runs one child, and already has it'
+        }
+        onClick={(e) => {
+          e.stopPropagation();
+          actions.addChild(id);
+        }}
+      >
+        {d.canAddChild && <span className="mm-handle__plus">＋</span>}
+      </Handle>
       {(d.kind !== 'prompt' || d.jsonOutput || d.fileCount > 0) && (
         <div className="mm-node__flags">
           {d.kind !== 'prompt' && <KindChip kind={d.kind} mcpServer={d.mcpServer} />}
@@ -62,28 +86,8 @@ export function BulletNode({ id, data, selected }: NodeProps) {
         </button>
       )}
       {d.hasChildren && d.collapsed && <div className="mm-node__badge">▸</div>}
-      {/*
-        One circle, two gestures: drag from it to start a link, click it to add
-        a child. They used to be separate controls sitting on top of each other
-        — the `+` button covering the connection handle — so a drag aimed at the
-        handle hit the button instead. The `+` now lives *inside* the handle.
-      */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="mm-handle mm-handle--start"
-        title={
-          d.canAddChild
-            ? 'Drag to link, click to add a child'
-            : 'A python node runs one child, and already has it'
-        }
-        onClick={(e) => {
-          e.stopPropagation();
-          actions.addChild(id);
-        }}
-      >
-        {d.canAddChild && <span className="mm-handle__plus">＋</span>}
-      </Handle>
+      {/* The output: it links down into this node's parent. */}
+      <Handle type="source" position={Position.Bottom} className="mm-handle" />
     </div>
   );
 }
