@@ -154,17 +154,6 @@ export function BulletMenu({ bullet }: Props) {
               </button>
             </li>
           )}
-          {bullet.kind !== 'loop' && (
-            <li>
-              <button
-                role="menuitem"
-                title="Loop bullets are sent to the LLM once per item of an upstream JSON list — give one a child (or an @ reference) with JSON enforced, and ref() hands it one item at a time."
-                onClick={() => run(() => actions.setKind(id, 'loop'))}
-              >
-                Convert to loop
-              </button>
-            </li>
-          )}
           {bullet.kind !== 'python' && (
             <li>
               <button

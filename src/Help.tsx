@@ -42,7 +42,6 @@ const RUNNING: Row[] = [
   { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed. A child has no @ marking where it belongs, so its output goes below the bullet's text" },
   { keys: 'An empty bullet', desc: 'Kept, not skipped, when anything below it has text — a blank bullet just hands its children\u2019s outputs upward' },
   { keys: '••• → Convert to template', desc: 'TPL — not sent to the LLM: the text, with every reference filled in, is the output' },
-  { keys: '••• → Convert to loop', desc: 'LOOP — sent to the LLM once per item of an upstream JSON list (give it an input with JSON enforced); its answer is the list of answers' },
   { keys: '@coding_instructions', desc: 'Drop into a prompt that asks for a script: the server fills in that the answer is executed, which packages the sandbox has, and how to ask for more (a PEP 723 header). Its row is filled in for you unless you type your own' },
   { keys: '@python_depn', desc: 'A variable the server reads too: comma-separated packages every python bullet\u2019s sandbox installs before it runs (on top of numpy, pandas, requests)' },
   { keys: '••• → Convert to python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output' },

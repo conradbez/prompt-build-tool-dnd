@@ -186,17 +186,6 @@ you take away is what was running — see [`server/README.md`](server/README.md)
 A browser that will not hand over the clipboard gets a box to paste into
 instead, rather than a button that appears to do nothing.
 
-## Looping over a list
-
-`•••` → **Convert to loop** marks a bullet `LOOP`. It is sent to the LLM **once
-per item** of an upstream JSON list, and its answer is the list of answers —
-pbt's own `model_type="loop"`.
-
-The list comes from an input with **JSON enforced** (a child, or an `@`
-reference) that returns an array; on each pass that input's `ref()` renders one
-item, so nothing new has to be written in the bullet. A loop with no such input
-is refused before the run, with a message saying what it needs.
-
 ## Agents with MCP tools
 
 `•••` → **Convert to agent** marks a bullet `AGENT`. Its text — with its inputs

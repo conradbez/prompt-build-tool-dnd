@@ -31,7 +31,7 @@ interface Props {
  * having to close the modal to act on that is the wrong shape.
  *
  * The head carries the same `•••` menu the outline row does, and the same chips,
- * for the same reason: what a bullet *is* — template, loop, python, held to JSON
+ * for the same reason: what a bullet *is* — template, python, agent, held to JSON
  * — is half the answer to "why did it say that", and changing it is the other
  * half. Neither should need the modal closed first.
  */

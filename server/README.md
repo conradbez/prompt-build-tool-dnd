@@ -164,26 +164,8 @@ Each node carries a `kind`, which decides what running it does:
 |------------|------------------------------------------------------------------|
 | `prompt`   | Sent to the LLM. The default.                                     |
 | `template` | Never sent: the rendered text, with every upstream output substituted in, *is* the output. |
-| `loop`     | Sent to the LLM **once per item** of an upstream JSON list; its output is the list of answers. pbt's own fan-out kind. |
 | `python`   | Runs the code its **one child** produced, in a **Modal sandbox** — not on this server. |
 | `agent`    | Its rendered text is a **task** for a coding agent (mini-swe-agent) in a Modal sandbox, with bash and, optionally, an **MCP server**'s tools. Its output is `{"output", "logs", "run_time"}`. See below. |
-
-A **loop** bullet is emitted with `{{ config(model_type="loop") }}` and is
-otherwise shaped like a prompt: the `{{ ref('…') }}` lines it already carries are
-what pbt renders, and on a loop model `ref()` yields the **current item**, so a
-loop bullet needs no syntax of its own.
-
-Only a JSON bullet can produce a list, so its inputs are where the list comes
-from. When exactly one input has JSON enforced the server pins
-`loop_over="<that model>"`, which settles the ambiguity before the run instead of
-after — pbt raises when two upstreams both come back as lists, and by then the
-rest of the graph has been sent to a model and paid for. When **no** input could
-produce one, `POST /run` refuses the whole run and says so, rather than letting
-that surface mid-run.
-
-A loop's `prompts` entry shows the **first pass**, headed by a line saying how
-many there were: a loop bullet has no single prompt, and showing one nobody was
-sent would be worse than saying which one this is.
 
 `template` needs no model type of its own: pbt parses `{{ config(...) }}` into
 `model.config` and hands it to `llm_call`, where `llm.py` short-circuits into a
@@ -370,8 +352,7 @@ model saw everything.
 The object is returned to pbt as a structured value, so it passes on as one,
 and `outputs` shows it as pretty-printed JSON. With JSON enforced on the bullet,
 the agent is asked for JSON and `output` holds the answer *parsed*; an answer
-that won't parse fails the bullet. An agent bullet is never offered to a loop
-as its list, JSON or not, because its output is an object.
+that won't parse fails the bullet.
 
 **Everything downstream gets the whole object, logs included.** A parent bullet,
 or an `@` reference to an agent bullet, renders it in full, so the logs go into

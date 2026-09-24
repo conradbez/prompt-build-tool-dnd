@@ -1385,13 +1385,6 @@ body,
   background: #d8ecfb;
 }
 
-/* A loop bullet runs many times over a list — green, the odd one out among the
-   kinds, because it is the only one whose answer is a collection. */
-.tpl-chip--loop {
-  color: #2f6f3e;
-  background: #d9f2e0;
-}
-
 /* An agent works on its own for many steps — violet, apart from the kinds that
    make a single call. */
 .tpl-chip--agent {
@@ -1412,13 +1405,6 @@ body,
 .ol-row--python .ol-md {
   padding-right: 38px;
   color: #3e4c59;
-}
-
-/* A loop bullet *is* an ordinary prompt — it just runs once per item — so it
-   keeps a prompt's ink and only makes room for its chip. */
-.ol-row--loop .ol-text,
-.ol-row--loop .ol-md {
-  padding-right: 44px;
 }
 
 /* An agent bullet's text is a task in prose, like a prompt's. Its chip is the

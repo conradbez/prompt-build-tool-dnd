@@ -14,7 +14,6 @@ branches in parallel.
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import re
 from typing import Any, Optional
@@ -73,15 +72,6 @@ SKIPPED_NOTE = (
     "which is why the inputs below are missing: they were never produced.]"
 )
 
-
-# pbt's own fan-out kind: the model is called once per item of an upstream JSON
-# list, and `ref('<that list>')` renders the current item, so a loop bullet
-# needs no syntax of its own — the ref lines `_build_source` already writes do
-# the work. `loop_over` names which upstream to iterate when it is knowable.
-def _loop_config_line(over: str = "") -> str:
-    if over:
-        return '{{ config(model_type="loop", loop_over="%s") }}' % over
-    return '{{ config(model_type="loop") }}'
 
 # Attachments reach the model the same way: pbt parses the declared names out
 # of the config block and hands the matching files to `llm_call(files=...)`.
@@ -186,7 +176,7 @@ class Node(BaseModel):
     files: list[FileRef] = []
     parentId: Optional[str] = None
     refs: list[str] = []
-    # "prompt" | "template" | "python" | "loop" | "agent" — see `_build_source`.
+    # "prompt" | "template" | "python" | "agent" — see `_build_source`.
     # Else treated as a prompt rather than rejected: a bullet is not worth a 422.
     kind: str = "prompt"
     # An agent bullet's MCP server: the command that starts it over stdio, e.g.
@@ -266,7 +256,6 @@ def _build_source(
     id_to_slug: dict[str, str],
     session_id: str = "",
     var_names: set[str] | None = None,
-    json_ids: set[str] | None = None,
     python_packages: str = "",
 ) -> str:
     """Compose a bullet's pbt prompt.
@@ -288,10 +277,8 @@ def _build_source(
     it short-circuits into a passthrough instead of an LLM call.
 
     A python node gets the `python_modal` config line instead, and its refs go
-    into a Jinja *comment* — see `_python_source`. A loop node keeps the ordinary
-    shape and adds pbt's `model_type="loop"`: its ref lines are what render the
-    current item on each pass. So does an agent node — its rendered text is the
-    agent's task — plus the `agent_modal` config line naming its MCP server, if
+    into a Jinja *comment* — see `_python_source`. An agent node keeps the
+    ordinary shape — its rendered text is the agent's task — plus the `agent_modal` config line naming its MCP server, if
     any (see `agent_exec.py`).
 
     Any `@name` naming a run variable becomes `{{ promptdata("name") }}` on the
@@ -299,7 +286,6 @@ def _build_source(
     """
     dep_ids = _deps(node, child_ids, id_to_slug)
     dep_slugs = [id_to_slug[d] for d in dep_ids]
-    json_ids = json_ids or set()
     if node.kind == "python":
         return _python_source(node, dep_slugs, python_packages)
 
@@ -314,8 +300,6 @@ def _build_source(
     source = "\n".join([prompt, *ref_lines]) if ref_lines else prompt
     if node.jsonOutput:
         source = JSON_CONFIG_LINE + "\n" + source
-    if node.kind == "loop":
-        source = _loop_config_line(_loop_over(node, dep_ids, id_to_slug, json_ids)) + "\n" + source
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
     if node.kind == "agent":
@@ -327,30 +311,30 @@ def _build_source(
     return source
 
 
-def _loop_over(
-    node: Node, dep_ids: list[str], id_to_slug: dict[str, str], json_ids: set[str]
-) -> str:
-    """Which upstream a loop bullet iterates, when there is only one candidate.
-
-    Only a JSON bullet can produce a list, so the candidates are this bullet's
-    JSON-enforced inputs. Pinning the single one takes the ambiguity out before
-    the run rather than after: pbt raises at execution time when two upstreams
-    both come back as lists, and by then the LLM calls have been paid for.
-    With two or more candidates there is nothing to pin — either only one turns
-    out to be a list (pbt copes) or pbt says which two clashed.
-    """
-    candidates = [d for d in dep_ids if d in json_ids]
-    return id_to_slug[candidates[0]] if len(candidates) == 1 else ""
+def _children(nodes: list[Node]) -> dict[str, list[str]]:
+    """Parent id → child ids, from each bullet's `parentId`. Children feed their parent."""
+    children: dict[str, list[str]] = {n.id: [] for n in nodes}
+    for n in nodes:
+        if n.parentId in children:
+            children[n.parentId].append(n.id)
+    return children
 
 
-def _list_sources(nodes: list[Node]) -> set[str]:
-    """The bullets that may hand a loop its list: those with JSON enforced.
-
-    Not an agent bullet, even with JSON enforced: its output is always the
-    `{output, logs, run_time}` object (see `agent_exec.py`), never a list, so
-    pinning a loop to it would only fail mid-run.
-    """
-    return {n.id for n in nodes if n.jsonOutput and n.kind != "agent"}
+def _models(
+    nodes: list[Node],
+    children: dict[str, list[str]],
+    names: dict[str, str],
+    session_id: str,
+    promptdata: dict[str, str],
+) -> dict[str, str]:
+    """Every bullet's pbt source, keyed by its model name — for a run and an
+    export alike. One variable is read here as well as rendered into prompts:
+    the packages a python bullet's sandbox installs (see `modal_exec`)."""
+    packages = promptdata.get(modal_exec.PACKAGES_VAR, "")
+    return {
+        names[n.id]: _build_source(n, children[n.id], names, session_id, set(promptdata), packages)
+        for n in nodes
+    }
 
 
 def _json_body(node: Node, text: str) -> str:
@@ -525,40 +509,6 @@ def _json_forms(text: str) -> tuple[str, str]:
     return json.dumps(value, indent=2, ensure_ascii=False), str(value)
 
 
-def _as_rendered(item: Any) -> str:
-    """One list item as Jinja writes it into a prompt: text as itself, anything
-    structured through `str()` — the same shape `_json_forms` describes."""
-    return item if isinstance(item, str) else str(item)
-
-
-def _loop_view(
-    node: Node,
-    dep_ids: list[str],
-    id_to_slug: dict[str, str],
-    json_ids: set[str],
-    canonical: dict[str, str],
-    rendered: dict[str, str],
-) -> tuple[dict[str, str], str]:
-    """What *one pass* of a loop bullet saw, and a line saying it was one of many.
-
-    A loop bullet has no single prompt — it has one per item — so the column
-    shows the first pass and says how many there were, rather than a prompt
-    nobody was sent.
-    """
-    over = _loop_over(node, dep_ids, id_to_slug, json_ids)
-    over_id = next((d for d in dep_ids if id_to_slug[d] == over), None) if over else None
-    if over_id is None:
-        return rendered, ""
-    try:
-        items = json.loads(canonical.get(over_id, ""))
-    except ValueError:
-        return rendered, ""
-    if not isinstance(items, list) or not items:
-        return rendered, ""
-    note = f"[Runs once per item — {len(items)} of them. Shown with the first.]"
-    return {**rendered, over_id: _as_rendered(items[0])}, note
-
-
 def _node_file_keys(node: Node, session_id: str) -> list[str]:
     """The attachments this bullet may use — its own, and nothing else.
 
@@ -719,30 +669,10 @@ def export(req: ExportRequest) -> ExportResponse:
         return ExportResponse(errors=["Nothing to export — every bullet is empty."])
 
     promptdata = _clean_promptdata(req.promptdata)
-    var_names = set(promptdata)
-    json_ids = _list_sources(nodes)
-
     # Readable names, not `n_<id>`: these become file names and `ref('…')`
     # calls that a person is going to read and edit.
     id_to_name = exporter.model_names(nodes)
-
-    children: dict[str, list[str]] = {n.id: [] for n in nodes}
-    for n in nodes:
-        if n.parentId in children:
-            children[n.parentId].append(n.id)
-
-    models = {
-        id_to_name[n.id]: _build_source(
-            n,
-            children[n.id],
-            id_to_name,
-            req.sessionId,
-            var_names,
-            json_ids,
-            promptdata.get(modal_exec.PACKAGES_VAR, ""),
-        )
-        for n in nodes
-    }
+    models = _models(nodes, _children(nodes), id_to_name, req.sessionId, promptdata)
 
     notes = exporter.warnings(nodes)
     build = exporter.project if req.target == "project" else exporter.script
@@ -773,9 +703,6 @@ async def run(req: RunRequest) -> RunResponse:
     # against these names, and pbt is handed the values.
     promptdata = _clean_promptdata(req.promptdata)
     var_names = set(promptdata)
-    # One variable is read by the server as well as rendered into prompts: the
-    # packages a python bullet's sandbox should install. See `modal_exec`.
-    python_packages = promptdata.get(modal_exec.PACKAGES_VAR, "")
 
     nodes = _runnable(req.nodes)
     if not nodes:
@@ -796,41 +723,8 @@ async def run(req: RunRequest) -> RunResponse:
     id_to_slug = {n.id: _slug(n.id) for n in nodes}
     slug_to_id = {v: k for k, v in id_to_slug.items()}
 
-    # Children feed their parent: build the parent → child-ids map from parentId.
-    children: dict[str, list[str]] = {n.id: [] for n in nodes}
-    for n in nodes:
-        if n.parentId in children:
-            children[n.parentId].append(n.id)
-
-    json_ids = _list_sources(nodes)
-
-    # A loop repeats over a list, and only a JSON bullet can hand it one. Say so
-    # here rather than letting pbt raise it mid-run, which is after the rest of
-    # the graph has already been sent to a model and paid for.
-    starved = [
-        n.id
-        for n in nodes
-        if n.kind == "loop"
-        and not any(d in json_ids for d in _deps(n, children[n.id], id_to_slug))
-    ]
-    if starved:
-        one = len(starved) == 1
-        subject = "A loop bullet repeats" if one else f"{len(starved)} loop bullets repeat"
-        whose = "its" if one else "their"
-        give = "Give it" if one else "Give each"
-        return RunResponse(
-            errors=[
-                f"{subject} over a JSON list, and none of {whose} inputs produce one. "
-                f"{give} a child (or an @ reference) with JSON enforced."
-            ]
-        )
-
-    models = {
-        id_to_slug[n.id]: _build_source(
-            n, children[n.id], id_to_slug, req.sessionId, var_names, json_ids, python_packages
-        )
-        for n in nodes
-    }
+    children = _children(nodes)
+    models = _models(nodes, children, id_to_slug, req.sessionId, promptdata)
 
     # Pull each bullet's attachments once, keyed the way the config declares
     # them, so pbt can route them to the model that asked.
@@ -872,28 +766,22 @@ async def run(req: RunRequest) -> RunResponse:
     by_id = {slug_to_id.get(name, name): value for name, value in results.items()}
     skipped = {slug_to_id.get(name, name) for name in skipped_slugs}
     # Anything structured reads one way and renders another — see `_json_forms`.
-    # A loop bullet's output is a list whether or not JSON was enforced on it.
     rendered = dict(by_id)
     for n in nodes:
-        if (n.jsonOutput or n.kind in ("loop", "agent")) and n.id in by_id:
+        if (n.jsonOutput or n.kind == "agent") and n.id in by_id:
             by_id[n.id], rendered[n.id] = _json_forms(by_id[n.id])
 
     prompts = {}
     for n in nodes:
         deps = _deps(n, children[n.id], id_to_slug)
-        view, note = (
-            _loop_view(n, deps, id_to_slug, json_ids, by_id, rendered)
-            if n.kind == "loop"
-            else (rendered, "")
-        )
-        body = _model_input(n, deps, view, global_instruction, promptdata)
+        body = _model_input(n, deps, rendered, global_instruction, promptdata)
         if n.id in skipped:
             # Say so rather than showing a prompt that was never sent: the
             # inputs are missing from it because they never arrived, and a
             # reconstruction that does not admit that reads as a bug in the
             # reference that fed it.
             body = SKIPPED_NOTE + "\n\n" + body
-        prompts[n.id] = f"{note}\n{body}" if note else body
+        prompts[n.id] = body
     return RunResponse(outputs=by_id, prompts=prompts, errors=errors)
 
 

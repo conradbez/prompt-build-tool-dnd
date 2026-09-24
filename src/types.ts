@@ -8,16 +8,13 @@
  * - `python`   — its text is Python, run in a Modal sandbox rather than on the
  *   server. Whatever it prints is its output, and the upstream outputs arrive
  *   as `inputs`. Emitted as `{{ config(model_type="python_modal") }}`.
- * - `loop`     — sent to the LLM *once per item* of an upstream JSON list, and
- *   its output is the list of answers. Emitted as
- *   `{{ config(model_type="loop") }}`; pbt's own fan-out kind.
  * - `agent`    — its rendered text is a *task* for a coding agent
  *   (mini-swe-agent) working in a Modal sandbox with bash and, optionally, an
  *   MCP server's tools. Its output is `{output, logs, run_time}`: the answer,
  *   the run end to end on Modal, and how long it took. Emitted as
  *   `{{ config(model_type="agent_modal") }}`.
  */
-export type BulletKind = 'prompt' | 'template' | 'python' | 'loop' | 'agent';
+export type BulletKind = 'prompt' | 'template' | 'python' | 'agent';
 
 /**
  * What a python bullet shows instead of text. It has none: it is an operator,

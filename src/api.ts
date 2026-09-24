@@ -24,7 +24,7 @@ export interface NodePayload {
   text: string;
   parentId: string | null;
   refs: string[];
-  /** Prompt, template, python, loop or agent — decides how the server runs it. */
+  /** Prompt, template, python or agent — decides how the server runs it. */
   kind: BulletKind;
   /** An agent bullet's MCP server command; empty for none. */
   mcpServer: string;

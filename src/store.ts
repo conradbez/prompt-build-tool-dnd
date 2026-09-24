@@ -134,7 +134,7 @@ function loadDoc(): Doc | null {
 }
 
 function isKind(v: unknown): v is BulletKind {
-  return v === 'prompt' || v === 'template' || v === 'python' || v === 'loop' || v === 'agent';
+  return v === 'prompt' || v === 'template' || v === 'python' || v === 'agent';
 }
 
 function isPos(v: unknown): v is { x: number; y: number } {
@@ -348,7 +348,7 @@ export const actions = {
     emit(next);
   },
 
-  /** Make a bullet a prompt, a template, python, a loop or an agent — see `BulletKind`. */
+  /** Make a bullet a prompt, a template, python or an agent — see `BulletKind`. */
   setKind(id: string, kind: BulletKind) {
     const b = state.bullets[id];
     if (!b || b.kind === kind) return;
