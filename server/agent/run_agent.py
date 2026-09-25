@@ -116,7 +116,7 @@ def _check_mcp(events: list[dict]) -> str | None:
             if not more.startswith("|") or not more.strip(" |"):
                 break
             detail.append(more.strip(" |"))
-        return f"{status.group(2)}: " + "\n".join(detail)
+        return status.group(2) + (": " + "\n".join(detail) if detail else "")
     return "\n".join(lines).strip() or f"opencode mcp list exited {p.returncode}"
 
 
@@ -130,7 +130,9 @@ def _server_stderr(command: list[str]) -> str:
     """
     try:
         p = subprocess.run(command, cwd=WORKDIR, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
-        return (p.stderr or p.stdout).strip()[-2000:]
+        # Both streams: a launcher like uv says "Installed N packages" on
+        # stderr, and a server that exits at once often explains on stdout.
+        return "\n".join(s.strip() for s in (p.stderr, p.stdout) if s.strip())[-2000:]
     except subprocess.TimeoutExpired as e:
         said = e.stderr or ""
         return (said.decode(errors="replace") if isinstance(said, bytes) else said).strip()[-2000:]

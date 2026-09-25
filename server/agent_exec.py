@@ -104,6 +104,8 @@ MAX_LOG_LINES = 400
 
 # OpenCode's name for each provider this server offers.
 _OPENCODE_PROVIDER = {"gemini": "google", "openai": "openai", "anthropic": "anthropic"}
+# The key variable OpenCode reads, where it differs from this server's ENV_KEYS.
+_OPENCODE_KEY_ENV = {"gemini": "GOOGLE_GENERATIVE_AI_API_KEY"}
 
 # (provider, key sent from the UI) for the run in progress. A context variable
 # rather than a global because the server answers requests concurrently: each
@@ -188,15 +190,16 @@ def _lookup():
 def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
     """What the sandbox needs to call the model: its name and the key.
 
-    OpenCode reads each provider's own key variable (`GEMINI_API_KEY` among
-    Google's), so the key goes in under the same name this server reads it from.
+    The key goes in under the name OpenCode reads for that provider, which is
+    not always this server's: Google's is `GOOGLE_GENERATIVE_AI_API_KEY`, and
+    `GEMINI_API_KEY` alone fails with "API key is missing".
     """
     key = api_key or ""
     if not key:
         raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
     model = os.environ.get("AGENT_MODEL") or f"{_OPENCODE_PROVIDER[provider]}/{model_name(provider)}"
     return {
-        ENV_KEYS[provider]: key,
+        _OPENCODE_KEY_ENV.get(provider, ENV_KEYS[provider]): key,
         "AGENT_MODEL": model,
         "AGENT_STEP_LIMIT": str(STEP_LIMIT),
         "AGENT_MCP_START_SECONDS": str(MCP_START_SECONDS),
