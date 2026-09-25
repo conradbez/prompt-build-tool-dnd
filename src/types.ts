@@ -9,7 +9,7 @@
  *   server. Whatever it prints is its output, and the upstream outputs arrive
  *   as `inputs`. Emitted as `{{ config(model_type="python_modal") }}`.
  * - `agent`    — its rendered text is a *task* for a coding agent
- *   (mini-swe-agent) working in a Modal sandbox with bash and, optionally, an
+ *   (OpenCode) working in a Modal sandbox with its own tools and, optionally, an
  *   MCP server's tools. Its output is `{output, logs, run_time}`: the answer,
  *   the run end to end on Modal, and how long it took. Emitted as
  *   `{{ config(model_type="agent_modal") }}`.

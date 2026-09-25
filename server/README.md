@@ -165,7 +165,7 @@ Each node carries a `kind`, which decides what running it does:
 | `prompt`   | Sent to the LLM. The default.                                     |
 | `template` | Never sent: the rendered text, with every upstream output substituted in, *is* the output. |
 | `python`   | Runs the code its **one child** produced, in a **Modal sandbox** — not on this server. |
-| `agent`    | Its rendered text is a **task** for a coding agent (mini-swe-agent) in a Modal sandbox, with bash and, optionally, an **MCP server**'s tools. Its output is `{"output", "logs", "run_time"}`. See below. |
+| `agent`    | Its rendered text is a **task** for a coding agent (OpenCode) in a Modal sandbox, with its own tools and, optionally, an **MCP server**'s tools. Its output is `{"output", "logs", "run_time"}`. See below. |
 
 `template` needs no model type of its own: pbt parses `{{ config(...) }}` into
 `model.config` and hands it to `llm_call`, where `llm.py` short-circuits into a
@@ -306,9 +306,9 @@ has installed); the UI annotates the "Convert to python" action when it is not.
 An agent bullet is shaped like a prompt — its text, `@` references filled in
 where they stand, children's outputs below, the global instruction on top — but
 instead of one model call, that rendered text is handed to
-[mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) as a task. The
-agent works in a fresh Modal sandbox with bash as its only tool until it submits
-an answer.
+[OpenCode](https://opencode.ai), run headless, as a task. The agent works in a
+fresh Modal sandbox with its own tools (bash, reading and editing files, …) and
+any MCP server's until it answers; its final message is the answer.
 
 The bullet's output is a JSON object:
 
@@ -318,14 +318,14 @@ The bullet's output is a JSON object:
   "logs": [
     "[    0.0s] modal: creating sandbox (app mindmap-agent, 2 cpu, 4096 MB, timeout 900s)",
     "[    1.2s] modal: sandbox sb-… up",
-    "[    6.9s] mcp: 2 tools: bump, render",
-    "[    7.1s] agent: starting (anthropic/claude-sonnet-4-5, up to 30 steps), task of 94 chars",
-    "[    9.4s] agent: step 1 $ mcp-call bump '{\"by\": 3}'",
-    "[    9.5s] mcp-server: bumped to 3",
-    "[    9.5s] mcp: call bump {\"by\": 3} -> ok in 0.0s",
-    "[    9.5s] bash: exit 0\ncounter=3",
+    "[    1.2s] modal: starting MCP server: uvx counter-mcp",
+    "[    1.2s] agent: starting (anthropic/claude-sonnet-4-5, up to 30 steps), task of 94 chars",
+    "[    6.9s] mcp: server connected in 5.6s",
+    "[    9.4s] agent: step 1: I'll bump the counter by 3.",
+    "[    9.5s] mcp: step 1 mcp_bump {\"by\": 3} -> completed\ncounter=3",
+    "[   10.8s] tool: step 2 $ ls /root -> completed\nopencode.json",
     "…",
-    "[   21.2s] agent: finished: Submitted after 4 steps",
+    "[   21.2s] agent: finished: Answered after 4 steps, $0.0123",
     "[   21.3s] modal: sandbox terminated"
   ],
   "run_time": 21.3                    // seconds, sandbox created → terminated
@@ -338,14 +338,13 @@ Each line is tagged with where it came from:
 | Tag | What |
 |---|---|
 | `modal` | the sandbox being created and terminated, and the MCP server being started |
-| `mcp` | the daemon: the server coming up, its tool list, every call it served with its outcome and duration |
-| `mcp-server` | whatever the MCP server itself printed to stderr |
-| `agent` | each step's reasoning and command, and how the run finished (status, steps, cost) |
-| `bash` | each command's exit code and output |
+| `mcp` | the server coming up, and every call to one of its tools, with its arguments, status and output |
+| `tool` | every call to one of OpenCode's own tools (`$ command` for bash), with its status and output |
+| `agent` | each step's text, any error, and how the run finished (status, steps, cost) |
 
 The sandbox's clock and this server's are lined up by the moment the agent is
 launched. Each step's text is clipped (600 chars of reasoning, 1,500 of output),
-an image a tool returned is logged as `[image shown to the model]`, and a log
+an image a tool returned is logged as `[N image(s) shown to the model]`, and a log
 over 400 lines keeps its first and last 200. It is a summary of the run: the
 model saw everything.
 
@@ -374,18 +373,19 @@ kind `agent_exec.py` registers with pbt on import. Everything lives inside one
 sandbox — nothing is hosted and no ports are exposed:
 
 ```
-Modal sandbox
-├── mcp_daemon.py   (main process) launches the MCP server over stdio,
-│                   holds one session open, listens on /tmp/mcp.sock
-├── mcp-call        tiny CLI; the agent runs it through bash
-└── run_agent.py    mini-swe-agent loop (bash is its only tool)
+Modal sandbox       (main process: a plain `sleep`)
+└── run_agent.py    writes /root/opencode.json, checks the MCP server comes up
+                    (`opencode mcp list`), runs `opencode run --format json`
+                    with the task on stdin, and folds its events into a result
 ```
 
-mini-swe-agent runs each command in a fresh shell, so it cannot hold an MCP
-session itself. The daemon holds it, which keeps the server's state (open files,
-CAD sessions, DB connections) alive across steps; the agent just runs
-`mcp-call <tool> '<json>'`. With **no** MCP server the main process is a plain
-`sleep` and the agent has bash alone. The sources are in `server/agent/`.
+OpenCode is an MCP client itself. It launches the server over stdio and holds
+one session for the whole run, which keeps the server's state (open files, CAD
+sessions, DB connections) alive across steps, and hands the model the server's
+tools as `mcp_<tool>` next to its own. With **no** MCP server the agent has
+OpenCode's tools alone. The source is `server/agent/run_agent.py`; OpenCode's
+version is pinned in `agent_exec.py` (`OPENCODE_VERSION`), since the log and
+the answer are read from its JSON event stream.
 
 | Server type | `mcpServer` |
 |---|---|
@@ -394,34 +394,31 @@ CAD sessions, DB connections) alive across steps; the agent just runs
 | Needs system libraries / API keys | the same, plus `AGENT_APT_PACKAGES` / `AGENT_MODAL_SECRETS` below |
 
 The agent uses the **run's provider and key** — the same ones prompt bullets
-use, as `<provider>/<*_MODEL>` through litellm. The key never goes into the
-model source (it would land in the cache key and in exports): `main.run` binds
-it in a context variable for the tasks pbt spawns, and it reaches the sandbox as
-a Modal secret made for that one sandbox. The MCP server inherits the sandbox's
+use, as OpenCode's `<provider>/<*_MODEL>` (Gemini is `google/…` there). The
+key never goes into the model source (it would land in the cache key and in
+exports): `main.run` binds it in a context variable for the tasks pbt spawns,
+and it reaches the sandbox as a Modal secret made for that one sandbox. The MCP server inherits the sandbox's
 environment, key included — the agent can read it anyway.
 
-A server that exits while starting fails the bullet at once, with what it
-printed. An agent that stops without submitting (step or cost limit, a crash)
-fails the bullet with its exit status and the last thing it said, rather than
-passing on half an answer.
+A server that will not start fails the bullet before the agent runs, with
+OpenCode's reason and what the server printed when started on its own. An
+agent that ends without an answer (a model error, a crash) fails the bullet
+with its exit status and the last thing it said, rather than passing on half an
+answer. The MCP server's own stderr is otherwise not in the log: OpenCode keeps
+it.
 
-Images a tool returns are **shown to the model**: the daemon saves each to
-`/tmp/mcp_out/`, and `mcp-call` inlines it with mini-swe-agent v2's multimodal
-tag, which the agent turns into an image block on the way to the model. That
-needs a vision-capable model, and every image stays in the conversation — each
-costs tokens on every later step — so the agent is told to ask for renders
-sparingly. `AGENT_INLINE_IMAGES=0` prints the paths instead. Other binary
-content (audio, resources) is only reported as `[type content]`.
+Images a tool returns are **shown to the model**: OpenCode passes them on as
+image blocks. That needs a vision-capable model, and every image stays in the
+conversation — each costs tokens on every later step — so the agent is told to
+ask for renders sparingly.
 
 Server-side settings, all optional:
 
 | Variable | Default | |
 |---|---|---|
-| `AGENT_MODEL` | provider's model | a litellm model id, overriding the run's provider for every agent |
-| `AGENT_STEP_LIMIT` | `30` | model calls per agent — the limit that always holds |
-| `AGENT_COST_LIMIT` | `1.0` | USD per agent, where litellm can price the model |
-| `AGENT_INLINE_IMAGES` | `1` | `0` to give the agent image paths instead of the images |
-| `AGENT_TIMEOUT_SECONDS` | `900` | the sandbox's whole lifetime |
+| `AGENT_MODEL` | provider's model | an OpenCode `provider/model` id, overriding the run's provider for every agent |
+| `AGENT_STEP_LIMIT` | `30` | steps before the model is told to stop using tools and answer — an instruction, not a cutoff |
+| `AGENT_TIMEOUT_SECONDS` | `900` | the sandbox's whole lifetime, the limit that always holds |
 | `AGENT_MCP_START_SECONDS` | `180` | how long an MCP server may take to come up (`uvx`/`npx` download first) |
 | `AGENT_APT_PACKAGES` | — | system packages an MCP server needs, e.g. `libgl1 libxrender1` |
 | `AGENT_PIP_PACKAGES` | — | extra Python packages in the agent image |
