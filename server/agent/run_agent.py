@@ -1,194 +1,235 @@
-"""The agent loop inside an agent bullet's sandbox: mini-swe-agent, bash as its only tool.
+"""The agent inside an agent bullet's sandbox: OpenCode, run headless.
 
-Usage: run_agent.py <task file> <result file>
+Usage: run_agent.py <task file> <result file> [MCP server command…]
 
 The task arrives as a file rather than an argument because it is a rendered
 bullet — upstream answers and all — and has no business being limited by argv.
-The result is written as JSON to *result file*: the agent's own logging goes to
-stdout, so stdout is no place to fish the answer out of.
+It reaches OpenCode on stdin. The result is written as JSON to *result file*.
 
-Model and key come from the environment (`AGENT_MODEL`, and the provider's own
-key variable, which litellm reads) — set by `agent_exec.py` per run.
+OpenCode speaks MCP itself: the server whose command follows the result file
+is launched over stdio, held open for the whole run (so its state carries from
+one call to the next), and its tools reach the model as `mcp_<tool>`, next to
+OpenCode's own bash, read, edit and the rest. Images a tool returns are shown
+to the model.
+
+Model and key come from the environment (`AGENT_MODEL`, as OpenCode's
+`provider/model`, and the provider's own key variable, which OpenCode reads) —
+set by `agent_exec.py` per run.
 """
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 
-import yaml
-from minisweagent.agents.default import DefaultAgent
-from minisweagent.config import builtin_config_dir
-from minisweagent.environments.local import LocalEnvironment
-from minisweagent.models import get_model
-from minisweagent.models.utils.openai_multimodal import DEFAULT_MULTIMODAL_REGEX
+WORKDIR = "/root"
+# OpenCode finds its project, and so its config, by $PWD rather than the
+# process's actual directory — an inherited PWD would lose the MCP server.
+OPENCODE_ENV = {**os.environ, "PWD": WORKDIR}
+# The MCP server's name in OpenCode's config, which prefixes its tools.
+MCP_NAME = "mcp"
 
-ANSWER = "/root/answer.md"
+FINISHING = """
 
-MCP_TOOLS = """\
-## MCP tools
+---
 
-An MCP tool server is available through the `mcp-call` command. Its session
-persists between commands, so state carries over from one call to the next.
+## How to finish
 
-- `mcp-call list`                    list tools
-- `mcp-call describe <tool>`         show a tool's description and JSON schema
-- `mcp-call <tool> '<json args>'`    call a tool (single-quote the JSON)
-
-Start with `mcp-call list`, and `describe` a tool before calling it.
-Images returned by tools are shown to you directly (and saved to /tmp/mcp_out/).
-Each one costs tokens for the rest of the run, so only ask for renders or
-screenshots at key steps.
+You work in a Linux sandbox; your working directory is /root. Python 3.12,
+`uv`/`uvx`, Node (`npx`), git and curl are installed.
+{mcp}
+Your final message is what the person reads, so make it the answer itself —
+not a description of what you did or where you put it.
 """
 
-# mini.yaml's own template runs the output through `tojson`, which escapes `<`
-# and `>` and so breaks the multimodal tags, and it trims anything over 10k
-# characters, which would cut an image's base64 in half. So: images pass
-# through untouched, and other long output is trimmed to head and tail.
-OBSERVATION_TEMPLATE = """<returncode>{{ output.returncode }}</returncode>
-{% if output.exception_info %}<exception>{{ output.exception_info }}</exception>
-{% endif -%}
-{%- if 'MSWEA_MULTIMODAL_CONTENT' in output.output or output.output | length < 10000 -%}
-<output>
-{{ output.output }}</output>
-{%- else -%}
-<output_head>
-{{ output.output[:5000] }}</output_head>
-<elided_chars>{{ output.output | length - 10000 }}</elided_chars>
-<output_tail>
-{{ output.output[-5000:] }}</output_tail>
-{%- endif -%}"""
-
-# Our own, rather than mini.yaml's: that one is written for fixing an issue in a
-# repository, and its finishing rule ("do not combine it with any other
-# command") would throw away the answer, which is the whole point here.
-INSTANCE_TEMPLATE = """\
-{{task}}
-
-## How to work
-
-You work in a Linux sandbox through a bash tool. Every command runs in a fresh
-subshell, so `cd` and environment variables do not persist — prefix them to the
-command that needs them, or write them to a file. Your working directory is
-/root. Python 3.12, `uv`/`uvx`, Node (`npx`), git and curl are installed.
-
-{{mcp_tools}}
-## Finishing
-
-Your final answer is what the person reads, so make it the answer itself — not
-a description of what you did. When you have it:
-
-1. Write it to """ + ANSWER + """.
-2. Run exactly: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat """ + ANSWER + """`
-
-After that command you cannot continue.
-
-<system_information>
-{{system}} {{release}} {{version}} {{machine}}
-</system_information>
+MCP_NOTE = """
+Tools named `mcp_*` come from an MCP server that stays up for the whole run, so
+state carries over from one call to the next. Images they return are shown to
+you, and each one costs tokens for the rest of the run: ask for renders or
+screenshots only at key steps.
 """
-
 
 # How much of each step goes into the bullet's log. The log is for following
 # what happened, not a transcript: the model saw everything, the log a summary.
 THOUGHT_CHARS = 600
 OUTPUT_CHARS = 1500
 
-_IMAGE_TAG = re.compile(r"(?s)<MSWEA_MULTIMODAL_CONTENT>.*?</MSWEA_MULTIMODAL_CONTENT>")
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _clip(text: str, limit: int) -> str:
-    text = _IMAGE_TAG.sub("[image shown to the model]", text or "").strip()
+    text = (text or "").strip()
     return text if len(text) <= limit else text[:limit] + f"… [{len(text) - limit} more chars]"
 
 
-def _events(messages: list[dict]) -> list[dict]:
-    """The run as `{ts, source, message}` events: each step's thought and
-    command, then what the command returned.
+def _config(mcp_command: list[str]) -> dict:
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        "model": os.environ["AGENT_MODEL"],
+        "autoupdate": False,
+        "share": "disabled",
+        "snapshot": False,
+        # No one is there to answer a permission prompt.
+        "permission": {"*": "allow"},
+        # Past this many steps the model is told to stop using tools and answer.
+        "agent": {"build": {"steps": int(os.environ.get("AGENT_STEP_LIMIT", "30"))}},
+    }
+    if mcp_command:
+        config["mcp"] = {
+            MCP_NAME: {
+                "type": "local",
+                "command": mcp_command,
+                # Per request. OpenCode's default is 5s; renders and exports are slow.
+                "timeout": int(os.environ.get("AGENT_MCP_TIMEOUT_MS", "300000")),
+            }
+        }
+    return config
 
-    Taken from the messages after the fact rather than logged as the agent goes
-    — mini-swe-agent already timestamps every one, and a run that crashes
-    half-way still has the messages it got to.
+
+def _check_mcp(events: list[dict]) -> str | None:
+    """Start the MCP server once to see that it comes up. The problem, or None.
+
+    OpenCode would otherwise carry on without a server that failed and leave
+    the agent to find out it has no tools.
     """
-    out = []
-    step = 0
-    for m in messages:
-        extra = m.get("extra") or {}
-        ts = extra.get("timestamp") or time.time()
-        if m.get("role") == "assistant":
-            step += 1
-            thought = m.get("content")
-            if thought and isinstance(thought, str) and thought.strip():
-                out.append({"ts": ts, "source": "agent", "message": f"step {step}: {_clip(thought, THOUGHT_CHARS)}"})
-            for action in extra.get("actions") or []:
-                out.append({"ts": ts, "source": "agent", "message": f"step {step} $ {_clip(action.get('command', ''), OUTPUT_CHARS)}"})
-        elif m.get("role") in ("tool", "user") and "raw_output" in extra:
-            code = extra.get("returncode")
-            body = _clip(extra.get("raw_output", ""), OUTPUT_CHARS)
-            problem = f" ({extra['exception_info']})" if extra.get("exception_info") else ""
-            out.append({"ts": ts, "source": "bash", "message": f"exit {code}{problem}" + (f"\n{body}" if body else "")})
-    return out
-
-
-def main(task_path: str, result_path: str) -> None:
     started = time.time()
+    try:
+        p = subprocess.run(
+            ["opencode", "mcp", "list"], cwd=WORKDIR, env=OPENCODE_ENV, capture_output=True, text=True,
+            timeout=int(os.environ.get("AGENT_MCP_START_SECONDS", "180")),
+        )
+    except subprocess.TimeoutExpired:
+        return "it did not come up in time"
+    # A status line (`✓ mcp connected`, `✗ mcp failed`), then its details, each
+    # on a line of its own under a `|` gutter.
+    lines = _ANSI.sub("", p.stdout + p.stderr).splitlines()
+    for i, line in enumerate(lines):
+        status = re.search(rf"([✓✗])\s+{MCP_NAME}\s+(\S+)", line)
+        if not status:
+            continue
+        if status.group(1) == "✓":
+            events.append({"ts": time.time(), "source": "mcp", "message": f"server {status.group(2)} in {time.time() - started:.1f}s"})
+            return None
+        detail = []
+        for more in lines[i + 1:]:
+            if not more.startswith("|") or not more.strip(" |"):
+                break
+            detail.append(more.strip(" |"))
+        return f"{status.group(2)}: " + "\n".join(detail)
+    return "\n".join(lines).strip() or f"opencode mcp list exited {p.returncode}"
+
+
+def _server_stderr(command: list[str]) -> str:
+    """What the server prints when started on its own, for one that failed.
+
+    OpenCode only reports that the connection closed; why (a package that is
+    not on the index, a missing library) is on the server's stderr. With stdin
+    closed a working server exits at once, and a broken one has already said
+    what is wrong.
+    """
+    try:
+        p = subprocess.run(command, cwd=WORKDIR, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        return (p.stderr or p.stdout).strip()[-2000:]
+    except subprocess.TimeoutExpired as e:
+        said = e.stderr or ""
+        return (said.decode(errors="replace") if isinstance(said, bytes) else said).strip()[-2000:]
+    except OSError as e:
+        return str(e)
+
+
+def _tool_event(part: dict, step: int, ts: float) -> dict:
+    tool = part.get("tool", "?")
+    state = part.get("state") or {}
+    args = state.get("input") or {}
+    call = f"$ {args['command']}" if tool == "bash" and "command" in args else f"{tool} {json.dumps(args)}"
+    body = state.get("output") if state.get("status") == "completed" else state.get("error")
+    images = sum(1 for a in state.get("attachments") or [] if str(a.get("mime", "")).startswith("image/"))
+    message = f"step {step} {_clip(call, OUTPUT_CHARS)} -> {state.get('status', '?')}"
+    if body:
+        message += "\n" + _clip(str(body), OUTPUT_CHARS)
+    if images:
+        message += f"\n[{images} image(s) shown to the model]"
+    source = "mcp" if tool.startswith(MCP_NAME + "_") else "tool"
+    started = (state.get("time") or {}).get("start")
+    return {"ts": started / 1000 if started else ts, "source": source, "message": message}
+
+
+def _read_run(lines: list[str], result: dict) -> None:
+    """Fold OpenCode's JSON event stream into *result*: the log, the answer,
+    steps and cost.
+
+    The answer is the text of the last step, when that step ended the turn
+    rather than asking for tools.
+    """
+    events = result["events"]
+    step, cost = 0, 0.0
+    texts: dict[str, list[str]] = {}
+    last_finish: dict = {}
+    errors = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        part = e.get("part") or {}
+        ts = e.get("timestamp", time.time() * 1000) / 1000
+        kind = e.get("type")
+        if kind == "step_start":
+            step += 1
+        elif kind == "text" and part.get("text", "").strip():
+            texts.setdefault(part.get("messageID", ""), []).append(part["text"])
+            at = (part.get("time") or {}).get("start")
+            events.append({"ts": at / 1000 if at else ts, "source": "agent", "message": f"step {step}: {_clip(part['text'], THOUGHT_CHARS)}"})
+        elif kind == "tool_use":
+            events.append(_tool_event(part, step, ts))
+        elif kind == "step_finish":
+            cost += float(part.get("cost") or 0)
+            last_finish = part
+        elif kind == "error":
+            err = e.get("error") or {}
+            errors.append(f"{err.get('name', 'Error')}: {(err.get('data') or {}).get('message', '')}".strip())
+            events.append({"ts": ts, "source": "agent", "message": f"error {errors[-1]}"})
+
+    answer = "\n".join(texts.get(last_finish.get("messageID", ""), [])).strip()
+    said = [t for group in texts.values() for t in group]
+    result.update(steps=step, cost=cost, last_message=said[-1] if said else "")
+    if errors:
+        result.update(exit_status="Error", error="\n".join(errors))
+    elif last_finish.get("reason") == "stop" and answer:
+        result.update(exit_status="Answered", submission=answer)
+    else:
+        result.update(exit_status=f"Stopped ({last_finish.get('reason') or 'no step finished'})")
+
+
+def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
+    result: dict = {"started": time.time(), "model": os.environ["AGENT_MODEL"], "exit_status": "", "submission": "", "events": []}
     with open(task_path) as f:
         task = f.read()
+    with open(os.path.join(WORKDIR, "opencode.json"), "w") as f:
+        json.dump(_config(mcp_command), f, indent=2)
 
-    config = yaml.safe_load((builtin_config_dir / "mini.yaml").read_text())
-    agent_config = {
-        k: v for k, v in config.get("agent", {}).items() if k in ("system_template",)
-    }
-    agent_config.update(
-        instance_template=INSTANCE_TEMPLATE,
-        step_limit=int(os.environ.get("AGENT_STEP_LIMIT", "30")),
-        cost_limit=float(os.environ.get("AGENT_COST_LIMIT", "1.0")),
-        wall_time_limit_seconds=int(os.environ.get("AGENT_WALL_SECONDS", "0")),
-    )
-
-    model = get_model(
-        os.environ["AGENT_MODEL"],
-        config.get("model", {})
-        | {
-            "observation_template": OBSERVATION_TEMPLATE,
-            "multimodal_regex": DEFAULT_MULTIMODAL_REGEX,
-            # A model litellm cannot price would otherwise stop the run. The
-            # cost limit then cannot bite, which is what the step limit is for.
-            "cost_tracking": "ignore_errors",
-        },
-    )
-    # 300s a command, not the default 30: MCP tool calls (renders, exports) are slow.
-    env = LocalEnvironment(
-        **{**config.get("environment", {}), "cwd": "/root", "timeout": 300}
-    )
-    agent = DefaultAgent(model, env, **agent_config)
-
-    has_mcp = os.path.exists(os.environ.get("MCP_SOCK", "/tmp/mcp.sock"))
-    result: dict = {}
     try:
-        info = agent.run(task, mcp_tools=MCP_TOOLS if has_mcp else "")
-        result = {
-            "exit_status": info.get("exit_status", ""),
-            "submission": info.get("submission", ""),
-        }
+        problem = _check_mcp(result["events"]) if mcp_command else None
+        if problem:
+            said = _server_stderr(mcp_command)
+            result.update(exit_status="MCPServerFailed", steps=0, error=problem + (f"\nIt printed:\n{said}" if said else ""))
+            return
+        task += FINISHING.format(mcp=MCP_NOTE if mcp_command else "")
+        # --title skips a model call spent naming the session.
+        p = subprocess.run(
+            ["opencode", "run", "--format", "json", "--auto", "--title", "agent bullet"],
+            cwd=WORKDIR, env=OPENCODE_ENV, input=task, capture_output=True, text=True,
+        )
+        _read_run(p.stdout.splitlines(), result)
+        if p.returncode and not result.get("error") and result["exit_status"] != "Answered":
+            result["error"] = f"opencode exited {p.returncode}:\n{p.stderr.strip()[-3000:]}"
     except Exception as e:  # noqa: BLE001 — reported back, not swallowed
-        result = {"exit_status": type(e).__name__, "submission": "", "error": str(e)}
-
-    # The last thing the model said, for a run that stopped without answering:
-    # "LimitsExceeded" alone does not tell anyone what it was stuck on.
-    said = [m for m in agent.messages if m.get("role") == "assistant"]
-    last = said[-1].get("content") if said else ""
-    result.update(
-        steps=agent.n_calls,
-        cost=agent.cost,
-        last_message=last if isinstance(last, str) else json.dumps(last)[:4000],
-        started=started,
-        model=os.environ["AGENT_MODEL"],
-        events=_events(agent.messages),
-    )
-    with open(result_path, "w") as f:
-        json.dump(result, f)
+        result.update(exit_status=type(e).__name__, error=str(e))
+    finally:
+        with open(result_path, "w") as f:
+            json.dump(result, f)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], sys.argv[3:])

@@ -3,22 +3,20 @@ An ``agent`` bullet type: a coding agent in a Modal sandbox, with an optional MC
 
 A prompt bullet asks a model once. An agent bullet hands its rendered text — its
 own words plus whatever flowed up from its children and `@` references — to
-mini-swe-agent as a task, in a fresh sandbox, and the agent works at it with
-bash until it submits an answer. That answer is the bullet's output.
+OpenCode as a task, in a fresh sandbox, and the agent works at it with its
+tools (bash, file reads and edits, …) until it answers. That answer is the
+bullet's output.
 
 Any stdio MCP server can ride along. Everything lives in the one sandbox:
 nothing is hosted and no ports are exposed.
 
-    Modal sandbox
-    ├── mcp_daemon.py   main process: launches the MCP server over stdio,
-    │                   holds one session open, listens on /tmp/mcp.sock
-    ├── mcp-call        tiny CLI; the agent runs it through bash
-    └── run_agent.py    mini-swe-agent loop (bash is its only tool)
+    Modal sandbox       (main process: a plain ``sleep``)
+    └── run_agent.py    writes OpenCode's config, checks the MCP server comes
+                        up, runs ``opencode run`` headless and reads its events
 
-mini-swe-agent runs each command in a fresh shell, so it cannot hold an MCP
-session itself. The daemon holds it, which keeps the server's state alive across
-steps; the agent just runs ``mcp-call <tool> '<json>'``. With no MCP server the
-sandbox's main process is a plain ``sleep`` and the agent has bash alone.
+OpenCode is an MCP client itself: it launches the server over stdio and holds
+the one session for the whole run, which keeps the server's state alive across
+steps, and hands the model its tools (and any images they return) directly.
 
 The server to launch is a per-bullet setting — ``{{ config(model_type=
 "agent_modal", mcp_server="uvx some-mcp-server") }}`` — so it travels in the
@@ -71,8 +69,8 @@ TIMEOUT_SECONDS = int(os.environ.get("AGENT_TIMEOUT_SECONDS", "900"))
 # How long the MCP server may take to come up. A `uvx`/`npx` server downloads
 # itself on first start, which is most of this.
 MCP_START_SECONDS = int(os.environ.get("AGENT_MCP_START_SECONDS", "180"))
+# Steps before the model is told to stop using tools and answer.
 STEP_LIMIT = int(os.environ.get("AGENT_STEP_LIMIT", "30"))
-COST_LIMIT = float(os.environ.get("AGENT_COST_LIMIT", "1.0"))
 CPU = 2
 MEMORY_MB = 4096
 
@@ -92,21 +90,20 @@ SECRETS_ENV = "AGENT_MODAL_SECRETS"
 # handed to `apt-get install` as an argument.
 _APT_NAME = re.compile(r"^[a-z0-9][a-z0-9+.-]+$")
 
+# Pinned: the bullet's log and answer are read from OpenCode's JSON event
+# stream, whose shape is OpenCode's to change.
+OPENCODE_VERSION = "1.18.32"
+
 AGENT_DIR = pathlib.Path(__file__).resolve().parent / "agent"
-SOCK = "/tmp/mcp.sock"
 TASK_PATH = "/tmp/agent_task.md"
 RESULT_PATH = "/tmp/agent_result.json"
-# The daemon's own output — its timestamped request log, and whatever the MCP
-# server writes to stderr — teed here so it can be read back while the sandbox
-# is still up.
-DAEMON_LOG = "/tmp/mcp_daemon.log"
 
 # The log travels back to the browser and on to any bullet downstream. A run
 # that goes past this keeps its start and its end, which is where the story is.
 MAX_LOG_LINES = 400
 
-# The litellm prefix for each provider this server offers.
-_LITELLM_PREFIX = {"gemini": "gemini", "openai": "openai", "anthropic": "anthropic"}
+# OpenCode's name for each provider this server offers.
+_OPENCODE_PROVIDER = {"gemini": "google", "openai": "openai", "anthropic": "anthropic"}
 
 # (provider, key sent from the UI) for the run in progress. A context variable
 # rather than a global because the server answers requests concurrently: each
@@ -179,21 +176,11 @@ def _lookup():
             modal.Image.debian_slim(python_version="3.12")
             # Node for `npx` servers, git and curl because an agent reaches for them.
             .apt_install("nodejs", "npm", "git", "curl", *apt)
-            # mcp 2.x renamed and changed the client APIs the daemon uses.
-            .uv_pip_install("mini-swe-agent>=2.4,<3", "mcp>=1.20,<2", "uv", "pyyaml", *pip)
-            .env(
-                {
-                    # litellm has no price for every model, and mini-swe-agent
-                    # stops the run on a model it cannot price unless told not to.
-                    "MSWEA_COST_TRACKING": "ignore_errors",
-                    "MSWEA_SILENT_STARTUP": "1",
-                    "MCP_SOCK": SOCK,
-                }
-            )
-            .add_local_file(AGENT_DIR / "mcp_daemon.py", "/opt/agent/mcp_daemon.py", copy=True)
-            .add_local_file(AGENT_DIR / "mcp_call.py", "/usr/local/bin/mcp-call", copy=True)
+            # A single prebuilt binary; npm only picks the one for this platform.
+            .run_commands(f"npm install -g opencode-ai@{OPENCODE_VERSION}", "opencode --version")
+            # uv for `uvx` servers.
+            .uv_pip_install("uv", *pip)
             .add_local_file(AGENT_DIR / "run_agent.py", "/opt/agent/run_agent.py", copy=True)
-            .run_commands("chmod +x /usr/local/bin/mcp-call")
         )
     return _app, _image
 
@@ -201,19 +188,18 @@ def _lookup():
 def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
     """What the sandbox needs to call the model: its name and the key.
 
-    litellm reads each provider's own key variable, so the key goes in under
-    the same name this server reads it from.
+    OpenCode reads each provider's own key variable (`GEMINI_API_KEY` among
+    Google's), so the key goes in under the same name this server reads it from.
     """
     key = api_key or ""
     if not key:
         raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
-    model = os.environ.get("AGENT_MODEL") or f"{_LITELLM_PREFIX[provider]}/{model_name(provider)}"
+    model = os.environ.get("AGENT_MODEL") or f"{_OPENCODE_PROVIDER[provider]}/{model_name(provider)}"
     return {
         ENV_KEYS[provider]: key,
         "AGENT_MODEL": model,
         "AGENT_STEP_LIMIT": str(STEP_LIMIT),
-        "AGENT_COST_LIMIT": str(COST_LIMIT),
-        "MCP_INLINE_IMAGES": os.environ.get("AGENT_INLINE_IMAGES", "1"),
+        "AGENT_MCP_START_SECONDS": str(MCP_START_SECONDS),
     }
 
 
@@ -251,75 +237,11 @@ class AgentError(RuntimeError):
         super().__init__(f"{message}\n\nLog (last lines):\n{log.tail()}")
 
 
-def _output(sb) -> str:
-    """Whatever the sandbox's main process said, for a server that failed to start."""
-    parts = []
-    for stream in (sb.stderr, sb.stdout):
-        try:
-            parts.append(stream.read())
-        except Exception:  # noqa: BLE001 — best effort, this is an error message
-            pass
-    return "\n".join(p.strip() for p in parts if p and p.strip())[-4000:]
-
-
 def _read(sb, path: str) -> str:
     """A file in the sandbox, or "" if it is not there."""
     p = sb.exec("cat", path)
     text = p.stdout.read()
     return text if p.wait() == 0 else ""
-
-
-def _daemon_events(text: str, offset: float, log: _Log) -> None:
-    """Merge the daemon's log in.
-
-    Its own lines carry an epoch timestamp, written when a request *completes*.
-    The MCP server's stderr carries none, and whatever it printed happened
-    during the request logged next — so it is held and filed just ahead of that
-    line. Anything after the last one is filed at the last one.
-    """
-    pending: list[str] = []
-    at = None
-    for line in text.splitlines():
-        stamp, _, rest = line.partition(" ")
-        try:
-            at = float(stamp) + offset
-        except ValueError:
-            if line.strip():
-                pending.append(line.rstrip()[:1000])
-            continue
-        for held in pending:
-            log.add("mcp-server", held, at)
-        pending = []
-        log.add("mcp", rest, at)
-    for held in pending:
-        log.add("mcp-server", held, at)
-
-
-def _start_mcp(sb, command: list[str], log: _Log) -> None:
-    """Wait for the daemon's socket, then check the server answers at all."""
-    log.add("modal", f"starting MCP server: {shlex.join(command)}")
-    # Polled from here rather than waited on in the sandbox, so a server that
-    # dies on start fails the bullet then, not a whole start timeout later.
-    deadline = time.time() + MCP_START_SECONDS
-    while True:
-        if sb.poll() is not None:
-            log.add("mcp-server", _output(sb) or "it printed nothing")
-            raise AgentError(f"The MCP server `{shlex.join(command)}` exited while starting.", log)
-        if sb.exec("test", "-S", SOCK).wait() == 0:
-            break
-        if time.time() > deadline:
-            raise AgentError(
-                f"The MCP server `{shlex.join(command)}` did not come up within {MCP_START_SECONDS}s.",
-                log,
-            )
-        time.sleep(1)
-    check = sb.exec("mcp-call", "list")
-    listing = check.stdout.read()
-    if check.wait() != 0:
-        log.add("mcp", (check.stderr.read() or listing).strip()[-2000:])
-        raise AgentError(f"The MCP server `{shlex.join(command)}` started but would not list its tools.", log)
-    tools = [line.split(" - ", 1)[0] for line in listing.splitlines() if line.strip()]
-    log.add("mcp", f"{len(tools)} tools: {', '.join(tools)}")
 
 
 def _run_sandbox(task: str, mcp_server: str, env: dict[str, str], json_answer: bool) -> dict:
@@ -329,16 +251,11 @@ def _run_sandbox(task: str, mcp_server: str, env: dict[str, str], json_answer: b
     log = _Log()
     app, image = _lookup()
     command = shlex.split(mcp_server) if mcp_server.strip() else []
-    # `"$@"` hands the server command through untouched — no shell reads it.
-    entry = (
-        ["sh", "-c", f'python /opt/agent/mcp_daemon.py "$@" 2>&1 | tee {DAEMON_LOG}', "sh", *command]
-        if command
-        else ["sleep", "infinity"]
-    )
 
     log.add("modal", f"creating sandbox (app {APP_NAME}, {CPU} cpu, {MEMORY_MB} MB, timeout {TIMEOUT_SECONDS}s)")
     sb = modal.Sandbox.create(
-        *entry,
+        "sleep",
+        "infinity",
         app=app,
         image=image,
         timeout=TIMEOUT_SECONDS,
@@ -349,11 +266,7 @@ def _run_sandbox(task: str, mcp_server: str, env: dict[str, str], json_answer: b
     )
     log.add("modal", f"sandbox {sb.object_id} up")
     result: dict[str, Any] = {}
-    offset = 0.0
     try:
-        if command:
-            _start_mcp(sb, command, log)
-
         # Through stdin, not argv: a rendered bullet can be long, and nothing
         # in it should be read by a shell.
         put = sb.exec("sh", "-c", f"cat > {TASK_PATH}")
@@ -362,9 +275,12 @@ def _run_sandbox(task: str, mcp_server: str, env: dict[str, str], json_answer: b
         put.stdin.drain()
         put.wait()
 
+        if command:
+            log.add("modal", f"starting MCP server: {shlex.join(command)}")
         log.add("agent", f"starting ({env['AGENT_MODEL']}, up to {STEP_LIMIT} steps), task of {len(task)} chars")
         launched = time.time()
-        p = sb.exec("python", "/opt/agent/run_agent.py", TASK_PATH, RESULT_PATH)
+        # The server command goes as arguments, so no shell reads it.
+        p = sb.exec("python", "/opt/agent/run_agent.py", TASK_PATH, RESULT_PATH, *command)
         out = p.stdout.read()
         err = p.stderr.read()
         code = p.wait()
@@ -385,11 +301,6 @@ def _run_sandbox(task: str, mcp_server: str, env: dict[str, str], json_answer: b
             + (f", ${result['cost']:.4f}" if result.get("cost") else ""),
         )
     finally:
-        if command:
-            try:
-                _daemon_events(_read(sb, DAEMON_LOG), offset, log)
-            except Exception as exc:  # noqa: BLE001 — a missing log must not hide the real error
-                log.add("mcp", f"could not read the daemon log: {exc}")
         sb.terminate()
         log.add("modal", "sandbox terminated")
 
@@ -404,7 +315,9 @@ def _answer(result: dict[str, Any], json_answer: bool, log: _Log) -> Any:
     """The submission — parsed, if the bullet enforces JSON — or an error saying
     why there is none."""
     submission = (result.get("submission") or "").strip()
-    if result.get("exit_status") == "Submitted" and submission:
+    if result.get("exit_status") == "MCPServerFailed":
+        raise AgentError(f"The MCP server did not start: {result.get('error', '')}", log)
+    if result.get("exit_status") == "Answered" and submission:
         if not json_answer:
             return submission[:MAX_OUTPUT_CHARS]
         try:

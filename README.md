@@ -189,9 +189,9 @@ instead, rather than a button that appears to do nothing.
 ## Agents with MCP tools
 
 `•••` → **Convert to agent** marks a bullet `AGENT`. Its text — with its inputs
-filled in, exactly as a prompt's would be — becomes a **task** for a small
-coding agent ([mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent))
-working in a Modal sandbox. It runs bash commands until it submits an answer.
+filled in, exactly as a prompt's would be — becomes a **task** for a coding
+agent ([OpenCode](https://opencode.ai), run headless) working in a Modal
+sandbox. It uses its tools (bash, reading and editing files) until it answers.
 The bullet's output is a JSON object: `output` (the answer), `logs` (the whole
 run, timestamped, from sandbox start to teardown: every step, command and MCP
 tool call) and `run_time` (in seconds). Bullets downstream receive all of it,
