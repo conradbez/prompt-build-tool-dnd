@@ -29,6 +29,9 @@ WORKDIR = "/root"
 OPENCODE_ENV = {**os.environ, "PWD": WORKDIR}
 # The MCP server's name in OpenCode's config, which prefixes its tools.
 MCP_NAME = "mcp"
+STEP_LIMIT = int(os.environ.get("AGENT_STEP_LIMIT", "30"))
+# OpenCode providers whose API refuses a request ending on the model's message.
+NO_TRAILING_ASSISTANT = ("google/",)
 
 FINISHING = """
 
@@ -39,6 +42,8 @@ FINISHING = """
 You work in a Linux sandbox; your working directory is /root. Python 3.12,
 `uv`/`uvx`, Node (`npx`), git and curl are installed.
 {mcp}
+You have about {steps} steps (one per reply of yours); leave the last of them
+for the answer rather than running out mid-task.
 Your final message is what the person reads, so make it the answer itself —
 not a description of what you did or where you put it.
 """
@@ -72,9 +77,14 @@ def _config(mcp_command: list[str]) -> dict:
         "snapshot": False,
         # No one is there to answer a permission prompt.
         "permission": {"*": "allow"},
-        # Past this many steps the model is told to stop using tools and answer.
-        "agent": {"build": {"steps": int(os.environ.get("AGENT_STEP_LIMIT", "30"))}},
     }
+    # Past this many steps OpenCode tells the model to stop using tools and
+    # answer — by ending the request on an assistant message, which Gemini
+    # refuses ("Requests ending with a model turn are not supported"). There
+    # the budget in FINISHING is all the model gets, and the sandbox timeout
+    # is the limit.
+    if not config["model"].startswith(NO_TRAILING_ASSISTANT):
+        config["agent"] = {"build": {"steps": STEP_LIMIT}}
     if mcp_command:
         config["mcp"] = {
             MCP_NAME: {
@@ -217,7 +227,7 @@ def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
             said = _server_stderr(mcp_command)
             result.update(exit_status="MCPServerFailed", steps=0, error=problem + (f"\nIt printed:\n{said}" if said else ""))
             return
-        task += FINISHING.format(mcp=MCP_NOTE if mcp_command else "")
+        task += FINISHING.format(mcp=MCP_NOTE if mcp_command else "", steps=STEP_LIMIT)
         # --title skips a model call spent naming the session.
         p = subprocess.run(
             ["opencode", "run", "--format", "json", "--auto", "--title", "agent bullet"],

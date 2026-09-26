@@ -117,6 +117,12 @@ def _inline(text: str, replace) -> tuple[str, set[str]]:
     return _MENTION.sub(sub, text), used
 
 
+def _test_assertion(text: str) -> str:
+    """A test's assertion with its mentions taken out: they say what it checks,
+    and that material follows the assertion rather than standing inside it."""
+    return re.sub(r"[ \t]{2,}", " ", _inline(text, lambda _id: "")[0]).strip()
+
+
 # A run variable, written in a bullet as `@name`. The `@` has to start a word —
 # the same rule the editor's autocomplete uses — so an email address in a prompt
 # is not mistaken for one.
@@ -305,14 +311,17 @@ def _build_source(
     if node.kind == "python":
         return _python_source(node, dep_slugs, python_packages)
 
+    if node.kind == "test":
+        # The assertion, then the verdict it wants, then what it is about. A
+        # mention only connects the test; it is not inlined, or the material
+        # would land inside the assertion and leave "Material under test" empty.
+        text = _test_assertion(_as_promptdata(node.text.strip(), var_names or set()))
+        ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids]
+        return "\n".join([TEST_CONFIG_LINE, text, TEST_INSTRUCTION, TEST_MATERIAL, *ref_lines])
     text, inlined = _inline(
         _as_promptdata(node.text.strip(), var_names or set()),
         lambda ref_id: "{{ ref('%s') }}" % id_to_slug[ref_id] if ref_id in id_to_slug else None,
     )
-    if node.kind == "test":
-        # The assertion, then the verdict it wants, then what it is about.
-        ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids if d not in inlined]
-        return "\n".join([TEST_CONFIG_LINE, text, TEST_INSTRUCTION, TEST_MATERIAL, *ref_lines])
     prompt = _json_body(node, text)
     # Only what has nowhere else to be: a reference already standing in the
     # sentence must not also be pasted underneath it.
@@ -511,8 +520,8 @@ def _model_input(
     if node.kind == "python":
         return modal_exec._inherited_code([results[d] for d in dep_ids if d in results])
     if node.kind == "test":
-        text, inlined = _inline(_fill_vars(node.text.strip(), promptdata or {}), results.get)
-        parts = [results[d] for d in dep_ids if d in results and d not in inlined]
+        text = _test_assertion(_fill_vars(node.text.strip(), promptdata or {}))
+        parts = [results[d] for d in dep_ids if d in results]
         return "\n".join([text, TEST_INSTRUCTION, TEST_MATERIAL, *parts])
     # Variables are shown filled in, not as the Jinja call they were compiled
     # to, and a reference is shown as the answer that replaced it — this column
