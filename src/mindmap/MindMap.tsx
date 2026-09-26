@@ -157,14 +157,15 @@ export function MindMap() {
     for (const b of Object.values(state.bullets)) {
       if (!b.collapsed) {
         for (const c of b.children) {
-          if (state.bullets[c]) {
+          // A test's verdict never feeds its parent, and it has no output to draw from.
+          if (state.bullets[c] && state.bullets[c].kind !== 'test') {
             const id = `e-${b.id}-${c}`;
             list.push({ id, source: c, target: b.id, markerEnd: { type: MarkerType.ArrowClosed } });
           }
         }
       }
       for (const r of b.refs) {
-        if (state.bullets[r]) {
+        if (state.bullets[r] && state.bullets[r].kind !== 'test') {
           const id = `r-${b.id}-${r}`;
           list.push({
             id,

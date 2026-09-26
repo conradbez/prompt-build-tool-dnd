@@ -94,8 +94,9 @@ export function BulletNode({ id, data, selected }: NodeProps) {
         </button>
       )}
       {d.hasChildren && d.collapsed && <div className="mm-node__badge">▸</div>}
-      {/* The output: it links across into this node's parent. */}
-      <Handle type="source" position={Position.Right} className="mm-handle" />
+      {/* The output: it links across into this node's parent. A test has
+          none — its verdict never feeds anything. */}
+      {d.kind !== 'test' && <Handle type="source" position={Position.Right} className="mm-handle" />}
     </div>
   );
 }
