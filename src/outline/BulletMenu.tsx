@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Bullet } from '../types';
 import { actions, canTakeChild, getState } from '../store';
-import { agentEnabled, filesEnabled, pythonInfo, uploadFile } from '../api';
+import { filesEnabled, uploadFile } from '../api';
+import { ROW_KEYS } from '../lib/shortcuts';
 
 interface Props {
   bullet: Bullet;
+  /** Show the row's keyboard shortcuts beside their items — only where they
+   *  are bound, i.e. the outline row. */
+  shortcuts?: boolean;
 }
 
 /**
@@ -13,26 +17,21 @@ interface Props {
  * row is hovered — see `.ol-row:hover .ol-menu` in index.css. Clicking opens a
  * small action popup for the bullet.
  */
-export function BulletMenu({ bullet }: Props) {
+export function BulletMenu({ bullet, shortcuts = false }: Props) {
+  const key = (k: keyof typeof ROW_KEYS) =>
+    shortcuts ? <kbd className="ol-menu__key">{ROW_KEYS[k]}</kbd> : null;
   const [open, setOpen] = useState(false);
   const [canUpload, setCanUpload] = useState(false);
-  const [python, setPython] = useState({ enabled: false, packages: [] as string[] });
-  const [agent, setAgent] = useState(false);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const picker = useRef<HTMLInputElement | null>(null);
   const { id } = bullet;
 
   // Attaching is hidden without a bucket — there is nowhere to put the bytes.
-  // `python` is only *annotated*, never hidden: this check fails on a stale or
-  // unreachable server too, and a silently missing menu item is a worse bug
-  // than a bullet that runs and reports what the server is missing.
   useEffect(() => {
     if (!open) return;
     let live = true;
     filesEnabled().then((yes) => live && setCanUpload(yes));
-    pythonInfo().then((info) => live && setPython(info));
-    agentEnabled().then((yes) => live && setAgent(yes));
     return () => {
       live = false;
     };
@@ -107,6 +106,15 @@ export function BulletMenu({ bullet }: Props) {
 
       {open && (
         <ul className="ol-menu__pop" role="menu">
+          <li>
+            <button
+              role="menuitem"
+              title="Node type, JSON output, and what that type needs — python packages, an agent's MCP server."
+              onClick={() => run(() => actions.openSettings(id))}
+            >
+              Settings…
+            </button>
+          </li>
           {canUpload && (
             <li>
               <button
@@ -129,127 +137,32 @@ export function BulletMenu({ bullet }: Props) {
             <li>
               <button role="menuitem" onClick={() => run(() => focusNew(actions.addSiblingAfter(id)))}>
                 Add bullet below
+                {key('addBelow')}
               </button>
             </li>
           )}
-          {bullet.kind !== 'prompt' && (
-            <li>
-              <button
-                role="menuitem"
-                title="An ordinary bullet: its text is sent to the LLM."
-                onClick={() => run(() => actions.setKind(id, 'prompt'))}
-              >
-                Convert to prompt
-              </button>
-            </li>
-          )}
-          {bullet.kind !== 'template' && (
-            <li>
-              <button
-                role="menuitem"
-                title="Template nodes are not sent to the LLM — their text, with refs filled in, is the output."
-                onClick={() => run(() => actions.setKind(id, 'template'))}
-              >
-                Convert to template
-              </button>
-            </li>
-          )}
-          {bullet.kind !== 'python' && (
-            <li>
-              <button
-                role="menuitem"
-                title={
-                  python.enabled
-                    ? 'Python nodes take no text of their own — they run the code their one child produced, in a Modal sandbox, and whatever it prints is the output.' +
-                      (python.packages.length
-                        ? ` The sandbox has: ${python.packages.join(', ')}.`
-                        : '')
-                    : 'Python nodes run their child\u2019s code in a Modal sandbox, which this server has not reported as configured — running one will say what is missing.'
-                }
-                onClick={() => run(() => actions.setKind(id, 'python'))}
-              >
-                Convert to python{python.enabled ? '' : ' (server not ready)'}
-              </button>
-            </li>
-          )}
-          {bullet.kind !== 'agent' && (
-            <li>
-              <button
-                role="menuitem"
-                title={
-                  'Agent nodes hand their text (with inputs filled in) to a coding agent as its task. It works in a Modal sandbox with bash — and an MCP server\u2019s tools, if you set one — and its final answer is the output.' +
-                  (agent ? '' : ' This server has not reported Modal as configured — running one will say what is missing.')
-                }
-                onClick={() => run(() => actions.setKind(id, 'agent'))}
-              >
-                Convert to agent{agent ? '' : ' (server not ready)'}
-              </button>
-            </li>
-          )}
-          {bullet.kind !== 'test' && (
-            <li>
-              <button
-                role="menuitem"
-                title="Test nodes check the nodes connected into them: their text is an assertion, and the model says whether it holds. Green passed, red failed, grey not run."
-                onClick={() => run(() => actions.setKind(id, 'test'))}
-              >
-                Convert to test
-              </button>
-            </li>
-          )}
-          {bullet.kind === 'agent' && (
-            <li>
-              <button
-                role="menuitem"
-                title={
-                  'The command that starts a stdio MCP server in the agent\u2019s sandbox, e.g. `uvx some-mcp-server` or `npx -y @scope/server`. Leave it empty for none.' +
-                  (bullet.mcpServer ? ` Now: ${bullet.mcpServer}` : '')
-                }
-                onClick={() =>
-                  run(() => {
-                    const next = window.prompt(
-                      'MCP server command (stdio), e.g. "uvx some-mcp-server" — empty for none',
-                      bullet.mcpServer,
-                    );
-                    if (next !== null) actions.setMcpServer(id, next);
-                  })
-                }
-              >
-                {bullet.mcpServer ? 'Change MCP server…' : 'Set MCP server…'}
-              </button>
-            </li>
-          )}
-          <li>
-            <button
-              role="menuitem"
-              title={
-                bullet.jsonOutput
-                  ? 'Stop checking this answer — anything it says will be passed on as it is.'
-                  : 'Require JSON: the answer is parsed and validated, and an answer that is not JSON fails this bullet instead of flowing on as prose.'
-              }
-              onClick={() => run(() => actions.setJsonOutput(id, !bullet.jsonOutput))}
-            >
-              {bullet.jsonOutput ? 'Stop enforcing JSON' : 'Enforce JSON output'}
-            </button>
-          </li>
           <li>
             <button role="menuitem" onClick={() => run(() => actions.indent(id))}>
               Indent
+              {key('indent')}
             </button>
           </li>
           <li>
             <button role="menuitem" onClick={() => run(() => actions.outdent(id))}>
               Outdent
+              {key('outdent')}
             </button>
           </li>
           <li>
             <button role="menuitem" onClick={() => run(() => actions.moveUp(id))}>
               Move up
+              {key('moveUp')}
             </button>
           </li>
           <li>
             <button role="menuitem" onClick={() => run(() => actions.moveDown(id))}>
               Move down
+              {key('moveDown')}
             </button>
           </li>
           {bullet.children.length > 0 && (

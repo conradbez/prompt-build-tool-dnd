@@ -270,7 +270,7 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
     >
       {tip && <MentionTip tip={tip} />}
       <div className="ol-gutter">
-        <BulletMenu bullet={bullet} />
+        <BulletMenu bullet={bullet} shortcuts />
         <button
           className={`ol-caret ${hasChildren ? '' : 'ol-caret--hidden'}`}
           onClick={() => actions.toggleCollapse(id)}

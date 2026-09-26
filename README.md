@@ -127,7 +127,7 @@ To keep this simple, several main-branch features are **not** implemented:
 
 ## Test nodes
 
-`•••` → *Convert to test* turns a bullet into a check on other bullets. Connect
+`•••` → *Settings…* → *Test* turns a bullet into a check on other bullets. Connect
 **one or more** nodes into it — drag from their output dot into the test's `+`
 (or `@`-mention them) — and write the **assertion** as its text, e.g. *"names
 exactly one fruit"*. On Run the model is shown the assertion and the connected
@@ -146,12 +146,10 @@ anything that mentions it. Click the verdict tag to read the reason.
 
 ## Python sandbox packages
 
-`•••` → *Convert to python* runs a bullet's child's script in a Modal sandbox,
-which always has `numpy`, `pandas` and `requests`. Add to it per run with the
-**`python_depn`** row at the top of the Settings variables table —
-comma-separated, e.g. `beautifulsoup4, lxml`. It is a variable like any other,
-so `@python_depn` in the prompt that writes the script also tells the
-model what it may import.
+`•••` → *Settings…* → *Python* runs a bullet's child's script in a Modal sandbox,
+which always has `numpy`, `pandas` and `requests`. Add to it per bullet in the
+same modal's **Sandbox packages** field — comma-separated, e.g.
+`beautifulsoup4, lxml`.
 
 A script can also ask for its own, in the standard **PEP 723** block that
 `uv run` reads — declared at the top of the file, installed before it runs:
@@ -168,10 +166,10 @@ which packages the sandbox already has, and that PEP 723 block. Its row is left
 empty by default and the server writes it at run time, so it always names the
 real sandbox — type into it to say your own thing instead.
 
-Both rows are fixed: the server looks them up by name, so they cannot be renamed
-or deleted, only filled in.
+Its row is fixed: the server looks it up by name, so it cannot be renamed or
+deleted, only filled in.
 
-Note what per-run packages mean: anyone who can post a graph to the server
+Note what per-bullet packages mean: anyone who can post a graph to the server
 chooses what gets installed, and `pip` runs a package's own build code.
 `MODAL_PACKAGES` on the server is the deploy-access-only version — see
 [`server/README.md`](server/README.md).
@@ -207,7 +205,7 @@ instead, rather than a button that appears to do nothing.
 
 ## Agents with MCP tools
 
-`•••` → **Convert to agent** marks a bullet `AGENT`. Its text — with its inputs
+`•••` → **Settings…** → **Agent** marks a bullet `AGENT`. Its text — with its inputs
 filled in, exactly as a prompt's would be — becomes a **task** for a coding
 agent ([OpenCode](https://opencode.ai), run headless) working in a Modal
 sandbox. It uses its tools (bash, reading and editing files) until it answers.
@@ -216,7 +214,7 @@ run, timestamped, from sandbox start to teardown: every step, command and MCP
 tool call) and `run_time` (in seconds). Bullets downstream receive all of it,
 logs included.
 
-`•••` → **Set MCP server…** gives the agent any stdio MCP server's tools as
+The **MCP server** field in the same modal gives the agent any stdio MCP server's tools as
 well: type the command that starts it (`uvx some-mcp-server`,
 `npx -y @scope/server`), and the chip becomes `AGENT+MCP`. Leave it empty for
 an agent with bash alone. The agent uses the provider and key in the toolbar.
@@ -225,7 +223,7 @@ server can configure.
 
 ## Enforcing JSON
 
-`•••` → **Enforce JSON output** marks a bullet `JSON`. The server emits pbt's
+`•••` → **Settings…** → **Enforce JSON output** marks a bullet `JSON`. The server emits pbt's
 `{{ config(output_format="json") }}` for it, so the answer is **parsed and
 validated**: one that is not JSON fails that bullet with its parse error instead
 of flowing downstream as prose. A prompt bullet also gets a line asking for JSON

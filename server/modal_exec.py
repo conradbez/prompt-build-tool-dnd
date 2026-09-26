@@ -37,13 +37,6 @@ MODEL_TYPE = "python_modal"
 # The config key carrying this bullet's extra packages, comma-separated.
 PACKAGES_KEY = "packages"
 
-# The run variable a person types them into — an ordinary promptdata entry in
-# the settings table, read by the server on the way to the sandbox. It stays a
-# variable like any other, so `@python_depn` in the prompt that *writes*
-# the script tells the model what it may import, in the same breath as telling
-# the sandbox what to install.
-PACKAGES_VAR = "python_depn"
-
 # The variable holding the boilerplate for a prompt that asks for a script. Its
 # value is written by the server (see `standard_instructions`), not by a person:
 # it names the packages *this* sandbox actually has and the exact syntax that
@@ -57,7 +50,7 @@ CONFIG_LINE = '{{ config(model_type="%s") }}' % MODEL_TYPE
 
 
 def config_line(extra: str = "") -> str:
-    """The bullet's config line, carrying any packages the run asked for.
+    """The bullet's config line, carrying any packages the bullet asked for.
 
     They travel *in the model source* rather than in a module-level variable
     because the server answers requests concurrently: a global would let one
@@ -145,15 +138,15 @@ def script_requirements(source: str) -> tuple[list[str], list[str]]:
     return split_requirements(" ".join(str(d) for d in declared if isinstance(d, str)))
 
 
-def standard_instructions(extra: str = "") -> str:
+def standard_instructions() -> str:
     """What to tell a model that is being asked to write a script for a sandbox.
 
     Three things it cannot know: that its answer is executed rather than read,
     what is already installed, and how to ask for more. The package list is the
-    real one for this server and this run, so the instructions cannot drift from
+    real one for this server, so the instructions cannot drift from
     the sandbox the way a hand-written paragraph would.
     """
-    have = packages() + split_requirements(extra)[0]
+    have = packages()
     return (
         "Write Python only — the file is run exactly as you write it, so no "
         "explanation outside comments. A ``` fence around it is fine.\n"
@@ -360,7 +353,7 @@ async def _run(inputs: list[Any], extra: str = "") -> str:
     wanted, refused = split_requirements(extra)
     if refused:
         raise RuntimeError(
-            f"`{PACKAGES_VAR}` lists something that is not a package "
+            f"This bullet's packages include something that is not a package "
             f"requirement: {', '.join(refused)}. A name, optional [extras] and "
             f"an optional version pin — nothing that reads as a flag or a URL."
         )

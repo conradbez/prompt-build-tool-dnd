@@ -21,7 +21,7 @@ const EDITING: Row[] = [
 ];
 
 const MAP: Row[] = [
-  { keys: 'Double-click a node', desc: 'Open it — your text, what the model was sent, and what came back. The ••• menu and the kind chips are in its head, so a bullet can be converted without closing it' },
+  { keys: 'Double-click a node', desc: 'Open it — your text, what the model was sent, and what came back. The ••• menu and the kind chips are in its head, so a bullet\u2019s settings can be changed without closing it' },
   { keys: 'Click a node', desc: 'Focus that bullet in the outline (and vice-versa)' },
   { keys: '＋ on a node', desc: 'Add a child node — a child feeds its output up into this node' },
   { keys: 'Drag a node', desc: 'Move it — the node then keeps that spot instead of following the layout' },
@@ -41,12 +41,11 @@ const RUNNING: Row[] = [
   { keys: '@variable', desc: 'A run variable from Settings (⚙), shown in teal — its value is substituted into the prompt. Same @ menu as bullets; add or edit the values in the settings table' },
   { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed. A child has no @ marking where it belongs, so its output goes below the bullet's text" },
   { keys: 'An empty bullet', desc: 'Kept, not skipped, when anything below it has text — a blank bullet just hands its children\u2019s outputs upward' },
-  { keys: '••• → Convert to template', desc: 'TPL — not sent to the LLM: the text, with every reference filled in, is the output' },
+  { keys: '••• → Settings… → Template', desc: 'TPL — not sent to the LLM: the text, with every reference filled in, is the output' },
   { keys: '@coding_instructions', desc: 'Drop into a prompt that asks for a script: the server fills in that the answer is executed, which packages the sandbox has, and how to ask for more (a PEP 723 header). Its row is filled in for you unless you type your own' },
-  { keys: '@python_depn', desc: 'A variable the server reads too: comma-separated packages every python bullet\u2019s sandbox installs before it runs (on top of numpy, pandas, requests)' },
-  { keys: '••• → Convert to python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output' },
-  { keys: '••• → Convert to agent', desc: 'AGENT — the text, with its inputs filled in, is a task for a coding agent in a sandbox: it works with bash until it submits an answer. Its output is JSON: output (the answer), logs (the run end to end on Modal) and run_time (seconds). ••• → Set MCP server… gives it a stdio MCP server\u2019s tools too (e.g. uvx some-mcp-server)' },
-  { keys: '••• → Enforce JSON output', desc: 'JSON — the answer is parsed and validated (pbt\u2019s output_format="json"); one that is not JSON fails the bullet instead of flowing on as prose. Works on any kind of bullet' },
+  { keys: '••• → Settings… → Python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output. Extra packages for its sandbox are set in the same modal' },
+  { keys: '••• → Settings… → Agent', desc: 'AGENT — the text, with its inputs filled in, is a task for a coding agent in a sandbox: it works with bash until it submits an answer. Its output is JSON: output (the answer), logs (the run end to end on Modal) and run_time (seconds). its MCP server field gives it a stdio MCP server\u2019s tools too (e.g. uvx some-mcp-server)' },
+  { keys: '••• → Settings… → Enforce JSON', desc: 'JSON — the answer is parsed and validated (pbt\u2019s output_format="json"); one that is not JSON fails the bullet instead of flowing on as prose. Works on any kind of bullet' },
 ];
 
 function Section({ title, rows }: { title: string; rows: Row[] }) {

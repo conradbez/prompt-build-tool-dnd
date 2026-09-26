@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { PROVIDERS, runGraph, type Provider } from './api';
+import { PROVIDERS, runGraph, type ClassifierSettings, type Provider } from './api';
 import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
 import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';
@@ -7,6 +7,16 @@ import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';
 const PROVIDER_STORAGE = 'wm.provider';
 const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
 const keyStorage = (p: Provider) => `wm.apiKey.${p}`;
+const CLASSIFIER_STORAGE = 'wm.classifier';
+
+function loadClassifier(): ClassifierSettings {
+  const empty = { apiKey: '', baseUrl: '', model: '' };
+  try {
+    return { ...empty, ...JSON.parse(localStorage.getItem(CLASSIFIER_STORAGE) || '{}') };
+  } catch {
+    return empty;
+  }
+}
 
 function loadProvider(): Provider {
   const v = localStorage.getItem(PROVIDER_STORAGE) as Provider | null;
@@ -36,6 +46,7 @@ export function Toolbar() {
   // sends them, and marks the gear when there is something behind it. The mark
   // counts the *rows a person wrote* — the reserved variables are always in the
   // map, and a dot that is always on says nothing.
+  const [classifier, setClassifier] = useState<ClassifierSettings>(loadClassifier);
   const rows = usePromptVars();
   const vars = promptVarMap(rows);
   const written = rows.filter((r) => NAME_RE.test(r.name)).length;
@@ -43,6 +54,11 @@ export function Toolbar() {
   const onInstructionChange = (v: string) => {
     setGlobalInstruction(v);
     localStorage.setItem(GLOBAL_INSTRUCTION_STORAGE, v);
+  };
+
+  const onClassifierChange = (v: ClassifierSettings) => {
+    setClassifier(v);
+    localStorage.setItem(CLASSIFIER_STORAGE, JSON.stringify(v));
   };
 
   const onProviderChange = (p: Provider) => {
@@ -68,7 +84,7 @@ export function Toolbar() {
     actions.setRunning(true);
     try {
       const nodes = buildNodePayloads(getState());
-      const res = await runGraph(nodes, provider, apiKey, globalInstruction, vars);
+      const res = await runGraph(nodes, provider, apiKey, globalInstruction, vars, classifier);
       if (res.needsKey) {
         // Nothing ran, so the last run's answers stand; the flash says why.
         setNeedsKey(true);
@@ -140,6 +156,8 @@ export function Toolbar() {
           apiKey={apiKey}
           onProviderChange={onProviderChange}
           onKeyChange={onKeyChange}
+          classifier={classifier}
+          onClassifierChange={onClassifierChange}
         />
       )}
 

@@ -11,7 +11,7 @@ export const PROVIDERS: { id: Provider; label: string }[] = [
   { id: 'anthropic', label: 'Anthropic' },
 ];
 
-import type { BulletKind, FileRef, TestStatus } from './types';
+import type { BulletKind, FileRef, TestJudge, TestStatus } from './types';
 import { getSessionId } from './lib/session';
 
 export interface NodePayload {
@@ -28,8 +28,13 @@ export interface NodePayload {
   kind: BulletKind;
   /** An agent bullet's MCP server command; empty for none. */
   mcpServer: string;
+  /** A python bullet's extra sandbox packages, comma-separated; empty for none. */
+  packages: string;
   /** Validate this bullet's answer as JSON (pbt's `output_format="json"`). */
   jsonOutput: boolean;
+  /** A test bullet's judge, and the P(yes) a classifier-judged one needs. */
+  judge: TestJudge;
+  threshold: number;
   /** Attachments, sent to the model along with this bullet's prompt. */
   files: FileRef[];
 }
@@ -220,6 +225,16 @@ export async function exportGraph(
   };
 }
 
+/**
+ * Settings → classifier, for classifier-judged tests: any `/v1/systemone`
+ * endpoint. Empty fields take pbt's defaults — TypeSafe's hosted Jev.
+ */
+export interface ClassifierSettings {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
 export async function runGraph(
   nodes: NodePayload[],
   provider: Provider,
@@ -228,6 +243,8 @@ export async function runGraph(
   globalInstruction?: string,
   /** Settings → run variables. Each `@name` in a bullet reads one of these. */
   promptdata?: Record<string, string>,
+  /** Settings → classifier, used by classifier-judged tests only. */
+  classifier?: ClassifierSettings,
 ): Promise<RunResponse> {
   const url = `${getServerUrl()}/run`;
   let res: Response;
@@ -242,6 +259,7 @@ export async function runGraph(
         sessionId: getSessionId(),
         globalInstruction: globalInstruction || '',
         promptdata: promptdata || {},
+        classifier: classifier || {},
       }),
     });
   } catch (err) {

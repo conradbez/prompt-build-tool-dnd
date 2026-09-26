@@ -34,15 +34,6 @@ export const NAME_RE = /^[A-Za-z0-9_]+$/;
 export const varRefRe = () => /(?<![^\s([{])@([A-Za-z0-9_]+)/g;
 
 /**
- * The one variable the *server* reads as well as renders: a comma-separated
- * list of packages a python bullet's sandbox installs before it runs. It stays
- * an ordinary variable, so `@python_depn` in the prompt that writes the
- * script tells the model what it may import in the same breath as telling the
- * sandbox what to install.
- */
-export const PYTHON_DEPS_VAR = 'python_depn';
-
-/**
  * The boilerplate for a prompt that asks a model for a script: that its answer
  * is executed rather than read, what the sandbox already has, and how to ask
  * for more (a PEP 723 header). It needs no row — the *server* writes its value
@@ -66,13 +57,6 @@ export interface ReservedVar {
 }
 
 export const RESERVED: ReservedVar[] = [
-  {
-    name: PYTHON_DEPS_VAR,
-    hint:
-      'Comma-separated packages every python bullet’s sandbox installs before ' +
-      'it runs, on top of numpy, pandas and requests.',
-    placeholder: 'beautifulsoup4, lxml, scipy==1.*',
-  },
   {
     name: STANDARD_INSTRUCTIONS_VAR,
     hint:
@@ -122,7 +106,6 @@ export function withBlankRow(rows: PromptVar[]): PromptVar[] {
 
 /** Names these variables used to have, and what they are called now. */
 export const RENAMED: Record<string, string> = {
-  avail_python_depn: PYTHON_DEPS_VAR,
   standard_coding_instructions: STANDARD_INSTRUCTIONS_VAR,
 };
 

@@ -163,6 +163,14 @@ def _llm_call(provider: str) -> str:
         "        # A template bullet is a passthrough: the rendered prompt *is*\n"
         "        # the output, so it is never sent anywhere.\n"
         "        return prompt.strip()\n"
+        '    if cfg.get("judge") == "classifier":\n'
+        "        # A classifier-judged test: P(yes) for the question above `---`.\n"
+        "        # Reads TYPESAFE_API_KEY / TYPESAFE_BASE_URL / TYPESAFE_DEFAULT_MODEL.\n"
+        "        import json\n\n        import pbt\n"
+        "        from pbt.classifier import split_question\n\n"
+        "        question, state = split_question(prompt)\n"
+        "        p = pbt.systemone_classifier()(state, question)\n"
+        '        return json.dumps({"pass": p >= float(cfg.get("threshold", 0.5)), "p_yes": p})\n'
         "    if not KEY:\n"
         f'        raise RuntimeError("Set {key_env} before running this.")\n'
         '    wants_json = cfg.get("output_format") == "json"\n\n'

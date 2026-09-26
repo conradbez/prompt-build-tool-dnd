@@ -294,6 +294,15 @@ body,
   background: var(--accent-soft);
 }
 
+/* A shortcut hint, pushed to the right edge of its item. */
+.ol-menu__key {
+  float: right;
+  margin-left: 16px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .ol-menu__item--danger {
   color: #b42318;
 }
@@ -2098,4 +2107,45 @@ body,
     bottom: auto;
     right: calc(60px + env(safe-area-inset-right));
   }
+}
+
+/* Node settings: the kind picker is a segmented control — one of five. */
+.ns-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ns-kind {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ns-kind:hover {
+  border-color: var(--accent);
+}
+
+.ns-kind--on,
+.ns-kind--on:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.ns-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ns-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }

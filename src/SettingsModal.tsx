@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PROVIDERS, exportGraph, type ExportTarget, type Provider } from './api';
+import { PROVIDERS, exportGraph, type ClassifierSettings, type ExportTarget, type Provider } from './api';
 import {
   NAME_RE,
   promptVarMap,
@@ -40,6 +40,9 @@ interface Props {
   apiKey: string;
   onProviderChange: (p: Provider) => void;
   onKeyChange: (v: string) => void;
+  /** Where classifier-judged tests are sent — see `ClassifierSettings`. */
+  classifier: ClassifierSettings;
+  onClassifierChange: (v: ClassifierSettings) => void;
 }
 
 /**
@@ -65,6 +68,8 @@ export function SettingsModal({
   apiKey,
   onProviderChange,
   onKeyChange,
+  classifier,
+  onClassifierChange,
 }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -125,6 +130,42 @@ export function SettingsModal({
             />
             <p className="res-col__note">
               Template and python bullets are left alone — only prompts get it.
+            </p>
+          </section>
+
+          <section className="res-col">
+            <h3 className="res-col__head">Classifier for tests</h3>
+            <div className="res-col__body pd-model">
+              <input
+                className="pd-input"
+                type="password"
+                placeholder="TypeSafe API key (blank for local)"
+                value={classifier.apiKey}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => onClassifierChange({ ...classifier, apiKey: e.target.value })}
+              />
+              <input
+                className="pd-input"
+                placeholder="https://api.typesafe.ai"
+                value={classifier.baseUrl}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => onClassifierChange({ ...classifier, baseUrl: e.target.value })}
+              />
+              <input
+                className="pd-input"
+                placeholder="jev-latest"
+                value={classifier.model}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => onClassifierChange({ ...classifier, model: e.target.value })}
+              />
+            </div>
+            <p className="res-col__note">
+              Used by test bullets judged by a classifier instead of the LLM. Any{' '}
+              <code>/v1/systemone</code> endpoint: blank means TypeSafe&rsquo;s hosted Jev; for a
+              local Ollaya use <code>http://localhost:11435</code> and <code>laya:en</code>.
             </p>
           </section>
 
@@ -242,8 +283,9 @@ function VarTable() {
         <code>{'{{ promptdata("name") }}'}</code>. Renaming one here does not rewrite the bullets
         that used the old name.
         <br />
-        The first two are the server&rsquo;s own: it reads them by name, so those cannot be
-        renamed or removed — only filled in. Hover either for what it does.
+        The first is the server&rsquo;s own: it reads it by name, so it cannot be renamed or
+        removed — only filled in. Hover it for what it does. Python packages are set per
+        bullet, in its ••• → Settings….
       </p>
     </section>
   );

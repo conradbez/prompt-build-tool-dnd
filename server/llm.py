@@ -8,6 +8,7 @@ an attachment on a bullet goes to the model along with that bullet's prompt.
 
 from __future__ import annotations
 
+import json
 import mimetypes
 import os
 from typing import Any, Callable, Optional
@@ -85,14 +86,43 @@ def _is_template(config: Any) -> bool:
     return bool(config) and config.get("model_type") == "template"
 
 
-def make_llm_call(api_key: Optional[str] = None, provider: str = "gemini") -> Callable[..., str]:
+def _classify(prompt: str, config: dict, settings: dict) -> str:
+    """A classifier-judged test: P(yes) for the question above ``---`` about the
+    material below it, returned as the verdict JSON every test bullet gives.
+
+    The key, like the LLM's, is only ever what the UI sent: pbt would otherwise
+    fall back to the server's ``TYPESAFE_API_KEY``. An empty key is still a
+    valid call — a local Ollaya needs none.
+    """
+    import pbt
+    from pbt.classifier import parse_threshold, split_question
+
+    question, state = split_question(prompt)
+    classify_call = pbt.systemone_classifier(
+        model=settings.get("model") or None,
+        base_url=settings.get("baseUrl") or None,
+        api_key=settings.get("apiKey") or "",
+    )
+    p_yes = float(classify_call(state, question))
+    threshold = parse_threshold(config.get("threshold"))
+    return json.dumps({"pass": p_yes >= threshold, "p_yes": round(p_yes, 4), "threshold": threshold})
+
+
+def make_llm_call(
+    api_key: Optional[str] = None,
+    provider: str = "gemini",
+    classifier: Optional[dict] = None,
+) -> Callable[..., str]:
     """Return an ``llm_call(prompt, files=None, config=None)`` bound to a provider.
 
     The key is only ever ``api_key`` (sent from the UI) — the server's own
     environment keys are never used, so a public deploy can't spend them.
+    ``classifier`` holds the settings for classifier-judged tests.
     """
 
     def llm_call(prompt: str, files: Any = None, config: Any = None) -> str:
+        if config and config.get("judge") == "classifier":
+            return _classify(prompt, config, classifier or {})
         if _is_template(config):
             # ref()/promptdata() are already substituted, so the rendered
             # prompt *is* the output. Stripped because the injected

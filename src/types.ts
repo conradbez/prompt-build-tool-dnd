@@ -33,6 +33,17 @@ export type BulletKind = 'prompt' | 'template' | 'python' | 'agent' | 'test';
 export type TestStatus = 'pass' | 'fail' | 'skipped';
 
 /**
+ * Who decides a test bullet:
+ *
+ * - `llm`        — the run's model reads the assertion and the material and
+ *   answers pass or fail.
+ * - `classifier` — a classifier (TypeSafe's Jev, or a local Ollaya) answers the
+ *   assertion as a yes/no question with P(yes); the test passes when that
+ *   reaches `Bullet.threshold`. Set up in Settings → Classifier.
+ */
+export type TestJudge = 'llm' | 'classifier';
+
+/**
  * What a python bullet shows instead of text. It has none: it is an operator,
  * not an editor — it runs what its one child produced, so there is nothing on
  * it for a person to write.
@@ -83,6 +94,16 @@ export interface Bullet {
    * agent works with bash alone. Ignored on every other kind.
    */
   mcpServer: string;
+  /**
+   * A python bullet's extra sandbox packages, comma-separated, e.g.
+   * `beautifulsoup4, scipy==1.*` — installed on top of the server's own before
+   * it runs. Empty means none. Ignored on every other kind.
+   */
+  packages: string;
+  /** A test bullet's judge — see `TestJudge`. Ignored on every other kind. */
+  judge: TestJudge;
+  /** A classifier-judged test passes when P(yes) ≥ this, 0–1. */
+  threshold: number;
 }
 
 export interface Focus {
@@ -115,6 +136,8 @@ export interface OutlineState {
    * the same modal, and only one of them is on screen at a time.
    */
   openResultId: string | null;
+  /** Whose settings modal is open, if any — kind, JSON, packages, MCP. */
+  openSettingsId: string | null;
 }
 
 /** A single entry in the flattened, depth-first view of visible bullets. */

@@ -40,7 +40,8 @@ export function ResultModal({ bullet, prompt, result }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
+      // A settings modal open on top takes the Escape for itself.
+      if (e.key === 'Escape' && !getState().openSettingsId) close();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

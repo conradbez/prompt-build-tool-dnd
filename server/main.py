@@ -79,6 +79,20 @@ TEST_INSTRUCTION = (
 )
 TEST_MATERIAL = "Material under test:"
 
+# A classifier-judged test skips the LLM: a classifier (TypeSafe's Jev, or a
+# local Ollaya) answers the assertion as a yes/no question with P(yes). pbt's
+# own classifier-test shape — question above a `---` line, material below — is
+# used here too, and `llm.py` routes `judge="classifier"` to the classifier.
+CLASSIFIER_SEPARATOR = "---"
+
+
+# Both keys are read by `llm.py`, not pbt — registered so pbt does not warn.
+pbt.register_config_keys("judge", "threshold")
+
+
+def _classifier_config_line(threshold: float) -> str:
+    return '{{ config(judge="classifier", threshold="%s", global_instruction=False) }}' % threshold
+
 # What the "Model input" column says for a bullet that never ran.
 SKIPPED_NOTE = (
     "[Not sent. Something this bullet depends on failed, so pbt skipped it — "
@@ -142,9 +156,7 @@ def _clean_promptdata(promptdata: dict[str, str]) -> dict[str, str]:
     """
     clean = {k: str(v) for k, v in promptdata.items() if _VAR_NAME.match(k)}
     if not clean.get(modal_exec.INSTRUCTIONS_VAR, "").strip():
-        clean[modal_exec.INSTRUCTIONS_VAR] = modal_exec.standard_instructions(
-            clean.get(modal_exec.PACKAGES_VAR, "")
-        )
+        clean[modal_exec.INSTRUCTIONS_VAR] = modal_exec.standard_instructions()
     return clean
 
 
@@ -201,8 +213,24 @@ class Node(BaseModel):
     # An agent bullet's MCP server: the command that starts it over stdio, e.g.
     # `uvx some-mcp-server`. Empty means the agent has bash alone.
     mcpServer: str = ""
+    # A python bullet's extra sandbox packages, comma-separated — see
+    # `modal_exec.config_line`. Ignored on every other kind.
+    packages: str = ""
     # Hold this bullet's answer to JSON — pbt's `output_format="json"`.
     jsonOutput: bool = False
+    # A test bullet's judge: "llm" asks the run's model for a verdict,
+    # "classifier" asks the classifier for P(yes) and passes at `threshold`.
+    judge: str = "llm"
+    threshold: float = 0.5
+
+
+class ClassifierSettings(BaseModel):
+    """Settings → classifier: any `/v1/systemone` endpoint (see
+    `pbt.systemone_classifier`). Empty fields take pbt's defaults — hosted Jev."""
+
+    apiKey: str = ""
+    baseUrl: str = ""
+    model: str = ""
 
 
 class RunRequest(BaseModel):
@@ -217,6 +245,7 @@ class RunRequest(BaseModel):
     # Settings → run variables, name → value. A bullet writes `@name`; pbt is
     # handed the map and renders `{{ promptdata("name") }}` from it.
     promptdata: dict[str, str] = {}
+    classifier: ClassifierSettings = ClassifierSettings()
 
 
 class ExportRequest(BaseModel):
@@ -278,7 +307,6 @@ def _build_source(
     id_to_slug: dict[str, str],
     session_id: str = "",
     var_names: set[str] | None = None,
-    python_packages: str = "",
 ) -> str:
     """Compose a bullet's pbt prompt.
 
@@ -309,7 +337,7 @@ def _build_source(
     dep_ids = _deps(node, child_ids, id_to_slug)
     dep_slugs = [id_to_slug[d] for d in dep_ids]
     if node.kind == "python":
-        return _python_source(node, dep_slugs, python_packages)
+        return _python_source(node, dep_slugs, node.packages)
 
     if node.kind == "test":
         # The assertion, then the verdict it wants, then what it is about. A
@@ -317,6 +345,10 @@ def _build_source(
         # would land inside the assertion and leave "Material under test" empty.
         text = _test_assertion(_as_promptdata(node.text.strip(), var_names or set()))
         ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids]
+        if _is_classifier(node):
+            return "\n".join(
+                [_classifier_config_line(_threshold(node)), text, CLASSIFIER_SEPARATOR, *ref_lines]
+            )
         return "\n".join([TEST_CONFIG_LINE, text, TEST_INSTRUCTION, TEST_MATERIAL, *ref_lines])
     text, inlined = _inline(
         _as_promptdata(node.text.strip(), var_names or set()),
@@ -357,12 +389,10 @@ def _models(
     promptdata: dict[str, str],
 ) -> dict[str, str]:
     """Every bullet's pbt source, keyed by its model name — for a run and an
-    export alike. One variable is read here as well as rendered into prompts:
-    the packages a python bullet's sandbox installs (see `modal_exec`)."""
-    packages = promptdata.get(modal_exec.PACKAGES_VAR, "")
+    export alike."""
     feeds = _feeding(nodes, names)
     return {
-        names[n.id]: _build_source(n, children[n.id], feeds, session_id, set(promptdata), packages)
+        names[n.id]: _build_source(n, children[n.id], feeds, session_id, set(promptdata))
         for n in nodes
     }
 
@@ -376,6 +406,15 @@ def _feeding(nodes: list[Node], names: dict[str, str]) -> dict[str, str]:
     """
     tests = {n.id for n in nodes if n.kind == "test"}
     return {k: v for k, v in names.items() if k not in tests}
+
+
+def _is_classifier(node: Node) -> bool:
+    return node.kind == "test" and node.judge == "classifier"
+
+
+def _threshold(node: Node) -> float:
+    """The pass mark for a classifier test, clamped to what pbt accepts."""
+    return min(1.0, max(0.0, node.threshold))
 
 
 def _json_body(node: Node, text: str) -> str:
@@ -425,8 +464,8 @@ def _python_source(node: Node, dep_slugs: list[str], packages: str = "") -> str:
     Attachments are deliberately not declared here: the sandbox is a different
     machine and never sees them, so there is nothing to fetch from the bucket.
 
-    Packages the run asked for ride along in the config line — see
-    `modal_exec.config_line`, and `modal_exec.PACKAGES_VAR` for where they come from.
+    The bullet's own packages (set in its settings) ride along in the config
+    line — see `modal_exec.config_line`.
     """
     lines = [modal_exec.config_line(packages)]
     if dep_slugs:
@@ -522,6 +561,8 @@ def _model_input(
     if node.kind == "test":
         text = _test_assertion(_fill_vars(node.text.strip(), promptdata or {}))
         parts = [results[d] for d in dep_ids if d in results]
+        if _is_classifier(node):
+            return "\n".join([text, CLASSIFIER_SEPARATOR, *parts])
         return "\n".join([text, TEST_INSTRUCTION, TEST_MATERIAL, *parts])
     # Variables are shown filled in, not as the Jinja call they were compiled
     # to, and a reference is shown as the answer that replaced it — this column
@@ -809,7 +850,9 @@ async def run(req: RunRequest) -> RunResponse:
     # run's provider and key too — bound for the tasks pbt spawns, not globally.
     provider_token = agent_exec.use_provider(req.provider, req.apiKey)
     try:
-        llm = make_llm_call(api_key=req.apiKey, provider=req.provider)
+        llm = make_llm_call(
+            api_key=req.apiKey, provider=req.provider, classifier=req.classifier.model_dump()
+        )
         outputs = await pbt.async_run(
             models_from_dict=models,
             llm_call=llm,

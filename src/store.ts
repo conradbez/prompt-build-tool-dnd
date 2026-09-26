@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { nanoid } from 'nanoid';
-import type { Bullet, BulletKind, FileRef, Focus, OutlineState, FlatBullet, TestStatus } from './types';
+import type { Bullet, BulletKind, FileRef, Focus, OutlineState, FlatBullet, TestJudge, TestStatus } from './types';
 import { mentionIds, mentionToken, stripMention } from './lib/mentions';
 import { RENAMED } from './lib/promptdata';
 
@@ -22,6 +22,9 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     kind: 'prompt',
     jsonOutput: false,
     mcpServer: '',
+    packages: '',
+    judge: 'llm',
+    threshold: 0.5,
     ...partial,
   };
 }
@@ -92,6 +95,9 @@ export function parseDoc(value: unknown): Doc | null {
         kind: isKind(b.kind) ? b.kind : 'prompt',
         jsonOutput: !!b.jsonOutput,
         mcpServer: typeof b.mcpServer === 'string' ? b.mcpServer : '',
+        packages: typeof b.packages === 'string' ? b.packages : '',
+        judge: b.judge === 'classifier' ? 'classifier' : 'llm',
+        threshold: typeof b.threshold === 'number' ? clampThreshold(b.threshold) : 0.5,
       });
     }
     // A child naming a parent that did not come with it would strand it, so
@@ -106,6 +112,11 @@ export function parseDoc(value: unknown): Doc | null {
   } catch {
     return null;
   }
+}
+
+/** A classifier pass mark, kept to what pbt accepts. */
+export function clampThreshold(v: number): number {
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5;
 }
 
 /**
@@ -162,6 +173,7 @@ function seed(): OutlineState {
     runErrors: [],
     running: false,
     openResultId: null,
+    openSettingsId: null,
   };
 }
 
@@ -222,6 +234,9 @@ export function buildNodePayloads(s: OutlineState = state) {
     kind: b.kind,
     jsonOutput: b.jsonOutput,
     mcpServer: b.mcpServer,
+    packages: b.packages,
+    judge: b.judge,
+    threshold: b.threshold,
   }));
 }
 
@@ -381,16 +396,46 @@ export const actions = {
       prompts: {},
       runErrors: [],
       openResultId: null,
+      openSettingsId: null,
     });
   },
 
   /** Set the MCP server an agent bullet starts — see `Bullet.mcpServer`. */
+  // Not trimmed: it is edited as you type, and trimming would eat the space
+  // between a command and its arguments. The server normalises whitespace.
   setMcpServer(id: string, command: string) {
     const b = state.bullets[id];
-    const value = command.trim();
-    if (!b || b.mcpServer === value) return;
+    if (!b || b.mcpServer === command) return;
     const next = clone(state);
-    next.bullets[id] = { ...b, mcpServer: value };
+    next.bullets[id] = { ...b, mcpServer: command };
+    emit(next);
+  },
+
+  /** Choose who judges a test bullet — see `TestJudge`. */
+  setJudge(id: string, judge: TestJudge) {
+    const b = state.bullets[id];
+    if (!b || b.judge === judge) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, judge };
+    emit(next);
+  },
+
+  /** Set a classifier-judged test's pass mark — see `Bullet.threshold`. */
+  setThreshold(id: string, threshold: number) {
+    const b = state.bullets[id];
+    const t = clampThreshold(threshold);
+    if (!b || b.threshold === t) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, threshold: t };
+    emit(next);
+  },
+
+  /** Set a python bullet's extra sandbox packages — see `Bullet.packages`. */
+  setPackages(id: string, packages: string) {
+    const b = state.bullets[id];
+    if (!b || b.packages === packages) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, packages };
     emit(next);
   },
 
@@ -689,6 +734,11 @@ export const actions = {
   },
 
   /** Open (or close, with null) the answer modal for one bullet. */
+  openSettings(id: string | null) {
+    if (state.openSettingsId === id) return;
+    emit({ ...state, openSettingsId: id });
+  },
+
   openResult(id: string | null) {
     if (state.openResultId === id) return;
     emit({ ...state, openResultId: id });

@@ -4,6 +4,7 @@ import { Outline } from './outline/Outline';
 import { Toolbar } from './Toolbar';
 import { Help } from './Help';
 import { ResultModal } from './outline/ResultModal';
+import { NodeSettingsModal } from './NodeSettingsModal';
 import { useOutline } from './store';
 import { SWITCH_HINT } from './lib/shortcuts';
 
@@ -43,6 +44,7 @@ export default function App() {
   // that would otherwise put a second copy on screen.
   const open = state.openResultId;
   const openBullet = open ? state.bullets[open] : undefined;
+  const settingsBullet = state.openSettingsId ? state.bullets[state.openSettingsId] : undefined;
   const compact = useCompact();
   const toggle = useCallback(() => setFull((v) => (v === 'map' ? 'outline' : 'map')), []);
 
@@ -105,6 +107,9 @@ export default function App() {
           result={state.results[openBullet.id]}
         />
       )}
+
+      {/* After the answer modal, so opened from its ••• menu it sits on top. */}
+      {settingsBullet && <NodeSettingsModal bullet={settingsBullet} />}
     </div>
   );
 }
