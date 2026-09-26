@@ -66,6 +66,19 @@ JSON_CONFIG_LINE = '{{ config(output_format="json") }}'
 # and it doubles as OpenAI's requirement that a JSON-mode prompt say "JSON".
 JSON_INSTRUCTION = "Respond with JSON only — no prose, no code fences."
 
+# A test bullet is a judge, not a step in the pipeline: its text is an
+# assertion about what feeds it, and the model is asked for a verdict rather
+# than an answer. Held to JSON so the verdict can be read without guessing, and
+# kept clear of the global instruction, which is written to steer the work being
+# tested rather than the check on it.
+TEST_CONFIG_LINE = '{{ config(output_format="json", global_instruction=False) }}'
+TEST_INSTRUCTION = (
+    "You are checking a test. Decide whether the assertion above holds for the "
+    "material below it. Respond with JSON only — no prose, no code fences: "
+    '{"pass": true or false, "reason": "one sentence saying why"}.'
+)
+TEST_MATERIAL = "Material under test:"
+
 # What the "Model input" column says for a bullet that never ran.
 SKIPPED_NOTE = (
     "[Not sent. Something this bullet depends on failed, so pbt skipped it — "
@@ -176,7 +189,7 @@ class Node(BaseModel):
     files: list[FileRef] = []
     parentId: Optional[str] = None
     refs: list[str] = []
-    # "prompt" | "template" | "python" | "agent" — see `_build_source`.
+    # "prompt" | "template" | "python" | "agent" | "test" — see `_build_source`.
     # Else treated as a prompt rather than rejected: a bullet is not worth a 422.
     kind: str = "prompt"
     # An agent bullet's MCP server: the command that starts it over stdio, e.g.
@@ -235,6 +248,9 @@ class RunResponse(BaseModel):
     # The prompt each bullet was actually sent, same keys. The UI shows it
     # beside the answer, so "why did it say that" has an answer on screen.
     prompts: dict[str, str] = {}
+    # Each test bullet's verdict: "pass", "fail", or "skipped" when something
+    # it checks failed and it never ran. A test absent here has not run.
+    tests: dict[str, str] = {}
     errors: list[str] = []
 
 
@@ -293,6 +309,10 @@ def _build_source(
         _as_promptdata(node.text.strip(), var_names or set()),
         lambda ref_id: "{{ ref('%s') }}" % id_to_slug[ref_id] if ref_id in id_to_slug else None,
     )
+    if node.kind == "test":
+        # The assertion, then the verdict it wants, then what it is about.
+        ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids if d not in inlined]
+        return "\n".join([TEST_CONFIG_LINE, text, TEST_INSTRUCTION, TEST_MATERIAL, *ref_lines])
     prompt = _json_body(node, text)
     # Only what has nowhere else to be: a reference already standing in the
     # sentence must not also be pasted underneath it.
@@ -331,10 +351,22 @@ def _models(
     export alike. One variable is read here as well as rendered into prompts:
     the packages a python bullet's sandbox installs (see `modal_exec`)."""
     packages = promptdata.get(modal_exec.PACKAGES_VAR, "")
+    feeds = _feeding(nodes, names)
     return {
-        names[n.id]: _build_source(n, children[n.id], names, session_id, set(promptdata), packages)
+        names[n.id]: _build_source(n, children[n.id], feeds, session_id, set(promptdata), packages)
         for n in nodes
     }
+
+
+def _feeding(nodes: list[Node], names: dict[str, str]) -> dict[str, str]:
+    """The model names a bullet may depend on: every bullet but a test.
+
+    A test's output is a verdict on other bullets, not material for one, so it
+    never flows onward — not as a child into its parent, not through an `@`. A
+    test hung under a bullet checks it from the side rather than feeding it.
+    """
+    tests = {n.id for n in nodes if n.kind == "test"}
+    return {k: v for k, v in names.items() if k not in tests}
 
 
 def _json_body(node: Node, text: str) -> str:
@@ -478,6 +510,10 @@ def _model_input(
     """
     if node.kind == "python":
         return modal_exec._inherited_code([results[d] for d in dep_ids if d in results])
+    if node.kind == "test":
+        text, inlined = _inline(_fill_vars(node.text.strip(), promptdata or {}), results.get)
+        parts = [results[d] for d in dep_ids if d in results and d not in inlined]
+        return "\n".join([text, TEST_INSTRUCTION, TEST_MATERIAL, *parts])
     # Variables are shown filled in, not as the Jinja call they were compiled
     # to, and a reference is shown as the answer that replaced it — this column
     # exists to answer "what did the model actually see".
@@ -507,6 +543,18 @@ def _json_forms(text: str) -> tuple[str, str]:
     except ValueError:
         return text, text  # not parseable here means it was never parsed there
     return json.dumps(value, indent=2, ensure_ascii=False), str(value)
+
+
+def _verdict(output: str) -> str:
+    """A test's answer as "pass" or "fail". Anything but an explicit pass fails:
+    a check that cannot say it passed has not passed."""
+    try:
+        value = json.loads(output)
+    except ValueError:
+        return "fail"
+    if isinstance(value, dict):
+        value = value.get("pass")
+    return "pass" if value is True or str(value).strip().lower() in ("true", "pass") else "fail"
 
 
 def _node_file_keys(node: Node, session_id: str) -> list[str]:
@@ -708,6 +756,14 @@ async def run(req: RunRequest) -> RunResponse:
     if not nodes:
         return RunResponse(errors=["No non-empty bullets to run."])
 
+    # A test connected to nothing has nothing to check, so it is left out of
+    # the run rather than asked to judge an empty page — it stays "not run".
+    kids = _children(nodes)
+    feeders = _feeding(nodes, {n.id: n.id for n in nodes})
+    nodes = [n for n in nodes if n.kind != "test" or _deps(n, kids[n.id], feeders)]
+    if not nodes:
+        return RunResponse(errors=["No non-empty bullets to run."])
+
     # The editor keeps a python bullet to one child, but the editor is not the
     # only thing that can post here.
     crowded = _overfull_python(nodes)
@@ -725,13 +781,14 @@ async def run(req: RunRequest) -> RunResponse:
 
     children = _children(nodes)
     models = _models(nodes, children, id_to_slug, req.sessionId, promptdata)
+    feeds = _feeding(nodes, id_to_slug)
 
     # Pull each bullet's attachments once, keyed the way the config declares
     # them, so pbt can route them to the model that asked.
     promptfiles: dict[str, Any] = {}
     try:
         for n in nodes:
-            if n.kind in ("python", "agent"):
+            if n.kind in ("python", "agent", "test"):
                 continue  # a sandbox never sees attachments — don't fetch them
             for key in _node_file_keys(n, req.sessionId):
                 if key not in promptfiles:
@@ -768,12 +825,12 @@ async def run(req: RunRequest) -> RunResponse:
     # Anything structured reads one way and renders another — see `_json_forms`.
     rendered = dict(by_id)
     for n in nodes:
-        if (n.jsonOutput or n.kind == "agent") and n.id in by_id:
+        if (n.jsonOutput or n.kind in ("agent", "test")) and n.id in by_id:
             by_id[n.id], rendered[n.id] = _json_forms(by_id[n.id])
 
     prompts = {}
     for n in nodes:
-        deps = _deps(n, children[n.id], id_to_slug)
+        deps = _deps(n, children[n.id], feeds)
         body = _model_input(n, deps, rendered, global_instruction, promptdata)
         if n.id in skipped:
             # Say so rather than showing a prompt that was never sent: the
@@ -782,7 +839,17 @@ async def run(req: RunRequest) -> RunResponse:
             # reference that fed it.
             body = SKIPPED_NOTE + "\n\n" + body
         prompts[n.id] = body
-    return RunResponse(outputs=by_id, prompts=prompts, errors=errors)
+    # A test that ran says pass or fail; one skipped because what it checks
+    # failed did not run; one that errored itself could not say it passed.
+    tests = {}
+    for n in nodes:
+        if n.kind != "test":
+            continue
+        if n.id in skipped:
+            tests[n.id] = "skipped"
+        else:
+            tests[n.id] = _verdict(by_id[n.id]) if n.id in by_id else "fail"
+    return RunResponse(outputs=by_id, prompts=prompts, tests=tests, errors=errors)
 
 
 # Serve the built frontend last, so `/run` and `/healthz` take precedence.

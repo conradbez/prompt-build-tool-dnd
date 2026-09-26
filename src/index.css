@@ -1559,6 +1559,97 @@ body,
   border-color: #6ee7b7;
 }
 
+/* A test node wears its verdict: grey until it has run, green when it passed,
+   red when it failed, and grey hatched when it was "not run" because something
+   it checks failed first. The whole card takes the colour — a red test is the
+   one thing on the map that should be seen from across the room. */
+.mm-node--test {
+  border-width: 2px;
+}
+
+.mm-node--test-idle {
+  border-color: #cbd2d9;
+  background: #f5f7fa;
+}
+
+.mm-node--test-skipped {
+  border-color: #cbd2d9;
+  border-style: dashed;
+  background: repeating-linear-gradient(-45deg, #f5f7fa 0 6px, #eceff3 6px 12px);
+}
+
+.mm-node--test-pass {
+  border-color: #34d399;
+  background: #ecfdf5;
+}
+
+.mm-node--test-fail {
+  border-color: #f87171;
+  background: #fef2f2;
+}
+
+.mm-node--test-idle .mm-node__md,
+.mm-node--test-skipped .mm-node__md {
+  color: #616e7c;
+}
+
+.mm-node__test {
+  margin-top: 7px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+  color: #616e7c;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.mm-node__test:disabled {
+  cursor: default;
+}
+
+.mm-node__test--pass {
+  border-color: #6ee7b7;
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.mm-node__test--fail {
+  border-color: #fca5a5;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* In the outline there is no card to colour, so the chip carries the verdict. */
+.tpl-chip--test-idle,
+.tpl-chip--test-skipped {
+  color: #52606d;
+  background: #e4e7eb;
+}
+
+.tpl-chip--test-skipped {
+  text-decoration: line-through;
+}
+
+.tpl-chip--test-pass {
+  color: #065f46;
+  background: #d1fae5;
+}
+
+.tpl-chip--test-fail {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.ol-row--test .ol-text,
+.ol-row--test .ol-md {
+  padding-right: 42px;
+}
+
 /* ------------------------------------------------------------------ toolbar */
 
 .tb {

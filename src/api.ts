@@ -11,7 +11,7 @@ export const PROVIDERS: { id: Provider; label: string }[] = [
   { id: 'anthropic', label: 'Anthropic' },
 ];
 
-import type { BulletKind, FileRef } from './types';
+import type { BulletKind, FileRef, TestStatus } from './types';
 import { getSessionId } from './lib/session';
 
 export interface NodePayload {
@@ -24,7 +24,7 @@ export interface NodePayload {
   text: string;
   parentId: string | null;
   refs: string[];
-  /** Prompt, template, python or agent — decides how the server runs it. */
+  /** Prompt, template, python, agent or test — decides how the server runs it. */
   kind: BulletKind;
   /** An agent bullet's MCP server command; empty for none. */
   mcpServer: string;
@@ -40,6 +40,8 @@ export interface RunResponse {
   outputs: Record<string, string>;
   /** The prompt each bullet was actually sent, keyed the same way. */
   prompts: Record<string, string>;
+  /** Each test bullet's verdict; a test that did not run is absent. */
+  tests?: Record<string, TestStatus>;
   errors: string[];
 }
 

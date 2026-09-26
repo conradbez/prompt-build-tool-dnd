@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { actions } from '../store';
-import { PYTHON_CAPTION, type BulletKind } from '../types';
+import { PYTHON_CAPTION, type BulletKind, type TestStatus } from '../types';
 
 export interface BulletNodeData {
   /** The bullet's markdown, already rendered (mentions included). */
@@ -18,13 +18,19 @@ export interface BulletNodeData {
   fileCount: number;
   /** True once this bullet has a result from the latest run. */
   hasResult: boolean;
+  /** A test node's verdict from the latest run; absent until it has one. */
+  test?: TestStatus;
   [key: string]: unknown;
 }
 
 export function BulletNode({ id, data, selected }: NodeProps) {
   const d = data as BulletNodeData;
   return (
-    <div className={`mm-node ${selected ? 'mm-node--selected' : ''} ${d.kind !== 'prompt' ? `mm-node--${d.kind}` : ''}`}>
+    <div
+      className={`mm-node ${selected ? 'mm-node--selected' : ''} ${d.kind !== 'prompt' ? `mm-node--${d.kind}` : ''} ${
+        d.kind === 'test' ? `mm-node--test-${d.test ?? 'idle'}` : ''
+      }`}
+    >
       {/*
         One circle, two gestures: drag from it to start a link, click it to add
         a child. They used to be separate controls sitting on top of each other
@@ -52,7 +58,7 @@ export function BulletNode({ id, data, selected }: NodeProps) {
       </Handle>
       {(d.kind !== 'prompt' || d.jsonOutput || d.fileCount > 0) && (
         <div className="mm-node__flags">
-          {d.kind !== 'prompt' && <KindChip kind={d.kind} mcpServer={d.mcpServer} />}
+          {d.kind !== 'prompt' && <KindChip kind={d.kind} mcpServer={d.mcpServer} test={d.test} />}
           {d.jsonOutput && <JsonChip />}
           {d.fileCount > 0 && (
             <span className="mm-node__files" title={`${d.fileCount} attached file(s)`}>
@@ -73,7 +79,9 @@ export function BulletNode({ id, data, selected }: NodeProps) {
       {/* A tag, not the answer. A node's job on the map is to show the shape
           of the graph; an LLM answer pasted into it buries that under a wall
           of text, and the answer has a place of its own — the modal. */}
-      {d.hasResult && (
+      {d.kind === 'test' ? (
+        <TestTag id={id} status={d.test} />
+      ) : d.hasResult && (
         <button
           className="mm-node__ok"
           title="Ran successfully — open the answer"
@@ -92,6 +100,36 @@ export function BulletNode({ id, data, selected }: NodeProps) {
   );
 }
 
+/** What each test state says, on the node and in its tooltip. */
+const TEST_LABELS: Record<TestStatus | 'idle', [string, string]> = {
+  idle: ['untested', 'Not run yet — connect the nodes it checks into it, then press Run'],
+  skipped: ['not run', 'Something it checks failed, so this test never ran'],
+  pass: ['passed', 'The assertion held — open the verdict'],
+  fail: ['failed', 'The assertion did not hold — open the verdict'],
+};
+
+/**
+ * A test node's verdict, in place of the `success` tag every other node wears:
+ * a test that ran is not "successful" — it passed or it failed, and that is the
+ * one thing it is on the map to say.
+ */
+function TestTag({ id, status }: { id: string; status?: TestStatus }) {
+  const [label, title] = TEST_LABELS[status ?? 'idle'];
+  return (
+    <button
+      className={`mm-node__test mm-node__test--${status ?? 'idle'}`}
+      title={title}
+      disabled={!status}
+      onClick={(e) => {
+        e.stopPropagation();
+        actions.openResult(id);
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 /**
  * The `JSON` badge. Orthogonal to the kind — a prompt, a template or a python
  * bullet can each be held to JSON — so it is its own chip beside that one.
@@ -107,17 +145,34 @@ export function JsonChip({ className = '' }: { className?: string }) {
   );
 }
 
-/** The `TPL` / `PY` / `AGENT` badge. A prompt is the default and wears nothing. */
+/**
+ * The `TPL` / `PY` / `AGENT` / `TEST` badge. A prompt is the default and wears
+ * nothing. A test's chip takes its verdict's colour, so the outline — which has
+ * no node to colour — shows it too.
+ */
 export function KindChip({
   kind,
   mcpServer = '',
+  test,
   className = '',
 }: {
   kind: BulletKind;
   mcpServer?: string;
+  test?: TestStatus;
   className?: string;
 }) {
   if (kind === 'prompt') return null;
+  if (kind === 'test') {
+    const [label, title] = TEST_LABELS[test ?? 'idle'];
+    return (
+      <span
+        className={`tpl-chip tpl-chip--test tpl-chip--test-${test ?? 'idle'} ${className}`}
+        title={`Test: ${label}. ${title}.`}
+      >
+        TEST
+      </span>
+    );
+  }
   const [label, title] =
     kind === 'template'
       ? ['TPL', 'Not sent to the LLM — its text, with refs filled in, is its output']

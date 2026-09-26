@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { nanoid } from 'nanoid';
-import type { Bullet, BulletKind, FileRef, Focus, OutlineState, FlatBullet } from './types';
+import type { Bullet, BulletKind, FileRef, Focus, OutlineState, FlatBullet, TestStatus } from './types';
 import { mentionIds, mentionToken, stripMention } from './lib/mentions';
 import { RENAMED } from './lib/promptdata';
 
@@ -134,7 +134,7 @@ function loadDoc(): Doc | null {
 }
 
 function isKind(v: unknown): v is BulletKind {
-  return v === 'prompt' || v === 'template' || v === 'python' || v === 'agent';
+  return v === 'prompt' || v === 'template' || v === 'python' || v === 'agent' || v === 'test';
 }
 
 function isPos(v: unknown): v is { x: number; y: number } {
@@ -157,6 +157,7 @@ function seed(): OutlineState {
     focus: { id: firstId, caret: 'end' },
     selectedId: firstId,
     results: {},
+    tests: {},
     prompts: {},
     runErrors: [],
     running: false,
@@ -376,6 +377,7 @@ export const actions = {
       focus: { id: firstId, caret: 'end' },
       selectedId: firstId,
       results: {},
+      tests: {},
       prompts: {},
       runErrors: [],
       openResultId: null,
@@ -696,8 +698,9 @@ export const actions = {
     outputs: Record<string, string>,
     errors: string[],
     prompts: Record<string, string> = {},
+    tests: Record<string, TestStatus> = {},
   ) {
-    emit({ ...state, results: outputs, prompts, runErrors: errors, running: false });
+    emit({ ...state, results: outputs, prompts, tests, runErrors: errors, running: false });
   },
 
   /** Reparent `id` under `newParentId` (used by mind-map / future drag ops). */

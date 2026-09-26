@@ -72,15 +72,16 @@ export function Toolbar() {
       if (res.needsKey) {
         // Nothing ran, so the last run's answers stand; the flash says why.
         setNeedsKey(true);
-        actions.setRunResult(getState().results, [], getState().prompts);
+        actions.setRunResult(getState().results, [], getState().prompts, getState().tests);
         return;
       }
-      actions.setRunResult(res.outputs || {}, res.errors || [], res.prompts || {});
+      actions.setRunResult(res.outputs || {}, res.errors || [], res.prompts || {}, res.tests || {});
     } catch (err) {
       actions.setRunResult(
         getState().results,
         [err instanceof Error ? err.message : String(err)],
         getState().prompts,
+        getState().tests,
       );
     }
   };

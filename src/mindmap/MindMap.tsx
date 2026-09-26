@@ -124,6 +124,7 @@ export function MindMap() {
         jsonOutput: b.jsonOutput,
         fileCount: b.files.length,
         hasResult: state.results[p.id] !== undefined,
+        test: state.tests[p.id],
       };
       return {
         id: p.id,

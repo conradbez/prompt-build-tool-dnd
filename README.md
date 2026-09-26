@@ -125,6 +125,25 @@ To keep this simple, several main-branch features are **not** implemented:
   always goes through the server.
 - Per-session storage.
 
+## Test nodes
+
+`•••` → *Convert to test* turns a bullet into a check on other bullets. Connect
+**one or more** nodes into it — drag from their output dot into the test's `+`
+(or `@`-mention them) — and write the **assertion** as its text, e.g. *"names
+exactly one fruit"*. On Run the model is shown the assertion and the connected
+outputs and asked for a verdict (`{"pass": …, "reason": …}`), and the node
+takes its colour:
+
+| State | Colour | Means |
+|-------|--------|-------|
+| untested | grey | Not run yet, or nothing is connected to it (it is not sent) |
+| not run | grey, hatched | Something it checks failed, so it was skipped |
+| passed | green | The assertion held |
+| failed | red | It did not — or the check itself errored |
+
+A test's verdict never flows onward: it is not an input to its parent or to
+anything that mentions it. Click the verdict tag to read the reason.
+
 ## Python sandbox packages
 
 `•••` → *Convert to python* runs a bullet's child's script in a Modal sandbox,

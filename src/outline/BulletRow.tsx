@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { PYTHON_CAPTION, type Bullet } from '../types';
+import { PYTHON_CAPTION, type Bullet, type TestStatus } from '../types';
 import { actions, getState, titleMap } from '../store';
 import { register, getEditor } from './focusRegistry';
 import { BulletMenu } from './BulletMenu';
@@ -58,6 +58,8 @@ interface Props {
   onDragStart: (id: string, e: React.PointerEvent) => void;
   /** This bullet's latest run output, if it has one. */
   result?: string;
+  /** A test bullet's verdict from the latest run, if it has one. */
+  test?: TestStatus;
   /** Open the full answer in a modal — the one-line preview is only a handle. */
   onExpand: (id: string) => void;
 }
@@ -69,7 +71,7 @@ const MAX_MATCHES = 8;
  * you edit the raw markdown; the moment it loses focus the text is rendered,
  * so the outline reads as formatted prose.
  */
-export function BulletRow({ bullet, depth, selected, dragging, onDragStart, result, onExpand }: Props) {
+export function BulletRow({ bullet, depth, selected, dragging, onDragStart, result, test, onExpand }: Props) {
   const [ac, setAc] = useState<AutocompleteState | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   const { id } = bullet;
@@ -298,7 +300,7 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
 
       <div className="ol-fields">
         <div className={`ol-field-wrap ${hasHighlight ? 'ol-has-mention' : ''}`}>
-          <KindChip kind={bullet.kind} mcpServer={bullet.mcpServer} className="tpl-chip--outline" />
+          <KindChip kind={bullet.kind} mcpServer={bullet.mcpServer} test={test} className="tpl-chip--outline" />
           {bullet.jsonOutput && <JsonChip className="tpl-chip--outline" />}
 
           {/* Read view and editor are stacked in one grid cell and *both*

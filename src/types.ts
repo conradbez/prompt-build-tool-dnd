@@ -13,8 +13,24 @@
  *   MCP server's tools. Its output is `{output, logs, run_time}`: the answer,
  *   the run end to end on Modal, and how long it took. Emitted as
  *   `{{ config(model_type="agent_modal") }}`.
+ * - `test`     — its text is an *assertion* about the bullets connected into it
+ *   (children or `@` references). The model is asked for a verdict rather than
+ *   an answer, and the node shows it: see `TestStatus`. A test's output never
+ *   flows onward — it checks the graph from the side.
  */
-export type BulletKind = 'prompt' | 'template' | 'python' | 'agent';
+export type BulletKind = 'prompt' | 'template' | 'python' | 'agent' | 'test';
+
+/**
+ * Where a test bullet stands after the latest run:
+ *
+ * - `pass`    — green: the assertion held.
+ * - `fail`    — red: it did not, or the check itself errored.
+ * - `skipped` — "not run": something it checks failed, so it never ran.
+ *
+ * A test with no entry is grey — it has not run yet, or has nothing connected
+ * to check.
+ */
+export type TestStatus = 'pass' | 'fail' | 'skipped';
 
 /**
  * What a python bullet shows instead of text. It has none: it is an operator,
@@ -85,6 +101,8 @@ export interface OutlineState {
   selectedId: string | null;
   /** Latest run results, keyed by bullet id. */
   results: Record<string, string>;
+  /** Each test bullet's verdict from the latest run — see `TestStatus`. */
+  tests: Record<string, TestStatus>;
   /** What each bullet was actually sent last run — its text plus its inputs. */
   prompts: Record<string, string>;
   /** Errors from the latest run. */

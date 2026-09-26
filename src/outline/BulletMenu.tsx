@@ -186,6 +186,17 @@ export function BulletMenu({ bullet }: Props) {
               </button>
             </li>
           )}
+          {bullet.kind !== 'test' && (
+            <li>
+              <button
+                role="menuitem"
+                title="Test nodes check the nodes connected into them: their text is an assertion, and the model says whether it holds. Green passed, red failed, grey not run."
+                onClick={() => run(() => actions.setKind(id, 'test'))}
+              >
+                Convert to test
+              </button>
+            </li>
+          )}
           {bullet.kind === 'agent' && (
             <li>
               <button
