@@ -2419,8 +2419,9 @@ body,
   color: #616e7c;
 }
 
+/* Blue, like the running pills and the "running" count — red is for failures. */
 .rp__line--start .rp__tag {
-  color: #b45309;
+  color: var(--accent);
 }
 
 .rp__line--success .rp__tag,
