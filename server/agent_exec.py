@@ -433,8 +433,7 @@ def _collect_files(sb, log: _Log) -> list[pbt.File]:
         if len(files) >= MAX_FILES or total + size > MAX_FILES_BYTES:
             log.add("files", f"skipped {rel} ({size} bytes): over the limit of {MAX_FILES} files / {MAX_FILES_BYTES} bytes")
             continue
-        with sb.open(f"{OUTPUTS_DIR}/{rel}", "rb") as f:
-            data = f.read()
+        data = sb.filesystem.read_bytes(f"{OUTPUTS_DIR}/{rel}")
         name = rel.replace("/", "_")
         stem, dot, ext = name.rpartition(".")
         n = 2
