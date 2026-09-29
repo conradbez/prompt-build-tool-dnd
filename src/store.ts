@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { nanoid } from 'nanoid';
-import type { Bullet, BulletKind, FileRef, Focus, OutlineState, FlatBullet, TestJudge, TestStatus } from './types';
+import type { RunEvent } from './api';
+import type { Bullet, BulletKind, FileRef, Focus, OutlineState, FlatBullet, RunFile, TestJudge, TestStatus } from './types';
 import { mentionIds, mentionToken, stripMention } from './lib/mentions';
 import { RENAMED } from './lib/promptdata';
 
@@ -22,6 +23,8 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     kind: 'prompt',
     jsonOutput: false,
     mcpServer: '',
+    agentSteps: 0,
+    producesFiles: false,
     packages: '',
     judge: 'llm',
     threshold: 0.5,
@@ -95,6 +98,8 @@ export function parseDoc(value: unknown): Doc | null {
         kind: isKind(b.kind) ? b.kind : 'prompt',
         jsonOutput: !!b.jsonOutput,
         mcpServer: typeof b.mcpServer === 'string' ? b.mcpServer : '',
+        agentSteps: typeof b.agentSteps === 'number' && b.agentSteps > 0 ? Math.floor(b.agentSteps) : 0,
+        producesFiles: !!b.producesFiles,
         packages: typeof b.packages === 'string' ? b.packages : '',
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
         threshold: typeof b.threshold === 'number' ? clampThreshold(b.threshold) : 0.5,
@@ -169,15 +174,25 @@ function seed(): OutlineState {
     selectedId: firstId,
     results: {},
     tests: {},
+    files: {},
     prompts: {},
     runErrors: [],
     running: false,
+    runStatus: {},
+    runFailures: {},
+    runLog: [],
+    progressOpen: false,
     openResultId: null,
     openSettingsId: null,
   };
 }
 
 let state: OutlineState = seed();
+
+// When the current run began, and what its bullets are called — kept out of
+// the state because nothing renders them directly; the log lines carry both.
+let runStartedAt = 0;
+let runTitles: Record<string, string> = {};
 const listeners = new Set<() => void>();
 
 function emit(next: OutlineState) {
@@ -234,6 +249,8 @@ export function buildNodePayloads(s: OutlineState = state) {
     kind: b.kind,
     jsonOutput: b.jsonOutput,
     mcpServer: b.mcpServer,
+    agentSteps: b.agentSteps,
+    producesFiles: b.producesFiles,
     packages: b.packages,
     judge: b.judge,
     threshold: b.threshold,
@@ -393,8 +410,12 @@ export const actions = {
       selectedId: firstId,
       results: {},
       tests: {},
+      files: {},
       prompts: {},
       runErrors: [],
+      runStatus: {},
+      runFailures: {},
+      runLog: [],
       openResultId: null,
       openSettingsId: null,
     });
@@ -408,6 +429,25 @@ export const actions = {
     if (!b || b.mcpServer === command) return;
     const next = clone(state);
     next.bullets[id] = { ...b, mcpServer: command };
+    emit(next);
+  },
+
+  /** Set an agent bullet's step limit — see `Bullet.agentSteps`. 0 clears it. */
+  setAgentSteps(id: string, steps: number) {
+    const b = state.bullets[id];
+    const value = Math.max(0, Math.floor(steps) || 0);
+    if (!b || b.agentSteps === value) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, agentSteps: value };
+    emit(next);
+  },
+
+  /** Whether an agent bullet hands on files — see `Bullet.producesFiles`. */
+  setProducesFiles(id: string, on: boolean) {
+    const b = state.bullets[id];
+    if (!b || b.producesFiles === on) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, producesFiles: on };
     emit(next);
   },
 
@@ -733,6 +773,88 @@ export const actions = {
     emit({ ...state, running, ...(running ? { runErrors: [] } : {}) });
   },
 
+  /**
+   * Fold one progress event into the run. An answer lands on its bullet the
+   * moment it finishes, so a long run fills in as it goes rather than all at
+   * the end; the `final` event then settles everything (see `setRunResult`).
+   */
+  runEvent(event: RunEvent) {
+    const at = runStartedAt ? Date.now() - runStartedAt : 0;
+    const title = (id: string) => runTitles[id] || 'a bullet';
+    if (event.type === 'plan') {
+      runStartedAt = Date.now();
+      runTitles = Object.fromEntries(event.models.map((m) => [m.id, m.title]));
+      const n = event.models.length;
+      emit({
+        ...state,
+        runStatus: Object.fromEntries(event.models.map((m) => [m.id, 'queued' as const])),
+        runFailures: {},
+        runLog: [{ at: 0, kind: 'plan', title: `Running ${n} bullet${n === 1 ? '' : 's'}` }],
+      });
+    } else if (event.type === 'start') {
+      emit({
+        ...state,
+        runStatus: { ...state.runStatus, [event.id]: 'running' },
+        runLog: [...state.runLog, { at, kind: 'start', id: event.id, title: title(event.id) }],
+      });
+    } else if (event.type === 'log') {
+      emit({
+        ...state,
+        runLog: [...state.runLog, { at, kind: 'log', id: event.id, title: event.line }],
+      });
+    } else if (event.type === 'done') {
+      const next: OutlineState = {
+        ...state,
+        runStatus: { ...state.runStatus, [event.id]: event.status },
+        runLog: [
+          ...state.runLog,
+          {
+            at,
+            kind: event.status,
+            id: event.id,
+            title: title(event.id),
+            detail:
+              event.status === 'success'
+                ? `${(event.ms / 1000).toFixed(1)}s${event.cached ? ' · cached' : ''}`
+                : event.error,
+          },
+        ],
+      };
+      if (event.status !== 'success') {
+        next.runFailures = { ...state.runFailures, [event.id]: event.error };
+      }
+      if (event.output !== undefined) next.results = { ...state.results, [event.id]: event.output };
+      if (event.prompt !== undefined) next.prompts = { ...state.prompts, [event.id]: event.prompt };
+      if (event.test) next.tests = { ...state.tests, [event.id]: event.test };
+      if (event.status === 'success') {
+        // Its files are replaced along with its answer, or dropped if it made none this time.
+        const { [event.id]: _old, ...rest } = state.files;
+        next.files = event.files?.length ? { ...rest, [event.id]: event.files } : rest;
+      }
+      emit(next);
+    } else if (event.type === 'final' && !event.needsKey) {
+      const failed = Object.values(state.runStatus).filter((s) => s === 'error').length;
+      const secs = ((Date.now() - (runStartedAt || Date.now())) / 1000).toFixed(1);
+      emit({
+        ...state,
+        runLog: [
+          ...state.runLog,
+          {
+            at,
+            kind: 'end',
+            title: failed ? `Finished with ${failed} error${failed === 1 ? '' : 's'}` : 'Finished',
+            detail: `${secs}s`,
+          },
+        ],
+      });
+    }
+  },
+
+  openProgress(open: boolean) {
+    if (state.progressOpen === open) return;
+    emit({ ...state, progressOpen: open });
+  },
+
   /** Open (or close, with null) the answer modal for one bullet. */
   openSettings(id: string | null) {
     if (state.openSettingsId === id) return;
@@ -749,8 +871,14 @@ export const actions = {
     errors: string[],
     prompts: Record<string, string> = {},
     tests: Record<string, TestStatus> = {},
+    files: Record<string, RunFile[]> = {},
   ) {
-    emit({ ...state, results: outputs, prompts, tests, runErrors: errors, running: false });
+    // A bullet still queued or running when the run ended never finished —
+    // the stream broke off — so it has no status rather than a stuck spinner.
+    const runStatus = Object.fromEntries(
+      Object.entries(state.runStatus).filter(([, s]) => s !== 'queued' && s !== 'running'),
+    );
+    emit({ ...state, results: outputs, prompts, tests, files, runErrors: errors, running: false, runStatus });
   },
 
   /** Reparent `id` under `newParentId` (used by mind-map / future drag ops). */

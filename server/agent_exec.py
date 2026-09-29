@@ -24,7 +24,8 @@ model source like a python bullet's packages do (see `modal_exec.config_line`).
 
 The model's key does *not*: a key written into the source would end up in the
 cache key and in every export. It is carried per run in a context variable set
-by ``main.run`` (``use_provider``), which every task pbt spawns inherits, and
+by ``main.run`` (``use_run``), along with the run's step limit and where its
+live log lines go,, which every task pbt spawns inherits, and
 reaches the sandbox as a Modal secret built on the spot.
 
 The bullet's output is a JSON object, not bare text:
@@ -37,6 +38,10 @@ served, every agent step (its thought, its command, what the command returned),
 how the agent finished, and the teardown. ``run_time`` is wall-clock seconds from
 creating the sandbox to terminating it. When the bullet has JSON enforced,
 ``output`` is the answer parsed, and an answer that will not parse fails it.
+
+A bullet set to produce files (``produces_files=True``) also has ``files``: the
+agent is told to save them in ``/root/outputs/``, and each one it saved comes
+back as a ``pbt.File`` — handed to the bullets downstream as attachments.
 """
 
 from __future__ import annotations
@@ -49,7 +54,8 @@ import pathlib
 import re
 import shlex
 import time
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
 import pbt
 from pbt.executor.run_context import parse_json_output as pbt_json
@@ -61,6 +67,17 @@ MODEL_TYPE = "agent_modal"
 
 # The config key naming the MCP server command. Empty means none.
 MCP_KEY = "mcp_server"
+# The config key holding the bullet's own step limit. Absent means the run's.
+STEPS_KEY = "steps"
+# The config key saying the bullet must hand on files, not only text.
+FILES_KEY = "produces_files"
+
+# Where an agent asked for files saves them — see `run_agent.FILES_NOTE`.
+OUTPUTS_DIR = "/root/outputs"
+# What is collected from it. Files travel to every bullet downstream and back
+# to the browser, so a run that saves more keeps the first ones and says so.
+MAX_FILES = int(os.environ.get("AGENT_MAX_FILES", "10"))
+MAX_FILES_BYTES = int(os.environ.get("AGENT_MAX_FILES_BYTES", str(20 * 1024 * 1024)))
 
 APP_NAME = os.environ.get("AGENT_APP_NAME", "mindmap-agent")
 
@@ -69,8 +86,13 @@ TIMEOUT_SECONDS = int(os.environ.get("AGENT_TIMEOUT_SECONDS", "900"))
 # How long the MCP server may take to come up. A `uvx`/`npx` server downloads
 # itself on first start, which is most of this.
 MCP_START_SECONDS = int(os.environ.get("AGENT_MCP_START_SECONDS", "180"))
-# Steps before the model is told to stop using tools and answer.
+# Steps before the model is told to stop using tools and answer. The default;
+# a run may ask for another within MAX_STEP_LIMIT (Settings → agent steps).
 STEP_LIMIT = int(os.environ.get("AGENT_STEP_LIMIT", "30"))
+MAX_STEP_LIMIT = int(os.environ.get("AGENT_MAX_STEP_LIMIT", "200"))
+
+# How `run_agent.py` flags a log event printed live — see its LIVE_MARKER.
+LIVE_MARKER = "@@agent-event "
 CPU = 2
 MEMORY_MB = 4096
 
@@ -107,33 +129,62 @@ _OPENCODE_PROVIDER = {"gemini": "google", "openai": "openai", "anthropic": "anth
 # The key variable OpenCode reads, where it differs from this server's ENV_KEYS.
 _OPENCODE_KEY_ENV = {"gemini": "GOOGLE_GENERATIVE_AI_API_KEY"}
 
-# (provider, key sent from the UI) for the run in progress. A context variable
-# rather than a global because the server answers requests concurrently: each
-# `/run` sets its own, and the tasks pbt spawns for it inherit that one.
-_provider: contextvars.ContextVar[tuple[str, str | None]] = contextvars.ContextVar(
-    "agent_provider", default=("gemini", None)
+# A live log line for one bullet: (pbt model name, line).
+LogSink = Callable[[str, str], None]
+
+
+@dataclass(frozen=True)
+class RunSettings:
+    """What an agent bullet takes from the run it is part of."""
+
+    provider: str = "gemini"
+    api_key: str | None = None
+    # Settings → agent steps; clamped by `steps_for`.
+    steps: int = STEP_LIMIT
+    # Where each log line goes the moment it happens, for the live run log.
+    on_log: LogSink | None = None
+
+
+# The run in progress. A context variable rather than a global because the
+# server answers requests concurrently: each `/run` sets its own, and the tasks
+# pbt spawns for it (and the threads they start) inherit that one.
+_settings: contextvars.ContextVar[RunSettings] = contextvars.ContextVar(
+    "agent_settings", default=RunSettings()
 )
 
 
-def use_provider(provider: str, api_key: str | None) -> contextvars.Token:
-    """Bind this run's provider and key for any agent bullet in it."""
-    return _provider.set((provider, api_key))
+def use_run(settings: RunSettings) -> contextvars.Token:
+    """Bind this run's provider, key, step limit and log sink for any agent bullet in it."""
+    return _settings.set(settings)
 
 
-def reset_provider(token: contextvars.Token) -> None:
-    _provider.reset(token)
+def reset_run(token: contextvars.Token) -> None:
+    _settings.reset(token)
 
 
-def config_line(mcp_server: str = "") -> str:
-    """The bullet's config line, naming its MCP server when it has one.
+def steps_for(requested: int | None) -> int:
+    """A step limit a run may ask for: the default when it names none."""
+    if not requested or requested < 1:
+        return STEP_LIMIT
+    return min(int(requested), MAX_STEP_LIMIT)
+
+
+def config_line(mcp_server: str = "", steps: int = 0, produces_files: bool = False) -> str:
+    """The bullet's config line, naming its MCP server, step limit and whether
+    it hands on files, each only when set.
 
     The command goes through `json.dumps`, whose escapes Jinja's string
     literals read the same way, so no quote in it can end the literal early.
     """
+    args = ['model_type="%s"' % MODEL_TYPE]
     command = " ".join(mcp_server.split())
-    if not command:
-        return '{{ config(model_type="%s") }}' % MODEL_TYPE
-    return "{{ config(model_type=\"%s\", %s=%s) }}" % (MODEL_TYPE, MCP_KEY, json.dumps(command))
+    if command:
+        args.append("%s=%s" % (MCP_KEY, json.dumps(command)))
+    if steps and steps > 0:
+        args.append("%s=%d" % (STEPS_KEY, int(steps)))
+    if produces_files:
+        args.append("%s=True" % FILES_KEY)
+    return "{{ config(%s) }}" % ", ".join(args)
 
 
 def enabled() -> bool:
@@ -187,7 +238,7 @@ def _lookup():
     return _app, _image
 
 
-def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
+def _secret_env(provider: str, api_key: str | None, steps: int = STEP_LIMIT) -> dict[str, str]:
     """What the sandbox needs to call the model: its name and the key.
 
     The key goes in under the name OpenCode reads for that provider, which is
@@ -201,7 +252,7 @@ def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
     return {
         _OPENCODE_KEY_ENV.get(provider, ENV_KEYS[provider]): key,
         "AGENT_MODEL": model,
-        "AGENT_STEP_LIMIT": str(STEP_LIMIT),
+        "AGENT_STEP_LIMIT": str(steps),
         "AGENT_MCP_START_SECONDS": str(MCP_START_SECONDS),
     }
 
@@ -209,12 +260,25 @@ def _secret_env(provider: str, api_key: str | None) -> dict[str, str]:
 class _Log:
     """The run's events, each at its offset in seconds from the start."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_line: Callable[[str], None] | None = None) -> None:
         self.t0 = time.time()
         self.events: list[tuple[float, str, str]] = []
+        self.on_line = on_line
 
     def add(self, source: str, message: str, at: float | None = None) -> None:
         self.events.append(((at if at is not None else time.time()) - self.t0, source, message))
+        if at is None:
+            self.live(source, message)
+
+    def live(self, source: str, message: str) -> None:
+        """Pass one line on as it happens. Stamped on arrival: the final log
+        re-places sandbox events on the sandbox's own clock, but live, now is
+        close enough and all there is."""
+        if self.on_line:
+            try:
+                self.on_line(f"[{time.time() - self.t0:7.1f}s] {source}: {message}")
+            except Exception:  # noqa: BLE001 — a log line is never worth failing the run
+                pass
 
     def lines(self) -> list[str]:
         # Stable, so events stamped the same instant keep the order they came in.
@@ -247,11 +311,19 @@ def _read(sb, path: str) -> str:
     return text if p.wait() == 0 else ""
 
 
-def _run_sandbox(task: str, mcp_server: str, env: dict[str, str], json_answer: bool) -> dict:
+def _run_sandbox(
+    task: str,
+    mcp_server: str,
+    env: dict[str, str],
+    json_answer: bool,
+    on_line: Callable[[str], None] | None = None,
+    want_files: bool = False,
+) -> dict:
     """Run the agent on *task* in a fresh sandbox. Blocking — call it off the loop."""
     import modal
 
-    log = _Log()
+    log = _Log(on_line)
+    files: list[pbt.File] = []
     app, image = _lookup()
     command = shlex.split(mcp_server) if mcp_server.strip() else []
 
@@ -280,11 +352,22 @@ def _run_sandbox(task: str, mcp_server: str, env: dict[str, str], json_answer: b
 
         if command:
             log.add("modal", f"starting MCP server: {shlex.join(command)}")
-        log.add("agent", f"starting ({env['AGENT_MODEL']}, up to {STEP_LIMIT} steps), task of {len(task)} chars")
+        log.add("agent", f"starting ({env['AGENT_MODEL']}, up to {env['AGENT_STEP_LIMIT']} steps), task of {len(task)} chars")
         launched = time.time()
-        # The server command goes as arguments, so no shell reads it.
-        p = sb.exec("python", "/opt/agent/run_agent.py", TASK_PATH, RESULT_PATH, *command)
-        out = p.stdout.read()
+        # The server command goes as arguments, so no shell reads it. Read line
+        # by line as it runs: each flagged line is a log event, relayed live.
+        p = sb.exec("python", "/opt/agent/run_agent.py", TASK_PATH, RESULT_PATH, *command, bufsize=1)
+        printed: list[str] = []
+        for line in p.stdout:
+            if line.startswith(LIVE_MARKER):
+                try:
+                    event = json.loads(line[len(LIVE_MARKER):])
+                    log.live(event.get("source", "agent"), event.get("message", ""))
+                except ValueError:
+                    pass
+            else:
+                printed.append(line)
+        out = "".join(printed)
         err = p.stderr.read()
         code = p.wait()
 
@@ -303,15 +386,66 @@ def _run_sandbox(task: str, mcp_server: str, env: dict[str, str], json_answer: b
             f"finished: {result.get('exit_status') or 'unknown'} after {result.get('steps', '?')} steps"
             + (f", ${result['cost']:.4f}" if result.get("cost") else ""),
         )
+        # Before teardown, while the sandbox still has them — and only once
+        # there is an answer, since a failed run fails whatever it saved.
+        answer = _answer(result, json_answer, log)
+        if want_files:
+            files = _collect_files(sb, log)
     finally:
         sb.terminate()
         log.add("modal", "sandbox terminated")
 
+    out: dict[str, Any] = {"output": answer}
+    if want_files:
+        out["files"] = files
     return {
-        "output": _answer(result, json_answer, log),
+        **out,
         "logs": log.lines(),
         "run_time": round(time.time() - log.t0, 1),
     }
+
+
+def _collect_files(sb, log: _Log) -> list[pbt.File]:
+    """The files the agent saved in OUTPUTS_DIR, as pbt files.
+
+    Subfolders are flattened into the name (`plots/a.png` → `plots_a.png`):
+    pbt file names never carry a path. A bullet that promised files and saved
+    none fails, because everything downstream is waiting to be handed them.
+    """
+    p = sb.exec("find", OUTPUTS_DIR, "-type", "f", "-printf", "%s\t%P\n")
+    listing = p.stdout.read()
+    p.wait()
+    found = []
+    for line in listing.splitlines():
+        size, _, rel = line.partition("\t")
+        if rel and size.isdigit():
+            found.append((rel, int(size)))
+    found.sort()
+    if not found:
+        raise AgentError(
+            f"This bullet is set to produce files, but the agent saved none in {OUTPUTS_DIR}/.", log
+        )
+
+    files: list[pbt.File] = []
+    taken: set[str] = set()
+    total = 0
+    for rel, size in found:
+        if len(files) >= MAX_FILES or total + size > MAX_FILES_BYTES:
+            log.add("files", f"skipped {rel} ({size} bytes): over the limit of {MAX_FILES} files / {MAX_FILES_BYTES} bytes")
+            continue
+        with sb.open(f"{OUTPUTS_DIR}/{rel}", "rb") as f:
+            data = f.read()
+        name = rel.replace("/", "_")
+        stem, dot, ext = name.rpartition(".")
+        n = 2
+        while name in taken:
+            name = f"{stem}_{n}{dot}{ext}" if dot else f"{ext}_{n}"
+            n += 1
+        taken.add(name)
+        total += len(data)
+        files.append(pbt.File(data, name=name))
+        log.add("files", f"collected {name} ({len(data)} bytes)")
+    return files
 
 
 def _answer(result: dict[str, Any], json_answer: bool, log: _Log) -> Any:
@@ -336,7 +470,14 @@ def _answer(result: dict[str, Any], json_answer: bool, log: _Log) -> Any:
     )
 
 
-async def _run(task: str, mcp_server: str, env: dict[str, str], json_answer: bool) -> str:
+async def _run(
+    task: str,
+    mcp_server: str,
+    env: dict[str, str],
+    json_answer: bool,
+    on_line: Callable[[str], None] | None = None,
+    want_files: bool = False,
+) -> dict:
     if not enabled():
         raise RuntimeError(
             "Agent bullets run on Modal, which is not configured on this "
@@ -351,16 +492,17 @@ async def _run(task: str, mcp_server: str, env: dict[str, str], json_answer: boo
         raise RuntimeError("An agent bullet needs a task — its text, or something from below it.")
     # Modal's client is blocking, and pbt runs independent branches
     # concurrently — keep one agent from stalling the others.
-    # Serialised here, parsed back in `execute`: `call.compute` caches what it
-    # is handed, and text is what a cache stores faithfully.
-    result = await asyncio.to_thread(_run_sandbox, task, mcp_server, env, json_answer)
-    return json.dumps(result, ensure_ascii=False)
+    # Returned as it is: pbt's cache stores a dict — and the files in it, by
+    # hash — and hands the same back on a hit.
+    return await asyncio.to_thread(
+        _run_sandbox, task, mcp_server, env, json_answer, on_line, want_files
+    )
 
 
 # Registered on import, like `modal_exec`: importing this module is what teaches
 # pbt the kind. The rendered text is a task in natural language, so the run's
 # global instruction is welcome here.
-@pbt.model_kind(MODEL_TYPE, config_keys={MCP_KEY})
+@pbt.model_kind(MODEL_TYPE, config_keys={MCP_KEY, STEPS_KEY, FILES_KEY})
 async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     """Hand the rendered bullet to a coding agent, with its MCP server if it names one.
 
@@ -371,15 +513,30 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     bullet before anything is cached or started, and never enters the cache key.
     """
     mcp_server = str(call.spec.config.get(MCP_KEY, ""))
-    provider, api_key = _provider.get()
-    env = _secret_env(provider, api_key)
+    run = _settings.get()
+    # The bullet's own limit, if it set one, over the run's.
+    try:
+        own = int(call.spec.config.get(STEPS_KEY) or 0)
+    except (TypeError, ValueError):
+        own = 0
+    env = _secret_env(run.provider, run.api_key, steps_for(own) if own > 0 else run.steps)
+    name = call.spec.name
+    want_files = bool(call.spec.config.get(FILES_KEY))
+    if want_files:
+        env["AGENT_OUTPUT_FILES"] = "1"
+    on_line = (lambda line: run.on_log(name, line)) if run.on_log else None
 
     # `{{ config(...) }}` renders to nothing, so the server and the model are
     # invisible in `rendered` — and the same task with a different toolbox or a
     # different model is a different run.
     json_answer = call.spec.output_format == "json"
-    cache_text = "\x00".join([rendered, mcp_server, env["AGENT_MODEL"], str(json_answer)])
-    raw = await call.compute(
-        cache_text, compute=lambda: _run(rendered.strip(), mcp_server, env, json_answer)
+    # The step limit too: a run allowed more steps may well answer differently.
+    cache_text = "\x00".join(
+        [rendered, mcp_server, env["AGENT_MODEL"], str(json_answer), env["AGENT_STEP_LIMIT"], str(want_files)]
     )
-    return json.loads(raw)
+    raw = await call.compute(
+        cache_text,
+        compute=lambda: _run(rendered.strip(), mcp_server, env, json_answer, on_line, want_files),
+    )
+    # An entry cached before results were returned as dicts is JSON text.
+    return raw if isinstance(raw, dict) else json.loads(raw)

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { PROVIDERS, exportGraph, type ClassifierSettings, type ExportTarget, type Provider } from './api';
+import { Info } from './Info';
+import { PROVIDERS, agentInfo, exportGraph, type ClassifierSettings, type ExportTarget, type Provider } from './api';
 import {
   NAME_RE,
   promptVarMap,
@@ -43,6 +44,9 @@ interface Props {
   /** Where classifier-judged tests are sent — see `ClassifierSettings`. */
   classifier: ClassifierSettings;
   onClassifierChange: (v: ClassifierSettings) => void;
+  /** Steps an agent bullet may take before it must answer; 0 = server default. */
+  agentSteps: number;
+  onAgentStepsChange: (v: number) => void;
 }
 
 /**
@@ -70,7 +74,15 @@ export function SettingsModal({
   onKeyChange,
   classifier,
   onClassifierChange,
+  agentSteps,
+  onAgentStepsChange,
 }: Props) {
+  // The server's own limits, shown so a blank field says what it means.
+  const [{ defaultSteps, maxSteps }, setLimits] = useState({ defaultSteps: 30, maxSteps: 200 });
+  useEffect(() => {
+    agentInfo().then((info) => setLimits({ defaultSteps: info.defaultSteps, maxSteps: info.maxSteps }));
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -120,7 +132,12 @@ export function SettingsModal({
           </section>
 
           <section className="res-col">
-            <h3 className="res-col__head">Global instruction prepended to every LLM call</h3>
+            <h3 className="res-col__head">
+              Global instruction prepended to every LLM call
+              <Info>
+                Template and python bullets are left alone — only prompts get it.
+              </Info>
+            </h3>
             <textarea
               className="res-col__edit"
               value={value}
@@ -128,13 +145,17 @@ export function SettingsModal({
               placeholder="e.g. Answer in British English, and keep it under 200 words."
               onChange={(e) => onChange(e.target.value)}
             />
-            <p className="res-col__note">
-              Template and python bullets are left alone — only prompts get it.
-            </p>
           </section>
 
           <section className="res-col">
-            <h3 className="res-col__head">Classifier for tests</h3>
+            <h3 className="res-col__head">
+              Classifier for tests
+              <Info>
+                Used by test bullets judged by a classifier instead of the LLM. Any{' '}
+                <code>/v1/systemone</code> endpoint: blank means TypeSafe&rsquo;s hosted Jev; for a
+                local Ollaya use <code>http://localhost:11435</code> and <code>laya:en</code>.
+              </Info>
+            </h3>
             <div className="res-col__body pd-model">
               <input
                 className="pd-input"
@@ -162,11 +183,29 @@ export function SettingsModal({
                 onChange={(e) => onClassifierChange({ ...classifier, model: e.target.value })}
               />
             </div>
-            <p className="res-col__note">
-              Used by test bullets judged by a classifier instead of the LLM. Any{' '}
-              <code>/v1/systemone</code> endpoint: blank means TypeSafe&rsquo;s hosted Jev; for a
-              local Ollaya use <code>http://localhost:11435</code> and <code>laya:en</code>.
-            </p>
+          </section>
+
+          <section className="res-col">
+            <h3 className="res-col__head">
+              Agent steps
+              <Info>
+                How many steps an agent bullet may take — one per reply — before it is told to stop
+                using tools and answer. Blank uses the server&rsquo;s default ({defaultSteps}); at most{' '}
+                {maxSteps}. Gemini models ignore the hard stop and only see the budget in their
+                instructions.
+              </Info>
+            </h3>
+            <div className="res-col__body pd-model">
+              <input
+                className="pd-input"
+                type="number"
+                min={1}
+                max={maxSteps}
+                placeholder={`${defaultSteps} (server default)`}
+                value={agentSteps || ''}
+                onChange={(e) => onAgentStepsChange(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+              />
+            </div>
           </section>
 
           <VarTable />
@@ -205,6 +244,15 @@ function VarTable() {
     <section className="res-col">
       <h3 className="res-col__head">
         Variables — write <code>@name</code> in a bullet
+        <Info>
+          Sent to pbt as <code>promptdata</code>: each <code>@name</code> in a bullet becomes{' '}
+          <code>{'{{ promptdata("name") }}'}</code>. Renaming one here does not rewrite the bullets
+          that used the old name.
+          <br />
+          The first is the server&rsquo;s own: it reads it by name, so it cannot be renamed or
+          removed — only filled in. Hover it for what it does. Python packages are set per
+          bullet, in its ••• → Settings….
+        </Info>
       </h3>
       <div className="res-col__body pd-body">
         <table className="pd-table">
@@ -278,15 +326,6 @@ function VarTable() {
           </tbody>
         </table>
       </div>
-      <p className="res-col__note">
-        Sent to pbt as <code>promptdata</code>: each <code>@name</code> in a bullet becomes{' '}
-        <code>{'{{ promptdata("name") }}'}</code>. Renaming one here does not rewrite the bullets
-        that used the old name.
-        <br />
-        The first is the server&rsquo;s own: it reads it by name, so it cannot be renamed or
-        removed — only filled in. Hover it for what it does. Python packages are set per
-        bullet, in its ••• → Settings….
-      </p>
     </section>
   );
 }
@@ -503,7 +542,20 @@ function Documents({
 
   return (
     <section className="res-col" ref={section}>
-      <h3 className="res-col__head">This map — save, load, export</h3>
+      <h3 className="res-col__head">
+        This map — save, load, export
+        <Info>
+          {open ? (
+            <>
+              Editing “{open}” — changes go into it as you make them.{' '}
+            </>
+          ) : (
+            <>Nothing is open: save this map under a name and edits will go into it. </>
+          )}
+          Saves stay in this browser. Loading replaces what is on screen and keeps a copy as “
+          {BEFORE_LOAD}”.
+        </Info>
+      </h3>
       <div className="res-col__body pd-docs">
         <div className="pd-row">
           <select
@@ -657,17 +709,6 @@ function Documents({
           <p className={`pd-status ${status.bad ? 'pd-status--bad' : ''}`}>{status.text}</p>
         )}
       </div>
-      <p className="res-col__note">
-        {open ? (
-          <>
-            Editing “{open}” — changes go into it as you make them.{' '}
-          </>
-        ) : (
-          <>Nothing is open: save this map under a name and edits will go into it. </>
-        )}
-        Saves stay in this browser. Loading replaces what is on screen and keeps a copy as “
-        {BEFORE_LOAD}”.
-      </p>
     </section>
   );
 }

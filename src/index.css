@@ -278,7 +278,9 @@ body,
 }
 
 .ol-menu__pop button {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  white-space: nowrap;
   width: 100%;
   border: none;
   background: none;
@@ -294,10 +296,11 @@ body,
   background: var(--accent-soft);
 }
 
-/* A shortcut hint, pushed to the right edge of its item. */
+/* A shortcut hint, pushed to the right edge of its item — beside the label,
+   never wrapped under it. */
 .ol-menu__key {
-  float: right;
-  margin-left: 16px;
+  margin-left: auto;
+  padding-left: 16px;
   font-family: inherit;
   font-size: 11px;
   color: var(--muted);
@@ -2148,4 +2151,582 @@ body,
 
 .ns-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ---------------------------------------------------------------------------
+   Live run progress — the ☰ beside Run, the status pills on each bullet, and
+   the progress modal (see `RunProgress.tsx`).
+   --------------------------------------------------------------------------- */
+
+.tb__log {
+  flex: 0 0 auto;
+  height: 30px;
+  width: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tb__log:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Live: the log is filling in right now. */
+.tb__log--live {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: run-pulse 1.4s ease-in-out infinite;
+}
+
+/* Something failed — the log is where to read why. */
+.tb__log--failed {
+  border-color: #fca5a5;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+@keyframes run-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0);
+  }
+}
+
+/* A bullet waiting on a live run keeps its last answer, dimmed until replaced. */
+.ol-result--stale .ol-result__text {
+  opacity: 0.45;
+}
+
+.ol-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+  color: #616e7c;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ol-status--running,
+.mm-node__run--running {
+  border-color: #c7d2fe;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ol-status--running::before,
+.mm-node__run--running::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: run-blink 1s ease-in-out infinite;
+}
+
+@keyframes run-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.ol-status--error,
+.mm-node__run--error {
+  border-color: #fca5a5;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.ol-status--skipped,
+.mm-node__run--skipped {
+  border-style: dashed;
+}
+
+/* The start of the message, beside the pill — enough to recognise it. */
+.ol-status__why {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 400;
+}
+
+.mm-node__run {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+  color: #616e7c;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.mm-node--run-running {
+  border-color: var(--accent);
+  animation: run-pulse 1.4s ease-in-out infinite;
+}
+
+.mm-node--run-error:not(.mm-node--test) {
+  border-color: #fca5a5;
+}
+
+.mm-node--run-queued,
+.mm-node--run-skipped {
+  opacity: 0.7;
+}
+
+/* A failure in the answer modal: the message as pbt gave it, whitespace kept. */
+.res-col__error {
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: #991b1b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The progress modal. */
+.rp {
+  width: min(680px, 100%);
+}
+
+.rp__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.rp__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #eef0f3;
+  overflow: hidden;
+}
+
+.rp__fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.rp__fill--failed {
+  background: #dc2626;
+}
+
+.rp__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--text);
+}
+
+.rp__count {
+  color: #616e7c;
+}
+
+.rp__count--success {
+  color: #065f46;
+}
+
+.rp__count--running {
+  color: var(--accent);
+}
+
+.rp__count--error {
+  color: #991b1b;
+  font-weight: 600;
+}
+
+.rp__now {
+  color: #616e7c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp__link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rp__link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.rp__log {
+  margin: 0;
+  padding: 10px 18px 16px;
+  max-height: min(520px, 60vh);
+  overflow-y: auto;
+  list-style: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.rp__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+}
+
+.rp__time {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.rp__tag {
+  flex: 0 0 48px;
+  font-weight: 600;
+  color: #616e7c;
+}
+
+.rp__line--start .rp__tag {
+  color: #b45309;
+}
+
+.rp__line--success .rp__tag,
+.rp__line--end .rp__tag {
+  color: #047857;
+}
+
+.rp__line--error .rp__tag {
+  color: #dc2626;
+}
+
+.rp__title {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp__detail {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.rp__error {
+  flex: 1 0 100%;
+  margin: 2px 0 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #991b1b;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rp__line--skipped .rp__error {
+  background: #f5f7fa;
+  color: #616e7c;
+}
+
+@media (pointer: coarse) {
+  .tb__log {
+    height: 40px;
+    width: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb__log--live,
+  .mm-node--run-running,
+  .ol-status--running::before,
+  .mm-node__run--running::before {
+    animation: none;
+  }
+}
+
+/* A running agent's own log: in the run log, under its bullet; in the bullet's
+   window, in place of the answer until there is one. */
+/* Folded under its RUN line, lined up with the bullet's title. */
+.rp__agentlog {
+  flex: 1 0 100%;
+  box-sizing: border-box;
+  margin: 2px 0 6px;
+  padding-left: 110px;
+  min-width: 0;
+}
+
+.rp__agentsum {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.rp__agentsum::-webkit-details-marker {
+  display: none;
+}
+
+.rp__agentsum::before {
+  content: '▸';
+  flex: 0 0 auto;
+}
+
+.rp__agentlog[open] > .rp__agentsum::before {
+  content: '▾';
+}
+
+.rp__agentsum:hover .rp__agentcount {
+  color: var(--accent);
+}
+
+.rp__agentcount {
+  flex: 0 0 auto;
+  color: #52606d;
+}
+
+/* The latest line, as a preview — hidden once the whole log is open. */
+.rp__agentlast {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp__agentlog[open] .rp__agentlast {
+  display: none;
+}
+
+.rp__agentlog .rp__agent {
+  max-height: 260px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f5f7fa;
+  overflow: auto;
+}
+
+.rp__agent,
+.res-col__log {
+  margin: 0;
+  color: #52606d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.res-col__log {
+  padding: 14px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+@media (max-width: 620px) {
+  .rp__agentlog {
+    padding-left: 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Info tips — the "i" beside a settings heading, and its bubble (`Info.tsx`).
+   The explanations used to sit under each section as small print.
+   --------------------------------------------------------------------------- */
+
+.info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 10px;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: 0;
+  vertical-align: 1px;
+  cursor: help;
+  outline: none;
+}
+
+.info:hover,
+.info:focus-visible {
+  color: var(--accent);
+}
+
+/* Fixed, and placed by the component from the icon's rectangle, so a
+   scrolling modal body cannot clip it. Resets everything the uppercase
+   heading it sits in would otherwise hand down. */
+.info__pop {
+  position: fixed;
+  z-index: 200;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #1f2933;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  color: #f5f7fa;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.info__pop--above {
+  transform: translateY(-100%);
+}
+
+.info__pop code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  font-size: 11px;
+}
+
+/* The one note that stays: a warning about this server, not an explanation. */
+.res-col__note--warn {
+  color: #92400e;
+  background: #fffbeb;
+}
+
+/* ---------------------------------------------------------------------------
+   Files a bullet produced (`RunFiles.tsx`) — thumbnails in the outline's
+   answer column, a gallery in the bullet's window.
+   --------------------------------------------------------------------------- */
+
+.rf-thumbs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  margin-right: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.rf-thumbs__img,
+.rf-thumbs__doc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  object-fit: cover;
+  font-size: 12px;
+}
+
+.rf-thumbs:hover .rf-thumbs__img,
+.rf-thumbs:hover .rf-thumbs__doc {
+  border-color: var(--accent);
+}
+
+.rf-thumbs__more {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.rf-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.rf-gallery__head {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rf-file {
+  margin: 0;
+}
+
+.rf-file__img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: repeating-conic-gradient(#f3f4f6 0% 25%, #fff 0% 50%) 50% / 16px 16px;
+}
+
+.rf-file__cap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.rf-file__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.rf-file__size {
+  color: var(--muted);
+}
+
+.rf-file__dl {
+  color: var(--accent);
 }

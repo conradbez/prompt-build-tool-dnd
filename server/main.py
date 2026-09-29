@@ -2,7 +2,8 @@
 Simple, stateless FastAPI server for the Workflowy mind map.
 
 One meaningful endpoint — ``POST /run`` — receives the bullet graph as JSON and
-returns each bullet's result after flowing through prompt-build-tool (pbt).
+streams each bullet's progress and result as it flows through
+prompt-build-tool (pbt).
 No sessions, no file storage, no database: every request is self-contained.
 
 Each bullet becomes a pbt model. A bullet's `@` references become pbt
@@ -13,14 +14,17 @@ branches in parallel.
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import pathlib
 import re
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -29,6 +33,7 @@ from pydantic import BaseModel
 load_dotenv(pathlib.Path(__file__).resolve().parent.parent / ".env")
 
 import pbt
+from pbt.files import contains_files, iter_files, to_jsonable
 
 import export as exporter
 import files as attachments
@@ -213,6 +218,10 @@ class Node(BaseModel):
     # An agent bullet's MCP server: the command that starts it over stdio, e.g.
     # `uvx some-mcp-server`. Empty means the agent has bash alone.
     mcpServer: str = ""
+    # An agent bullet's step limit; 0 means the run's (`RunRequest.agentSteps`).
+    agentSteps: int = 0
+    # An agent bullet that hands on files, not only text — see `agent_exec`.
+    producesFiles: bool = False
     # A python bullet's extra sandbox packages, comma-separated — see
     # `modal_exec.config_line`. Ignored on every other kind.
     packages: str = ""
@@ -246,6 +255,9 @@ class RunRequest(BaseModel):
     # handed the map and renders `{{ promptdata("name") }}` from it.
     promptdata: dict[str, str] = {}
     classifier: ClassifierSettings = ClassifierSettings()
+    # Settings → agent steps: how many steps an agent bullet may take before it
+    # is told to answer. 0 means the server's default (see `agent_exec`).
+    agentSteps: int = 0
 
 
 class ExportRequest(BaseModel):
@@ -286,6 +298,8 @@ class RunResponse(BaseModel):
     # Each test bullet's verdict: "pass", "fail", or "skipped" when something
     # it checks failed and it never ran. A test absent here has not run.
     tests: dict[str, str] = {}
+    # The files each bullet produced, same keys — see `_file_info`.
+    files: dict[str, list[dict]] = {}
     errors: list[str] = []
 
 
@@ -307,6 +321,7 @@ def _build_source(
     id_to_slug: dict[str, str],
     session_id: str = "",
     var_names: set[str] | None = None,
+    file_sources: set[str] | None = None,
 ) -> str:
     """Compose a bullet's pbt prompt.
 
@@ -330,6 +345,9 @@ def _build_source(
     into a Jinja *comment* — see `_python_source`. An agent node keeps the
     ordinary shape — its rendered text is the agent's task — plus the `agent_modal` config line naming its MCP server, if
     any (see `agent_exec.py`).
+
+    A prompt bullet fed by one in *file_sources* — an agent set to produce
+    files — declares it in `promptfiles`, so pbt hands it those files too.
 
     Any `@name` naming a run variable becomes `{{ promptdata("name") }}` on the
     way through, which is how the values reach the prompt (see `_as_promptdata`).
@@ -365,8 +383,17 @@ def _build_source(
         source = TEMPLATE_CONFIG_LINE + "\n" + source
     if node.kind == "agent":
         # The sandbox never sees attachments, so none are declared either.
-        return agent_exec.config_line(node.mcpServer) + "\n" + source
+        return (
+            agent_exec.config_line(node.mcpServer, node.agentSteps, node.producesFiles)
+            + "\n"
+            + source
+        )
     keys = _node_file_keys(node, session_id)
+    if node.kind == "prompt":
+        # Only a prompt reaches a model that can look at them; a template
+        # passes text through, and pbt fails a bullet that asks for files from
+        # one that produced none — hence only those set to produce them.
+        keys += [id_to_slug[d] for d in dep_ids if d in (file_sources or set())]
     if keys:
         source = _promptfiles_line(keys) + "\n" + source
     return source
@@ -391,8 +418,11 @@ def _models(
     """Every bullet's pbt source, keyed by its model name — for a run and an
     export alike."""
     feeds = _feeding(nodes, names)
+    producers = {n.id for n in nodes if n.kind == "agent" and n.producesFiles}
     return {
-        names[n.id]: _build_source(n, children[n.id], feeds, session_id, set(promptdata))
+        names[n.id]: _build_source(
+            n, children[n.id], feeds, session_id, set(promptdata), producers
+        )
         for n in nodes
     }
 
@@ -617,7 +647,7 @@ def _node_file_keys(node: Node, session_id: str) -> list[str]:
     return [f.key for f in node.files if attachments.belongs_to(f.key, session_id, node.id)]
 
 
-def _title(node: Node) -> str:
+def _title(node: Node, others: dict[str, Node] | None = None) -> str:
     """What to call a bullet in a message to a person: its first line.
 
     Errors used to name the pbt model — `n_gT4b9…`, a slug built from an id
@@ -625,16 +655,56 @@ def _title(node: Node) -> str:
     the sentence a person reads when it fails.
     """
     line = node.text.split("\n", 1)[0].strip() if node.text else ""
+    # A mention reads as the bullet it names, the way the editor shows it.
+    line = _MENTION.sub(
+        lambda m: "@" + (others[m.group(1)].text.split("\n", 1)[0].strip()[:20] if others and m.group(1) in others else ""),
+        line,
+    )
     line = re.sub(r"^\s*(#{1,6}\s+|[-*+]\s+|>\s+)", "", line)
     if node.kind == "python" and not line:
         return "the python bullet"
     return f"“{line[:40]}…”" if len(line) > 40 else f"“{line}”" if line else "an empty bullet"
 
 
+# A file is previewed in the browser from a data URL, which keeps the server
+# stateless — nothing is stored to be fetched later. Past this size a file is
+# listed by name alone.
+PREVIEW_BYTES = 5 * 1024 * 1024
+
+
+def _split_files(value: Any) -> tuple[Any, list[pbt.File]]:
+    """A result's files, and what is left of it once they are taken out."""
+    if not contains_files(value):
+        return value, []
+    files = [f for _, f in iter_files(value)]
+    if isinstance(value, pbt.Output):
+        return value.text, files
+    if isinstance(value, dict):
+        return {k: v for k, v in value.items() if not contains_files(v)}, files
+    return "", files
+
+
+def _text(value: Any) -> str:
+    """A result as text: itself if it is text, JSON if it is structured."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(to_jsonable(value), ensure_ascii=False)
+
+
+def _file_info(f: pbt.File) -> dict:
+    """What the browser is told about a file: enough to list it, and its bytes
+    as a data URL when it is small enough to preview."""
+    url = ""
+    if f.size <= PREVIEW_BYTES:
+        url = f"data:{f.mime};base64," + base64.b64encode(f.read_bytes()).decode()
+    return {"name": f.name, "mime": f.mime, "size": f.size, "url": url}
+
+
 def _serialise(
     outputs: dict[str, Any], titles: dict[str, str] | None = None
-) -> tuple[dict[str, str], list[str], set[str]]:
-    """Split pbt outputs into results, error strings, and the names it skipped.
+) -> tuple[dict[str, str], list[str], set[str], dict[str, list[pbt.File]]]:
+    """Split pbt outputs into results, error strings, the names it skipped, and
+    the files each produced.
 
     A skip is not an error of its own: it is what happens *to* a bullet when
     something it depends on fails. Kept apart from the errors so the run can say
@@ -645,6 +715,7 @@ def _serialise(
     results: dict[str, str] = {}
     errors: list[str] = []
     skipped: set[str] = set()
+    files: dict[str, list[pbt.File]] = {}
     for name, value in outputs.items():
         label = titles.get(name, name)
         if isinstance(value, pbt.ModelError):
@@ -653,12 +724,15 @@ def _serialise(
             skipped.add(name)
             errors.append(f"{label}: skipped — something it needs did not run.")
         else:
-            text = value if isinstance(value, str) else str(value)
+            rest, made = _split_files(value)
+            if made:
+                files[name] = made
+            text = _text(rest)
             # Stripped because a template bullet's output is its own rendered
             # source, and the injected `{{ config(...) }}` line renders to an
             # empty first line.
             results[name] = text.strip()
-    return results, errors, skipped
+    return results, errors, skipped, files
 
 
 app = FastAPI(title="Workflowy mind-map runner", version="0.1.0")
@@ -701,8 +775,14 @@ def python_enabled() -> dict:
 
 @app.get("/agent/enabled")
 def agent_enabled() -> dict:
-    """Whether agent bullets can run here — they need Modal, as python does."""
-    return {"enabled": agent_exec.enabled(), "rejected": agent_exec.rejected()}
+    """Whether agent bullets can run here — they need Modal, as python does —
+    and the step limits a run may choose between."""
+    return {
+        "enabled": agent_exec.enabled(),
+        "rejected": agent_exec.rejected(),
+        "defaultSteps": agent_exec.STEP_LIMIT,
+        "maxSteps": agent_exec.MAX_STEP_LIMIT,
+    }
 
 
 @app.post("/files")
@@ -788,8 +868,48 @@ def export(req: ExportRequest) -> ExportResponse:
     )
 
 
-@app.post("/run", response_model=RunResponse)
-async def run(req: RunRequest) -> RunResponse:
+@app.post("/run")
+async def run(req: RunRequest) -> StreamingResponse:
+    """Run the graph, streaming its progress as newline-delimited JSON.
+
+    One event per line, so the UI can show a run as it happens rather than a
+    spinner followed by everything at once:
+
+    - ``plan``  — every bullet about to run, with the title to call it by;
+    - ``start`` — a bullet has started;
+    - ``log``   — one line of a running agent bullet's log, as it happens;
+    - ``done``  — a bullet finished: ``success`` with its answer and the prompt
+      it was sent, ``error`` with pbt's message, or ``skipped``;
+    - ``final`` — the whole `RunResponse`, the same answer a batch run gives.
+      A run that never starts (no key, nothing to run) sends only this.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def emit(event: dict) -> None:
+        # pbt may call back from a worker thread when `llm_call` is sync.
+        loop.call_soon_threadsafe(queue.put_nowait, event)
+
+    async def work() -> None:
+        try:
+            final = await _run(req, emit)
+        except Exception as exc:  # noqa: BLE001 — surface any failure to the client
+            final = RunResponse(errors=[str(exc)])
+        emit({"type": "final", **final.model_dump()})
+        emit(None)
+
+    async def lines():
+        task = asyncio.create_task(work())
+        try:
+            while (event := await queue.get()) is not None:
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        finally:
+            task.cancel()  # the browser went away: stop spending on its run
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+
+async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
     if req.provider not in PROVIDERS:
         return RunResponse(errors=[f"Unsupported provider: {req.provider}"])
 
@@ -828,6 +948,8 @@ async def run(req: RunRequest) -> RunResponse:
 
     id_to_slug = {n.id: _slug(n.id) for n in nodes}
     slug_to_id = {v: k for k, v in id_to_slug.items()}
+    by_node = {n.id: n for n in nodes}
+    titles = {n.id: _title(n, by_node) for n in nodes}
 
     children = _children(nodes)
     models = _models(nodes, children, id_to_slug, req.sessionId, promptdata)
@@ -846,9 +968,68 @@ async def run(req: RunRequest) -> RunResponse:
     except Exception as exc:  # noqa: BLE001 — a missing object shouldn't 500
         return RunResponse(errors=[f"Could not read an attached file: {exc}"])
 
+    emit({"type": "plan", "models": [{"id": n.id, "title": titles[n.id]} for n in nodes]})
+
+    # What downstream prompts rendered so far, so a finished bullet's "Model
+    # input" can be rebuilt the moment it lands: its inputs all finished first.
+    live_rendered: dict[str, str] = {}
+
+    def on_start(name: str) -> None:
+        emit({"type": "start", "id": slug_to_id.get(name, name)})
+
+    def on_done(result: pbt.ModelRunResult) -> None:
+        node_id = slug_to_id.get(result.model_name, result.model_name)
+        event: dict[str, Any] = {
+            "type": "done",
+            "id": node_id,
+            "status": result.status,
+            "ms": result.execution_ms,
+            "cached": result.cached,
+            "error": result.error,
+        }
+        # pbt names models by slug ("upstream models failed: ['n_x']"); a
+        # person knows them by their first line.
+        for slug, other in slug_to_id.items():
+            event["error"] = event["error"].replace(f"'{slug}'", titles[other])
+        node = by_node.get(node_id)
+        if node and result.status == "success":
+            value = result.value if result.value is not None else result.llm_output
+            rest, made = _split_files(value)
+            text = _text(rest).strip()
+            shown, rendered = text, text
+            if node.jsonOutput or node.kind in ("agent", "test"):
+                shown, rendered = _json_forms(text)
+            if made:
+                # What pbt put in a downstream prompt: the whole value, each
+                # file as its one-line handle.
+                rendered = str(value)
+                event["files"] = [_file_info(f) for f in made]
+            live_rendered[node_id] = rendered
+            deps = _deps(node, children[node_id], feeds)
+            event["output"] = shown
+            event["prompt"] = _model_input(node, deps, live_rendered, global_instruction, promptdata)
+            if node.kind == "test":
+                event["test"] = _verdict(shown)
+        elif node and node.kind == "test" and result.status == "skipped":
+            event["test"] = "skipped"
+        try:
+            emit(event)
+        except Exception:  # noqa: BLE001 — a progress event is never worth failing the run
+            pass
+
     # Agent bullets call the model from inside their sandbox, so they need this
-    # run's provider and key too — bound for the tasks pbt spawns, not globally.
-    provider_token = agent_exec.use_provider(req.provider, req.apiKey)
+    # run's provider and key too — bound for the tasks pbt spawns, not globally —
+    # along with its step limit and where to send their log lines live.
+    run_token = agent_exec.use_run(
+        agent_exec.RunSettings(
+            provider=req.provider,
+            api_key=req.apiKey,
+            steps=agent_exec.steps_for(req.agentSteps),
+            on_log=lambda name, line: emit(
+                {"type": "log", "id": slug_to_id.get(name, name), "line": line}
+            ),
+        )
+    )
     try:
         llm = make_llm_call(
             api_key=req.apiKey, provider=req.provider, classifier=req.classifier.model_dump()
@@ -863,14 +1044,14 @@ async def run(req: RunRequest) -> RunResponse:
             # there, so `@name` is rewritten here too.
             global_instruction=_as_promptdata(global_instruction, var_names) or None,
             verbose=False,
+            on_model_start=on_start,
+            on_model_done=on_done,
         )
-    except Exception as exc:  # noqa: BLE001 — surface any failure to the client
-        return RunResponse(errors=[str(exc)])
     finally:
-        agent_exec.reset_provider(provider_token)
+        agent_exec.reset_run(run_token)
 
-    results, errors, skipped_slugs = _serialise(
-        outputs, {id_to_slug[n.id]: _title(n) for n in nodes}
+    results, errors, skipped_slugs, made = _serialise(
+        outputs, {id_to_slug[n.id]: titles[n.id] for n in nodes}
     )
     by_id = {slug_to_id.get(name, name): value for name, value in results.items()}
     skipped = {slug_to_id.get(name, name) for name in skipped_slugs}
@@ -879,6 +1060,11 @@ async def run(req: RunRequest) -> RunResponse:
     for n in nodes:
         if (n.jsonOutput or n.kind in ("agent", "test")) and n.id in by_id:
             by_id[n.id], rendered[n.id] = _json_forms(by_id[n.id])
+    files = {}
+    for slug, found in made.items():
+        node_id = slug_to_id.get(slug, slug)
+        files[node_id] = [_file_info(f) for f in found]
+        rendered[node_id] = str(outputs[slug])  # see `on_done`
 
     prompts = {}
     for n in nodes:
@@ -901,7 +1087,7 @@ async def run(req: RunRequest) -> RunResponse:
             tests[n.id] = "skipped"
         else:
             tests[n.id] = _verdict(by_id[n.id]) if n.id in by_id else "fail"
-    return RunResponse(outputs=by_id, prompts=prompts, tests=tests, errors=errors)
+    return RunResponse(outputs=by_id, prompts=prompts, tests=tests, files=files, errors=errors)
 
 
 # Serve the built frontend last, so `/run` and `/healthz` take precedence.

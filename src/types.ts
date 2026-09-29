@@ -1,3 +1,4 @@
+import type { ModelRunStatus } from './api';
 /**
  * What a bullet *is*, which decides how the server runs it:
  *
@@ -95,6 +96,17 @@ export interface Bullet {
    */
   mcpServer: string;
   /**
+   * An agent bullet's step limit — how many replies it gets before it is told
+   * to answer. 0 falls back to Settings → agent steps, then the server default.
+   */
+  agentSteps: number;
+  /**
+   * An agent bullet that must hand on files, not only text: it is told to save
+   * them in `/root/outputs/`, and the prompt bullets it feeds receive them as
+   * attachments. Ignored on every other kind.
+   */
+  producesFiles: boolean;
+  /**
    * A python bullet's extra sandbox packages, comma-separated, e.g.
    * `beautifulsoup4, scipy==1.*` — installed on top of the server's own before
    * it runs. Empty means none. Ignored on every other kind.
@@ -124,12 +136,25 @@ export interface OutlineState {
   results: Record<string, string>;
   /** Each test bullet's verdict from the latest run — see `TestStatus`. */
   tests: Record<string, TestStatus>;
+  /** The files each bullet produced in the latest run. */
+  files: Record<string, RunFile[]>;
   /** What each bullet was actually sent last run — its text plus its inputs. */
   prompts: Record<string, string>;
   /** Errors from the latest run. */
   runErrors: string[];
   /** True while a run is in flight. */
   running: boolean;
+  /**
+   * Each bullet's place in the latest run, live while it is in flight: queued,
+   * running, then how it ended. A bullet absent here was not part of it.
+   */
+  runStatus: Record<string, ModelRunStatus>;
+  /** Why each bullet that errored or was skipped in the latest run did so. */
+  runFailures: Record<string, string>;
+  /** The latest run as it happened, one line per event — the progress modal. */
+  runLog: RunLogLine[];
+  /** Whether the progress modal is open. */
+  progressOpen: boolean;
   /**
    * Whose run is open in the answer modal, if any. It lives in the store
    * rather than in one panel because both the outline and the mind map open
@@ -138,6 +163,29 @@ export interface OutlineState {
   openResultId: string | null;
   /** Whose settings modal is open, if any — kind, JSON, packages, MCP. */
   openSettingsId: string | null;
+}
+
+/** A file a bullet produced, as the server describes it. */
+export interface RunFile {
+  name: string;
+  mime: string;
+  size: number;
+  /** A data URL of its bytes, or empty when it was too large to send. */
+  url: string;
+}
+
+/** One line of the progress modal — see `runLog`. */
+export interface RunLogLine {
+  /** Milliseconds since the run began. */
+  at: number;
+  /** `log` is a line from inside a running agent bullet, under its own. */
+  kind: 'plan' | 'start' | 'log' | 'success' | 'error' | 'skipped' | 'end';
+  /** The bullet the line is about; absent on lines about the whole run. */
+  id?: string;
+  /** The bullet's first line, or a note about the run as a whole. */
+  title: string;
+  /** Timing on a finished bullet, the message on a failed one. */
+  detail?: string;
 }
 
 /** A single entry in the flattened, depth-first view of visible bullets. */

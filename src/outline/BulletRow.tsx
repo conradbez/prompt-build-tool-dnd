@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { PYTHON_CAPTION, type Bullet, type TestStatus } from '../types';
+import { PYTHON_CAPTION, type Bullet, type RunFile, type TestStatus } from '../types';
+import { FileThumbs } from '../RunFiles';
 import { actions, getState, titleMap } from '../store';
 import { register, getEditor } from './focusRegistry';
 import { BulletMenu } from './BulletMenu';
@@ -16,7 +17,7 @@ import {
 } from '../lib/mentions';
 import { describeVar, usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
 import { renderInlineMarkdown, renderMarkdown } from '../lib/markdown';
-import { deleteFile, fileLink } from '../api';
+import { deleteFile, fileLink, type ModelRunStatus } from '../api';
 import { INDENT } from './dragDrop';
 import { caretAtStart, caretOnFirstLine, caretOnLastLine } from '../lib/caret';
 
@@ -60,18 +61,52 @@ interface Props {
   result?: string;
   /** A test bullet's verdict from the latest run, if it has one. */
   test?: TestStatus;
+  /** Where this bullet is in the current (or last) run, if it was part of it. */
+  runStatus?: ModelRunStatus;
+  /** Why it errored or was skipped, for the status pill's tooltip. */
+  failure?: string;
+  /** The files it produced in the latest run. */
+  files?: RunFile[];
   /** Open the full answer in a modal — the one-line preview is only a handle. */
   onExpand: (id: string) => void;
 }
 
 const MAX_MATCHES = 8;
 
+const STATUS_LABEL: Record<ModelRunStatus, string> = {
+  queued: 'waiting',
+  running: 'running',
+  success: 'done',
+  error: 'error',
+  skipped: 'skipped',
+};
+
+const STATUS_TIP: Record<ModelRunStatus, string> = {
+  queued: 'Waiting for the bullets it depends on — open the run log',
+  running: 'Running now — open the run log',
+  success: '',
+  error: 'Failed — open to see why',
+  skipped: 'Skipped because something it depends on failed',
+};
+
 /**
  * A single outline bullet: one markdown text field. While the caret is in it
  * you edit the raw markdown; the moment it loses focus the text is rendered,
  * so the outline reads as formatted prose.
  */
-export function BulletRow({ bullet, depth, selected, dragging, onDragStart, result, test, onExpand }: Props) {
+export function BulletRow({
+  bullet,
+  depth,
+  selected,
+  dragging,
+  onDragStart,
+  result,
+  test,
+  runStatus,
+  failure,
+  files,
+  onExpand,
+}: Props) {
   const [ac, setAc] = useState<AutocompleteState | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   const { id } = bullet;
@@ -370,9 +405,26 @@ export function BulletRow({ bullet, depth, selected, dragging, onDragStart, resu
       {/* The result column. Every row reserves it, whether or not there is an
           answer yet, so the bullets keep a straight right edge and the column
           does not appear and disappear as runs come in. */}
-      <div className="ol-result">
-        {result !== undefined && (
+      <div className={`ol-result${runStatus === 'queued' ? ' ol-result--stale' : ''}`}>
+        {/* While a run is live the column says where this bullet is in it; an
+            answer from the last run stays visible, dimmed, until it is replaced.
+            A failure takes the column over — it is the thing to read. */}
+        {(runStatus === 'running' || runStatus === 'error' || runStatus === 'skipped' ||
+          (runStatus === 'queued' && result === undefined)) && (
+          <button
+            type="button"
+            className={`ol-status ol-status--${runStatus}`}
+            title={failure || STATUS_TIP[runStatus]}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => (runStatus === 'error' || runStatus === 'skipped' ? onExpand(id) : actions.openProgress(true))}
+          >
+            {STATUS_LABEL[runStatus]}
+            {failure && runStatus === 'error' && <span className="ol-status__why">{failure}</span>}
+          </button>
+        )}
+        {result !== undefined && runStatus !== 'running' && runStatus !== 'error' && runStatus !== 'skipped' && (
           <>
+            {files && files.length > 0 && <FileThumbs files={files} onOpen={() => onExpand(id)} />}
             {/* The answer *is* the control — clicking it opens the full text.
                 It hugs its content rather than filling the column, so the tint
                 that comes up on hover reads as a box around this one answer. */}

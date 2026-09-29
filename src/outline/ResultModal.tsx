@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { FileGallery } from '../RunFiles';
 import { renderMarkdown } from '../lib/markdown';
 import { displayToRaw, toDisplay } from '../lib/mentions';
 import { usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
-import { actions, firstLine, getState, titleMap } from '../store';
+import { actions, firstLine, getState, titleMap, useOutline } from '../store';
 import { PYTHON_CAPTION, type Bullet } from '../types';
 import { BulletMenu } from './BulletMenu';
 import { JsonChip, KindChip } from '../mindmap/BulletNode';
@@ -49,6 +50,9 @@ export function ResultModal({ bullet, prompt, result }: Props) {
 
   const titles = titleMap(getState());
   const vars = usePromptVarMap();
+  const status = getState().runStatus[bullet.id];
+  const failure = getState().runFailures[bullet.id];
+  const files = getState().files[bullet.id];
   const title = firstLine(bullet.text) || (bullet.kind === 'python' ? 'Python' : 'Untitled');
 
   return (
@@ -87,16 +91,63 @@ export function ResultModal({ bullet, prompt, result }: Props) {
             vars={vars}
             empty="Not recorded — run this bullet again to capture it."
           />
-          <Column
-            heading="Model response"
-            body={result}
-            titles={titles}
-            vars={vars}
-            empty="Not run yet — press Run to fill this in."
-          />
+          {bullet.kind === 'agent' && (status === 'running' || status === 'queued') ? (
+            <LiveLog id={bullet.id} waiting={status === 'queued'} />
+          ) : status === 'error' || status === 'skipped' ? (
+            <section className="res-col">
+              <h3 className="res-col__head">{status === 'error' ? 'Error' : 'Skipped'}</h3>
+              <pre className="res-col__error">{failure || 'No message was given.'}</pre>
+            </section>
+          ) : (
+            <Column
+              heading="Model response"
+              body={status === 'running' || status === 'queued' ? undefined : result}
+              titles={titles}
+              vars={vars}
+              empty={
+                status === 'running'
+                  ? 'Running now…'
+                  : status === 'queued'
+                    ? 'Waiting for the bullets it depends on…'
+                    : 'Not run yet — press Run to fill this in.'
+              }
+              extra={
+                files?.length && status !== 'running' && status !== 'queued' ? (
+                  <FileGallery files={files} />
+                ) : undefined
+              }
+            />
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * A running agent's log as it arrives, in the answer's place until there is
+ * one. Follows the tail, the way the run log does.
+ */
+function LiveLog({ id, waiting }: { id: string; waiting: boolean }) {
+  const lines = useOutline().runLog.filter((l) => l.kind === 'log' && l.id === id);
+  const ref = useRef<HTMLPreElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lines.length]);
+  return (
+    <section className="res-col">
+      <h3 className="res-col__head">Agent log — live</h3>
+      {lines.length ? (
+        <pre className="res-col__log" ref={ref}>
+          {lines.map((l) => l.title).join('\n')}
+        </pre>
+      ) : (
+        <p className="res-col__empty">
+          {waiting ? 'Waiting for the bullets it depends on…' : 'Starting the sandbox…'}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -139,22 +190,25 @@ function Column({
   titles,
   vars,
   empty = 'Empty',
+  extra,
 }: {
   heading: string;
   body: string | undefined;
   titles: Record<string, string>;
   vars: PromptVarMap;
   empty?: string;
+  /** Shown under the text, in the same scroll — a response's files. */
+  extra?: ReactNode;
 }) {
   const text = (body ?? '').trim();
   return (
     <section className="res-col">
       <h3 className="res-col__head">{heading}</h3>
-      {text ? (
-        <div
-          className="res-col__body"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(text, titles, vars) }}
-        />
+      {text || extra ? (
+        <div className="res-col__body">
+          {text && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(text, titles, vars) }} />}
+          {extra}
+        </div>
       ) : (
         <p className="res-col__empty">{empty}</p>
       )}

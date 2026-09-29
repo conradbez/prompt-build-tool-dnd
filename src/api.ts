@@ -11,7 +11,7 @@ export const PROVIDERS: { id: Provider; label: string }[] = [
   { id: 'anthropic', label: 'Anthropic' },
 ];
 
-import type { BulletKind, FileRef, TestJudge, TestStatus } from './types';
+import type { BulletKind, FileRef, RunFile, TestJudge, TestStatus } from './types';
 import { getSessionId } from './lib/session';
 
 export interface NodePayload {
@@ -28,6 +28,10 @@ export interface NodePayload {
   kind: BulletKind;
   /** An agent bullet's MCP server command; empty for none. */
   mcpServer: string;
+  /** An agent bullet's step limit; 0 for the run's (Settings → agent steps). */
+  agentSteps: number;
+  /** An agent bullet that hands on files — see `Bullet.producesFiles`. */
+  producesFiles: boolean;
   /** A python bullet's extra sandbox packages, comma-separated; empty for none. */
   packages: string;
   /** Validate this bullet's answer as JSON (pbt's `output_format="json"`). */
@@ -47,6 +51,8 @@ export interface RunResponse {
   prompts: Record<string, string>;
   /** Each test bullet's verdict; a test that did not run is absent. */
   tests?: Record<string, TestStatus>;
+  /** The files each bullet produced, keyed the same way. */
+  files?: Record<string, RunFile[]>;
   errors: string[];
 }
 
@@ -113,14 +119,32 @@ export async function pythonInfo(): Promise<PythonInfo> {
   }
 }
 
-/** Whether the server can run `agent` bullets (Modal configured, as for python). */
-export async function agentEnabled(): Promise<boolean> {
+export interface AgentInfo {
+  /** Whether the server can run `agent` bullets (Modal configured, as for python). */
+  enabled: boolean;
+  /** The step limit a run gets when Settings leaves it blank, and the most it may ask for. */
+  defaultSteps: number;
+  maxSteps: number;
+}
+
+export async function agentInfo(): Promise<AgentInfo> {
+  const none: AgentInfo = { enabled: false, defaultSteps: 30, maxSteps: 200 };
   try {
     const res = await fetch(`${getServerUrl()}/agent/enabled`);
-    return res.ok && !!(await res.json()).enabled;
+    if (!res.ok) return none;
+    const data = await res.json();
+    return {
+      enabled: !!data.enabled,
+      defaultSteps: Number(data.defaultSteps) || none.defaultSteps,
+      maxSteps: Number(data.maxSteps) || none.maxSteps,
+    };
   } catch {
-    return false;
+    return none;
   }
+}
+
+export async function agentEnabled(): Promise<boolean> {
+  return (await agentInfo()).enabled;
 }
 
 /** Whether the server has a bucket configured; uploads are hidden if not. */
@@ -235,6 +259,33 @@ export interface ClassifierSettings {
   model: string;
 }
 
+/** What one bullet's run is doing right now. */
+export type ModelRunStatus = 'queued' | 'running' | 'success' | 'error' | 'skipped';
+
+/**
+ * One line of a run's progress stream — see `run` in `server/main.py`.
+ * `plan` names what is about to run, `start`/`done` follow each bullet, and
+ * `final` is the whole answer, the same shape a batch run gives.
+ */
+export type RunEvent =
+  | { type: 'plan'; models: { id: string; title: string }[] }
+  | { type: 'start'; id: string }
+  /** One line of a running agent bullet's log, as it happens. */
+  | { type: 'log'; id: string; line: string }
+  | {
+      type: 'done';
+      id: string;
+      status: 'success' | 'error' | 'skipped';
+      ms: number;
+      cached: boolean;
+      error: string;
+      output?: string;
+      prompt?: string;
+      test?: TestStatus;
+      files?: RunFile[];
+    }
+  | ({ type: 'final' } & RunResponse);
+
 export async function runGraph(
   nodes: NodePayload[],
   provider: Provider,
@@ -245,6 +296,10 @@ export async function runGraph(
   promptdata?: Record<string, string>,
   /** Settings → classifier, used by classifier-judged tests only. */
   classifier?: ClassifierSettings,
+  /** Settings → steps an agent bullet may take; 0 for the server's default. */
+  agentSteps?: number,
+  /** Called with each progress event as it arrives, `final` included. */
+  onEvent?: (event: RunEvent) => void,
 ): Promise<RunResponse> {
   const url = `${getServerUrl()}/run`;
   let res: Response;
@@ -252,7 +307,7 @@ export async function runGraph(
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      body: JSON.stringify({
         nodes,
         provider,
         apiKey: apiKey || undefined,
@@ -260,6 +315,7 @@ export async function runGraph(
         globalInstruction: globalInstruction || '',
         promptdata: promptdata || {},
         classifier: classifier || {},
+        agentSteps: agentSteps || 0,
       }),
     });
   } catch (err) {
@@ -267,11 +323,34 @@ export async function runGraph(
       `Could not reach the server at ${url} (${err instanceof Error ? err.message : String(err)}).`,
     );
   }
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     const body = await res.text().catch(() => '');
     const hint =
       res.status === 405 ? ' — that URL is not the runner (a static host answered).' : '';
     throw new Error(`Server ${res.status} ${res.statusText} at ${url}${hint} ${body.slice(0, 200)}`.trim());
   }
-  return res.json();
+
+  // Newline-delimited JSON: a chunk can end mid-line, so hold the tail back
+  // until the rest of it arrives.
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let final: RunResponse | null = null;
+  const take = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as RunEvent;
+    if (event.type === 'final') final = event;
+    onEvent?.(event);
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    lines.forEach(take);
+  }
+  take(buffer + decoder.decode());
+  if (!final) throw new Error(`The run at ${url} ended without a result — the server may have restarted.`);
+  return final;
 }

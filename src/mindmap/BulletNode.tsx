@@ -1,4 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import type { ModelRunStatus } from '../api';
 import { actions } from '../store';
 import { PYTHON_CAPTION, type BulletKind, type TestStatus } from '../types';
 
@@ -20,6 +21,12 @@ export interface BulletNodeData {
   hasResult: boolean;
   /** A test node's verdict from the latest run; absent until it has one. */
   test?: TestStatus;
+  /** Where this node is in the current (or last) run, if it was part of it. */
+  runStatus?: ModelRunStatus;
+  /** Why it errored or was skipped. */
+  failure?: string;
+  /** How many files it produced in the latest run — shown on its tag. */
+  fileOutCount?: number;
   [key: string]: unknown;
 }
 
@@ -29,7 +36,7 @@ export function BulletNode({ id, data, selected }: NodeProps) {
     <div
       className={`mm-node ${selected ? 'mm-node--selected' : ''} ${d.kind !== 'prompt' ? `mm-node--${d.kind}` : ''} ${
         d.kind === 'test' ? `mm-node--test-${d.test ?? 'idle'}` : ''
-      }`}
+      } ${d.runStatus ? `mm-node--run-${d.runStatus}` : ''}`}
     >
       {/*
         One circle, two gestures: drag from it to start a link, click it to add
@@ -79,7 +86,9 @@ export function BulletNode({ id, data, selected }: NodeProps) {
       {/* A tag, not the answer. A node's job on the map is to show the shape
           of the graph; an LLM answer pasted into it buries that under a wall
           of text, and the answer has a place of its own — the modal. */}
-      {d.kind === 'test' ? (
+      {d.runStatus && d.runStatus !== 'success' && !(d.runStatus === 'queued' && d.hasResult) ? (
+        <RunTag id={id} status={d.runStatus} failure={d.failure} />
+      ) : d.kind === 'test' ? (
         <TestTag id={id} status={d.test} />
       ) : d.hasResult && (
         <button
@@ -91,6 +100,7 @@ export function BulletNode({ id, data, selected }: NodeProps) {
           }}
         >
           success
+          {d.fileOutCount ? ` · ${d.fileOutCount} file${d.fileOutCount === 1 ? '' : 's'}` : ''}
         </button>
       )}
       {d.hasChildren && d.collapsed && <div className="mm-node__badge">▸</div>}
@@ -98,6 +108,29 @@ export function BulletNode({ id, data, selected }: NodeProps) {
           none — its verdict never feeds anything. */}
       {d.kind !== 'test' && <Handle type="source" position={Position.Right} className="mm-handle" />}
     </div>
+  );
+}
+
+/**
+ * A node's place in a live run, in place of its `success` tag: waiting,
+ * running, or — once it is over — how it failed. Clicking a failure opens the
+ * node, whose answer column carries the message; the rest open the run log.
+ */
+function RunTag({ id, status, failure }: { id: string; status: ModelRunStatus; failure?: string }) {
+  const label = { queued: 'waiting', running: 'running', success: 'success', error: 'error', skipped: 'skipped' }[status];
+  const failed = status === 'error' || status === 'skipped';
+  return (
+    <button
+      className={`mm-node__run mm-node__run--${status}`}
+      title={failure || (failed ? 'Open to see why' : 'Open the run log')}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (failed) actions.openResult(id);
+        else actions.openProgress(true);
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

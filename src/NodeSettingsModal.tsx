@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Info } from './Info';
 import { agentEnabled, pythonInfo } from './api';
 import { actions, firstLine } from './store';
 import type { Bullet, BulletKind } from './types';
@@ -83,7 +84,10 @@ export function NodeSettingsModal({ bullet }: Props) {
 
         <div className="res-modal__cols">
           <section className="res-col">
-            <h3 className="res-col__head">Node type</h3>
+            <h3 className="res-col__head">
+              Node type
+              <Info>{current.desc}</Info>
+            </h3>
             <div className="res-col__body">
               <div className="ns-kinds" role="radiogroup" aria-label="Node type">
                 {KINDS.map((k) => (
@@ -104,15 +108,18 @@ export function NodeSettingsModal({ bullet }: Props) {
                 ))}
               </div>
             </div>
-            <p className="res-col__note">
-              {current.desc}
-              {notReady}
-            </p>
+            {notReady && <p className="res-col__note res-col__note--warn">{notReady.trim()}</p>}
           </section>
 
           {kind !== 'test' && (
             <section className="res-col">
-              <h3 className="res-col__head">Output</h3>
+              <h3 className="res-col__head">
+                Output
+                <Info>
+                  The answer is parsed and validated (pbt&rsquo;s <code>output_format="json"</code>);
+                  one that is not JSON fails this bullet instead of flowing on as prose.
+                </Info>
+              </h3>
               <div className="res-col__body">
                 <label className="ns-check">
                   <input
@@ -123,16 +130,19 @@ export function NodeSettingsModal({ bullet }: Props) {
                   Enforce JSON output
                 </label>
               </div>
-              <p className="res-col__note">
-                The answer is parsed and validated (pbt&rsquo;s <code>output_format="json"</code>);
-                one that is not JSON fails this bullet instead of flowing on as prose.
-              </p>
             </section>
           )}
 
           {kind === 'test' && (
             <section className="res-col">
-              <h3 className="res-col__head">Judge</h3>
+              <h3 className="res-col__head">
+                Judge
+                <Info>
+                  {bullet.judge === 'llm'
+                    ? 'The run’s model reads the assertion and what is connected, and answers pass or fail.'
+                    : 'No LLM: the assertion is asked as a yes/no question about what is connected, and the classifier set in Settings answers with a probability.'}
+                </Info>
+              </h3>
               <div className="res-col__body">
                 <div className="ns-kinds" role="radiogroup" aria-label="Judge">
                   {(['llm', 'classifier'] as const).map((j) => (
@@ -163,17 +173,21 @@ export function NodeSettingsModal({ bullet }: Props) {
                   </label>
                 )}
               </div>
-              <p className="res-col__note">
-                {bullet.judge === 'llm'
-                  ? 'The run’s model reads the assertion and what is connected, and answers pass or fail.'
-                  : 'No LLM: the assertion is asked as a yes/no question about what is connected, and the classifier set in Settings answers with a probability.'}
-              </p>
             </section>
           )}
 
           {kind === 'python' && (
             <section className="res-col">
-              <h3 className="res-col__head">Sandbox packages</h3>
+              <h3 className="res-col__head">
+                Sandbox packages
+                <Info>
+                  Comma-separated, installed before this bullet runs
+                  {python.packages.length
+                    ? ` on top of what the sandbox has: ${python.packages.join(', ')}.`
+                    : '.'}{' '}
+                  A script can also ask for its own with a PEP 723 header.
+                </Info>
+              </h3>
               <div className="res-col__body">
                 <input
                   className="pd-input"
@@ -185,19 +199,19 @@ export function NodeSettingsModal({ bullet }: Props) {
                   onChange={(e) => actions.setPackages(id, e.target.value)}
                 />
               </div>
-              <p className="res-col__note">
-                Comma-separated, installed before this bullet runs
-                {python.packages.length
-                  ? ` on top of what the sandbox has: ${python.packages.join(', ')}.`
-                  : '.'}{' '}
-                A script can also ask for its own with a PEP 723 header.
-              </p>
             </section>
           )}
 
           {kind === 'agent' && (
             <section className="res-col">
-              <h3 className="res-col__head">MCP server</h3>
+              <h3 className="res-col__head">
+                MCP server
+                <Info>
+                  The command that starts a stdio MCP server in the agent&rsquo;s sandbox, e.g.{' '}
+                  <code>uvx some-mcp-server</code> or <code>npx -y @scope/server</code>. Empty means
+                  none — the agent works with bash alone.
+                </Info>
+              </h3>
               <div className="res-col__body">
                 <input
                   className="pd-input ns-mono"
@@ -209,11 +223,52 @@ export function NodeSettingsModal({ bullet }: Props) {
                   onChange={(e) => actions.setMcpServer(id, e.target.value)}
                 />
               </div>
-              <p className="res-col__note">
-                The command that starts a stdio MCP server in the agent&rsquo;s sandbox, e.g.{' '}
-                <code>uvx some-mcp-server</code> or <code>npx -y @scope/server</code>. Empty means
-                none — the agent works with bash alone.
-              </p>
+            </section>
+          )}
+
+          {kind === 'agent' && (
+            <section className="res-col">
+              <h3 className="res-col__head">
+                Files
+                <Info>
+                  The agent is told to save the files it makes — images, documents, data — in{' '}
+                  <code>/root/outputs/</code>. They are handed to the prompt bullets this one feeds
+                  as attachments, and shown with its answer. An agent that saves none fails, since
+                  the bullets after it are waiting for them.
+                </Info>
+              </h3>
+              <div className="res-col__body">
+                <label className="ns-check">
+                  <input
+                    type="checkbox"
+                    checked={bullet.producesFiles}
+                    onChange={(e) => actions.setProducesFiles(id, e.target.checked)}
+                  />
+                  Produces files
+                </label>
+              </div>
+            </section>
+          )}
+
+          {kind === 'agent' && (
+            <section className="res-col">
+              <h3 className="res-col__head">
+                Max steps
+                <Info>
+                  How many steps this agent may take — one per reply — before it is told to stop using
+                  tools and answer. Blank uses the run&rsquo;s default from Settings.
+                </Info>
+              </h3>
+              <div className="res-col__body">
+                <input
+                  className="pd-input"
+                  type="number"
+                  min={1}
+                  value={bullet.agentSteps || ''}
+                  placeholder="Default (Settings → agent steps)"
+                  onChange={(e) => actions.setAgentSteps(id, Number(e.target.value))}
+                />
+              </div>
             </section>
           )}
         </div>

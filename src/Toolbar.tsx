@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PROVIDERS, runGraph, type ClassifierSettings, type Provider } from './api';
+import { RunProgress } from './RunProgress';
 import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
 import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';
@@ -8,6 +9,7 @@ const PROVIDER_STORAGE = 'wm.provider';
 const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
 const keyStorage = (p: Provider) => `wm.apiKey.${p}`;
 const CLASSIFIER_STORAGE = 'wm.classifier';
+const AGENT_STEPS_STORAGE = 'wm.agentSteps';
 
 function loadClassifier(): ClassifierSettings {
   const empty = { apiKey: '', baseUrl: '', model: '' };
@@ -47,6 +49,10 @@ export function Toolbar() {
   // counts the *rows a person wrote* — the reserved variables are always in the
   // map, and a dot that is always on says nothing.
   const [classifier, setClassifier] = useState<ClassifierSettings>(loadClassifier);
+  // Steps an agent bullet may take; 0 leaves it to the server's default.
+  const [agentSteps, setAgentSteps] = useState<number>(
+    () => Number(localStorage.getItem(AGENT_STEPS_STORAGE)) || 0,
+  );
   const rows = usePromptVars();
   const vars = promptVarMap(rows);
   const written = rows.filter((r) => NAME_RE.test(r.name)).length;
@@ -59,6 +65,11 @@ export function Toolbar() {
   const onClassifierChange = (v: ClassifierSettings) => {
     setClassifier(v);
     localStorage.setItem(CLASSIFIER_STORAGE, JSON.stringify(v));
+  };
+
+  const onAgentStepsChange = (v: number) => {
+    setAgentSteps(v);
+    localStorage.setItem(AGENT_STEPS_STORAGE, String(v));
   };
 
   const onProviderChange = (p: Provider) => {
@@ -80,24 +91,48 @@ export function Toolbar() {
     return () => clearTimeout(t);
   }, [needsKey]);
 
+  const statuses = Object.values(state.runStatus);
+  const progress = {
+    total: statuses.length,
+    done: statuses.filter((s) => s !== 'queued' && s !== 'running').length,
+    failed: statuses.filter((s) => s === 'error').length,
+  };
+
   const run = async () => {
     actions.setRunning(true);
     try {
       const nodes = buildNodePayloads(getState());
-      const res = await runGraph(nodes, provider, apiKey, globalInstruction, vars, classifier);
+      const res = await runGraph(
+        nodes,
+        provider,
+        apiKey,
+        globalInstruction,
+        vars,
+        classifier,
+        agentSteps,
+        actions.runEvent,
+      );
       if (res.needsKey) {
         // Nothing ran, so the last run's answers stand; the flash says why.
         setNeedsKey(true);
-        actions.setRunResult(getState().results, [], getState().prompts, getState().tests);
+        const s = getState();
+        actions.setRunResult(s.results, [], s.prompts, s.tests, s.files);
         return;
       }
-      actions.setRunResult(res.outputs || {}, res.errors || [], res.prompts || {}, res.tests || {});
+      actions.setRunResult(
+        res.outputs || {},
+        res.errors || [],
+        res.prompts || {},
+        res.tests || {},
+        res.files || {},
+      );
     } catch (err) {
       actions.setRunResult(
         getState().results,
         [err instanceof Error ? err.message : String(err)],
         getState().prompts,
         getState().tests,
+        getState().files,
       );
     }
   };
@@ -132,8 +167,18 @@ export function Toolbar() {
           autoComplete="off"
         />
         <button className="tb__run" onClick={run} disabled={state.running}>
-          {state.running ? 'Running…' : 'Run'}
+          {state.running ? `Running ${progress.done}/${progress.total}…` : 'Run'}
         </button>
+        {state.runLog.length > 0 && (
+          <button
+            className={`tb__log${progress.failed ? ' tb__log--failed' : ''}${state.running ? ' tb__log--live' : ''}`}
+            onClick={() => actions.openProgress(true)}
+            title="Run progress and logs"
+            aria-label="Run progress and logs"
+          >
+            ☰
+          </button>
+        )}
         <button
           className={`tb__gear${settingsOpen ? ' tb__gear--on' : ''}${
             globalInstruction.trim() || written ? ' tb__gear--set' : ''
@@ -158,8 +203,12 @@ export function Toolbar() {
           onKeyChange={onKeyChange}
           classifier={classifier}
           onClassifierChange={onClassifierChange}
+          agentSteps={agentSteps}
+          onAgentStepsChange={onAgentStepsChange}
         />
       )}
+
+      {state.progressOpen && <RunProgress />}
 
       {state.runErrors.length > 0 && (
         <div className="tb__errors">

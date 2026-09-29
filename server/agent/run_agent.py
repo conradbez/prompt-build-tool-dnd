@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 WORKDIR = "/root"
@@ -48,6 +49,16 @@ Your final message is what the person reads, so make it the answer itself —
 not a description of what you did or where you put it.
 """
 
+FILES_NOTE = """
+This task must produce files. Save every file the person should get — images,
+documents, data — in {outputs}/ (it exists already). They are handed on as
+files, so save at least one; your final message is handed on as text beside
+them, so say what each file is rather than pasting its contents.
+"""
+
+# Where files the task asks for are saved; `agent_exec.py` collects them.
+OUTPUTS_DIR = "/root/outputs"
+
 MCP_NOTE = """
 Tools named `mcp_*` come from an MCP server that stays up for the whole run, so
 state carries over from one call to the next. Images they return are shown to
@@ -61,6 +72,16 @@ THOUGHT_CHARS = 600
 OUTPUT_CHARS = 1500
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+# Each log event is also printed as it happens, on a stdout line of its own
+# behind this marker, so the host can relay the run live instead of reading the
+# whole log from the result file once it is over.
+LIVE_MARKER = "@@agent-event "
+
+
+def _record(events: list[dict], event: dict) -> None:
+    events.append(event)
+    print(LIVE_MARKER + json.dumps(event), flush=True)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -119,7 +140,7 @@ def _check_mcp(events: list[dict]) -> str | None:
         if not status:
             continue
         if status.group(1) == "✓":
-            events.append({"ts": time.time(), "source": "mcp", "message": f"server {status.group(2)} in {time.time() - started:.1f}s"})
+            _record(events, {"ts": time.time(), "source": "mcp", "message": f"server {status.group(2)} in {time.time() - started:.1f}s"})
             return None
         detail = []
         for more in lines[i + 1:]:
@@ -167,12 +188,13 @@ def _tool_event(part: dict, step: int, ts: float) -> dict:
     return {"ts": started / 1000 if started else ts, "source": source, "message": message}
 
 
-def _read_run(lines: list[str], result: dict) -> None:
+def _read_run(lines, result: dict) -> None:
     """Fold OpenCode's JSON event stream into *result*: the log, the answer,
     steps and cost.
 
     The answer is the text of the last step, when that step ended the turn
-    rather than asking for tools.
+    rather than asking for tools. *lines* may be a live pipe: each event is
+    logged as its line arrives.
     """
     events = result["events"]
     step, cost = 0, 0.0
@@ -192,16 +214,16 @@ def _read_run(lines: list[str], result: dict) -> None:
         elif kind == "text" and part.get("text", "").strip():
             texts.setdefault(part.get("messageID", ""), []).append(part["text"])
             at = (part.get("time") or {}).get("start")
-            events.append({"ts": at / 1000 if at else ts, "source": "agent", "message": f"step {step}: {_clip(part['text'], THOUGHT_CHARS)}"})
+            _record(events, {"ts": at / 1000 if at else ts, "source": "agent", "message": f"step {step}: {_clip(part['text'], THOUGHT_CHARS)}"})
         elif kind == "tool_use":
-            events.append(_tool_event(part, step, ts))
+            _record(events, _tool_event(part, step, ts))
         elif kind == "step_finish":
             cost += float(part.get("cost") or 0)
             last_finish = part
         elif kind == "error":
             err = e.get("error") or {}
             errors.append(f"{err.get('name', 'Error')}: {(err.get('data') or {}).get('message', '')}".strip())
-            events.append({"ts": ts, "source": "agent", "message": f"error {errors[-1]}"})
+            _record(events, {"ts": ts, "source": "agent", "message": f"error {errors[-1]}"})
 
     answer = "\n".join(texts.get(last_finish.get("messageID", ""), [])).strip()
     said = [t for group in texts.values() for t in group]
@@ -228,14 +250,26 @@ def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
             result.update(exit_status="MCPServerFailed", steps=0, error=problem + (f"\nIt printed:\n{said}" if said else ""))
             return
         task += FINISHING.format(mcp=MCP_NOTE if mcp_command else "", steps=STEP_LIMIT)
+        if os.environ.get("AGENT_OUTPUT_FILES") == "1":
+            os.makedirs(OUTPUTS_DIR, exist_ok=True)
+            task += FILES_NOTE.format(outputs=OUTPUTS_DIR)
         # --title skips a model call spent naming the session.
-        p = subprocess.run(
-            ["opencode", "run", "--format", "json", "--auto", "--title", "agent bullet"],
-            cwd=WORKDIR, env=OPENCODE_ENV, input=task, capture_output=True, text=True,
-        )
-        _read_run(p.stdout.splitlines(), result)
-        if p.returncode and not result.get("error") and result["exit_status"] != "Answered":
-            result["error"] = f"opencode exited {p.returncode}:\n{p.stderr.strip()[-3000:]}"
+        # Read as it runs, not once it is done, so each step reaches the log
+        # live. stderr goes to a file: a pipe nobody reads can fill and stall it.
+        with tempfile.TemporaryFile("w+") as stderr:
+            p = subprocess.Popen(
+                ["opencode", "run", "--format", "json", "--auto", "--title", "agent bullet"],
+                cwd=WORKDIR, env=OPENCODE_ENV, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=stderr, text=True, bufsize=1,
+            )
+            p.stdin.write(task)
+            p.stdin.close()
+            _read_run(p.stdout, result)
+            code = p.wait()
+            stderr.seek(0)
+            said = stderr.read()
+        if code and not result.get("error") and result["exit_status"] != "Answered":
+            result["error"] = f"opencode exited {code}:\n{said.strip()[-3000:]}"
     except Exception as e:  # noqa: BLE001 — reported back, not swallowed
         result.update(exit_status=type(e).__name__, error=str(e))
     finally:

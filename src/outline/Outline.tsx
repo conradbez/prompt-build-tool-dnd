@@ -133,6 +133,9 @@ export function Outline() {
             onDragStart={onDragStart}
             result={state.results[id]}
             test={state.tests[id]}
+            runStatus={state.runStatus[id]}
+            failure={state.runFailures[id]}
+            files={state.files[id]}
             onExpand={actions.openResult}
           />
         ))}
