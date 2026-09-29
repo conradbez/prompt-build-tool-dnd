@@ -463,8 +463,12 @@ def _answer(result: dict[str, Any], json_answer: bool, log: _Log) -> Any:
             raise AgentError(f"The agent's answer is not valid JSON: {exc}", log) from exc
     status = result.get("exit_status") or "an unknown reason"
     said = (result.get("error") or result.get("last_message") or "").strip()[-2000:]
+    if status.startswith("StepLimit"):
+        headline = f"The agent used all {status.split()[-1]} of its steps without answering, so it was stopped."
+    else:
+        headline = f"The agent stopped without an answer ({status}, after {result.get('steps', '?')} steps)."
     raise AgentError(
-        f"The agent stopped without an answer ({status}, after {result.get('steps', '?')} steps)."
+        headline
         + (f" Last it said:\n{said}" if said else ""),
         log,
     )

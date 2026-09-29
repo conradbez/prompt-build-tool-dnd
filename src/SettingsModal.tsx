@@ -191,8 +191,7 @@ export function SettingsModal({
               <Info>
                 How many steps an agent bullet may take — one per reply — before it is told to stop
                 using tools and answer. Blank uses the server&rsquo;s default ({defaultSteps}); at most{' '}
-                {maxSteps}. Gemini models ignore the hard stop and only see the budget in their
-                instructions.
+                {maxSteps}. An agent that keeps going past it is stopped, and the bullet fails.
               </Info>
             </h3>
             <div className="res-col__body pd-model">

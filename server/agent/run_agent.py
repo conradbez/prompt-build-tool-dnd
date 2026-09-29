@@ -19,6 +19,7 @@ set by `agent_exec.py` per run.
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -102,8 +103,8 @@ def _config(mcp_command: list[str]) -> dict:
     # Past this many steps OpenCode tells the model to stop using tools and
     # answer — by ending the request on an assistant message, which Gemini
     # refuses ("Requests ending with a model turn are not supported"). There
-    # the budget in FINISHING is all the model gets, and the sandbox timeout
-    # is the limit.
+    # the model gets only the budget in FINISHING. Either way the limit itself
+    # is enforced by `_read_run`, which stops a run that goes past it.
     if not config["model"].startswith(NO_TRAILING_ASSISTANT):
         config["agent"] = {"build": {"steps": STEP_LIMIT}}
     if mcp_command:
@@ -188,16 +189,23 @@ def _tool_event(part: dict, step: int, ts: float) -> dict:
     return {"ts": started / 1000 if started else ts, "source": source, "message": message}
 
 
-def _read_run(lines, result: dict) -> None:
+def _read_run(lines, result: dict, limit: int | None = None, stop=None) -> None:
     """Fold OpenCode's JSON event stream into *result*: the log, the answer,
     steps and cost.
 
     The answer is the text of the last step, when that step ended the turn
     rather than asking for tools. *lines* may be a live pipe: each event is
     logged as its line arrives.
+
+    *limit* is enforced here, not trusted to OpenCode. Its own `steps` only
+    tells the model that tools are off while still sending them — a model
+    that carries on calling them is not stopped — and it is not set at all for
+    Gemini. The step after the limit is the one the model was told to answer
+    in; a step past that calls *stop*, and the run ends without an answer.
     """
     events = result["events"]
     step, cost = 0, 0.0
+    over = False
     texts: dict[str, list[str]] = {}
     last_finish: dict = {}
     errors = []
@@ -211,6 +219,12 @@ def _read_run(lines, result: dict) -> None:
         kind = e.get("type")
         if kind == "step_start":
             step += 1
+            if limit and step > limit + 1:
+                over = True
+                _record(events, {"ts": ts, "source": "agent", "message": f"stopped: step limit of {limit} reached without an answer"})
+                if stop:
+                    stop()
+                break
         elif kind == "text" and part.get("text", "").strip():
             texts.setdefault(part.get("messageID", ""), []).append(part["text"])
             at = (part.get("time") or {}).get("start")
@@ -228,12 +242,25 @@ def _read_run(lines, result: dict) -> None:
     answer = "\n".join(texts.get(last_finish.get("messageID", ""), [])).strip()
     said = [t for group in texts.values() for t in group]
     result.update(steps=step, cost=cost, last_message=said[-1] if said else "")
-    if errors:
+    if over:
+        result.update(exit_status=f"StepLimit {limit}", steps=step - 1)
+    elif errors:
         result.update(exit_status="Error", error="\n".join(errors))
     elif last_finish.get("reason") == "stop" and answer:
         result.update(exit_status="Answered", submission=answer)
     else:
         result.update(exit_status=f"Stopped ({last_finish.get('reason') or 'no step finished'})")
+
+
+def _stop(p: subprocess.Popen) -> None:
+    """End OpenCode and everything it started."""
+    try:
+        os.killpg(p.pid, signal.SIGTERM)
+        p.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
@@ -261,14 +288,17 @@ def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
                 ["opencode", "run", "--format", "json", "--auto", "--title", "agent bullet"],
                 cwd=WORKDIR, env=OPENCODE_ENV, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=stderr, text=True, bufsize=1,
+                # Its own group, so a stop takes the MCP server it started too.
+                start_new_session=True,
             )
             p.stdin.write(task)
             p.stdin.close()
-            _read_run(p.stdout, result)
+            _read_run(p.stdout, result, limit=STEP_LIMIT, stop=lambda: _stop(p))
             code = p.wait()
             stderr.seek(0)
             said = stderr.read()
-        if code and not result.get("error") and result["exit_status"] != "Answered":
+        stopped = result["exit_status"].startswith("StepLimit")
+        if code and not stopped and not result.get("error") and result["exit_status"] != "Answered":
             result["error"] = f"opencode exited {code}:\n{said.strip()[-3000:]}"
     except Exception as e:  # noqa: BLE001 — reported back, not swallowed
         result.update(exit_status=type(e).__name__, error=str(e))
