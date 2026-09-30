@@ -4,6 +4,7 @@ import { RunProgress } from './RunProgress';
 import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
 import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';
+import { SETTINGS_HINT } from './lib/shortcuts';
 
 const PROVIDER_STORAGE = 'wm.provider';
 const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
@@ -53,6 +54,24 @@ export function Toolbar() {
   const [agentSteps, setAgentSteps] = useState<number>(
     () => Number(localStorage.getItem(AGENT_STEPS_STORAGE)) || 0,
   );
+  // Mod+, opens settings, as in most desktop apps; the browser leaves it to the
+  // page once we take it, so it works in a tab too. On a bullet (caret in its
+  // row, or its node clicked) it opens *that* bullet's settings; otherwise the
+  // run's. Pressed again, it closes whichever is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key !== ',') return;
+      e.preventDefault();
+      const s = getState();
+      if (settingsOpen) setSettingsOpen(false);
+      else if (s.openResultId) actions.openResult(null);
+      else if (s.focus && s.bullets[s.focus.id]) actions.openSettings(s.focus.id);
+      else setSettingsOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsOpen]);
+
   const rows = usePromptVars();
   const vars = promptVarMap(rows);
   const written = rows.filter((r) => NAME_RE.test(r.name)).length;
@@ -184,7 +203,7 @@ export function Toolbar() {
             globalInstruction.trim() || written ? ' tb__gear--set' : ''
           }${needsKey ? ' tb__gear--wants' : ''}`}
           onClick={() => setSettingsOpen((v) => !v)}
-          title="Settings"
+          title={`Settings (${SETTINGS_HINT})`}
           aria-label="Settings"
           aria-expanded={settingsOpen}
         >

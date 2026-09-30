@@ -30,6 +30,8 @@ export interface NodePayload {
   mcpServer: string;
   /** An agent bullet's step limit; 0 for the run's (Settings → agent steps). */
   agentSteps: number;
+  /** An agent bullet's wait between model calls, in seconds; 0 for none. */
+  agentBackoff: number;
   /** An agent bullet that hands on files — see `Bullet.producesFiles`. */
   producesFiles: boolean;
   /** A python bullet's extra sandbox packages, comma-separated; empty for none. */

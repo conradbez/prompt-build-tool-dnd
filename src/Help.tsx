@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SWITCH_HINT } from './lib/shortcuts';
+import { SETTINGS_HINT, SWITCH_HINT } from './lib/shortcuts';
 
 interface Row {
   keys: string;
@@ -8,7 +8,8 @@ interface Row {
 
 const VIEW: Row[] = [
   { keys: SWITCH_HINT, desc: 'Switch between the mind map and the outline' },
-  { keys: 'Click the thumbnail', desc: 'Same thing — or the ⇄ button above it (top right)' },
+  { keys: 'Click the thumbnail', desc: 'Same thing' },
+  { keys: SETTINGS_HINT, desc: 'Settings — the current bullet\u2019s if one is focused, otherwise the run\u2019s (⚙). Again to close' },
 ];
 
 const EDITING: Row[] = [
@@ -21,9 +22,9 @@ const EDITING: Row[] = [
 ];
 
 const MAP: Row[] = [
-  { keys: 'Double-click a node', desc: 'Open it — your text, what the model was sent, and what came back. The ••• menu and the kind chips are in its head, so a bullet\u2019s settings can be changed without closing it' },
+  { keys: 'Double-click a node', desc: 'Open it' },
   { keys: 'Click a node', desc: 'Focus that bullet in the outline (and vice-versa)' },
-  { keys: '＋ on a node', desc: 'Add a child node — a child feeds its output up into this node' },
+  { keys: '＋ on a node', desc: 'Add an upstream child node' },
   { keys: 'Drag a node', desc: 'Move it — the node then keeps that spot instead of following the layout' },
   { keys: 'Drag from ＋', desc: 'Link to another node; drop on empty canvas to make a new child there' },
   { keys: 'Click a link', desc: 'Removes it — solid link → detach the child to top level; dashed link → drop the reference. It goes red under the pointer first (on touch, a tap asks before removing)' },

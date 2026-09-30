@@ -244,6 +244,8 @@ class Node(BaseModel):
     mcpServer: str = ""
     # An agent bullet's step limit; 0 means the run's (`RunRequest.agentSteps`).
     agentSteps: int = 0
+    # An agent bullet's wait between model calls, in seconds; 0 for none.
+    agentBackoff: float = 0
     # An agent bullet that hands on files, not only text — see `agent_exec`.
     producesFiles: bool = False
     # A python bullet's extra sandbox packages, comma-separated — see
@@ -408,7 +410,9 @@ def _build_source(
     if node.kind == "agent":
         # The sandbox never sees attachments, so none are declared either.
         return (
-            agent_exec.config_line(node.mcpServer, node.agentSteps, node.producesFiles)
+            agent_exec.config_line(
+                node.mcpServer, node.agentSteps, node.producesFiles, node.agentBackoff
+            )
             + "\n"
             + source
         )

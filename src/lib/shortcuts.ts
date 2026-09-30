@@ -8,6 +8,9 @@ const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(naviga
 /** Swaps the mind map and the outline. */
 export const SWITCH_HINT = IS_MAC ? '⌘\\' : 'Ctrl+\\';
 
+/** Opens / closes Settings — the key VS Code and most desktop apps use. */
+export const SETTINGS_HINT = IS_MAC ? '⌘,' : 'Ctrl+,';
+
 /**
  * The outline row's own keys, shown beside their `•••` menu items. They are
  * bound in the row's editor only — the mind map and the answer modal have no

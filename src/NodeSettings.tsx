@@ -248,6 +248,31 @@ export function NodeSettings({ bullet }: Props) {
           </div>
         </section>
       )}
+
+      {kind === 'agent' && (
+        <section className="res-col">
+          <h3 className="res-col__head">
+            Back-off
+            <Info>
+              Seconds the agent waits after each model reply before its next call, to stay under a
+              provider&rsquo;s rate limit. The wait counts against the sandbox&rsquo;s time limit
+              (15 min), so keep it × steps well under that. Blank or 0 means no wait.
+            </Info>
+          </h3>
+          <div className="res-col__body">
+            <input
+              className="pd-input"
+              type="number"
+              min={0}
+              max={300}
+              step={1}
+              value={bullet.agentBackoff || ''}
+              placeholder="0 — no wait (seconds)"
+              onChange={(e) => actions.setAgentBackoff(id, Number(e.target.value))}
+            />
+          </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -101,6 +101,11 @@ export interface Bullet {
    */
   agentSteps: number;
   /**
+   * An agent bullet's back-off: seconds it waits after each model reply before
+   * making the next call, to stay under a provider's rate limit. 0 for none.
+   */
+  agentBackoff: number;
+  /**
    * An agent bullet that must hand on files, not only text: it is told to save
    * them in `/root/outputs/`, and the prompt bullets it feeds receive them as
    * attachments. Ignored on every other kind.

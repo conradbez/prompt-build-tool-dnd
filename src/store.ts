@@ -24,6 +24,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     jsonOutput: false,
     mcpServer: '',
     agentSteps: 0,
+    agentBackoff: 0,
     producesFiles: false,
     packages: '',
     judge: 'llm',
@@ -99,6 +100,7 @@ export function parseDoc(value: unknown): Doc | null {
         jsonOutput: !!b.jsonOutput,
         mcpServer: typeof b.mcpServer === 'string' ? b.mcpServer : '',
         agentSteps: typeof b.agentSteps === 'number' && b.agentSteps > 0 ? Math.floor(b.agentSteps) : 0,
+        agentBackoff: typeof b.agentBackoff === 'number' && b.agentBackoff > 0 ? b.agentBackoff : 0,
         producesFiles: !!b.producesFiles,
         packages: typeof b.packages === 'string' ? b.packages : '',
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
@@ -251,6 +253,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     jsonOutput: b.jsonOutput,
     mcpServer: b.mcpServer,
     agentSteps: b.agentSteps,
+    agentBackoff: b.agentBackoff,
     producesFiles: b.producesFiles,
     packages: b.packages,
     judge: b.judge,
@@ -463,6 +466,16 @@ export const actions = {
     if (!b || b.agentSteps === value) return;
     const next = clone(state);
     next.bullets[id] = { ...b, agentSteps: value };
+    emit(next);
+  },
+
+  /** Set an agent bullet's back-off in seconds — see `Bullet.agentBackoff`. 0 clears it. */
+  setAgentBackoff(id: string, seconds: number) {
+    const b = state.bullets[id];
+    const value = Math.max(0, seconds || 0);
+    if (!b || b.agentBackoff === value) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, agentBackoff: value };
     emit(next);
   },
 

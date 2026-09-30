@@ -16,6 +16,7 @@ Model and key come from the environment (`AGENT_MODEL`, as OpenCode's
 `provider/model`, and the provider's own key variable, which OpenCode reads) —
 set by `agent_exec.py` per run.
 """
+import http.client
 import json
 import os
 import re
@@ -23,7 +24,10 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 WORKDIR = "/root"
 # OpenCode finds its project, and so its config, by $PWD rather than the
@@ -49,6 +53,18 @@ QUOTA_RETRIES = int(os.environ.get("AGENT_QUOTA_RETRIES", "6"))
 QUOTA_WAIT_START = 5
 QUOTA_WAIT_MAX = 30
 QUOTA_NUDGE = "Carry on with the task."
+# Seconds to wait after each model reply before the next call; 0 for none.
+BACKOFF_SECONDS = float(os.environ.get("AGENT_BACKOFF_SECONDS") or 0)
+# Where each OpenCode provider's API lives, for the back-off proxy to forward to.
+UPSTREAMS = {
+    "google": "https://generativelanguage.googleapis.com/v1beta",
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+}
+# Not forwarded either way: hop-by-hop, or set again for the new connection.
+# The body is asked for uncompressed, so it streams through as it arrives.
+_HOP_HEADERS = {"host", "connection", "keep-alive", "transfer-encoding", "content-length", "accept-encoding", "content-encoding"}
+
 # A run stopped at its step limit is resumed once with this, and given one step
 # to answer in: without it a model that kept calling tools (Gemini is never told
 # tools are off, see `_config`) ends with nothing at all.
@@ -81,6 +97,16 @@ them, so say what each file is rather than pasting its contents.
 
 # Where files the task asks for are saved; `agent_exec.py` collects them.
 OUTPUTS_DIR = "/root/outputs"
+
+# A files run that ends (answered, or at its step limit) with nothing in
+# OUTPUTS_DIR is resumed once with this, and given SAVE_STEPS steps, tools on:
+# the no-tools wrap-up alone could never save a file.
+SAVE_STEPS = 5
+SAVE_FILES = (
+    "You have not saved any files in {outputs}/, and this task must produce "
+    "files. Save them there now, from what you have so far — within {steps} "
+    "steps, the last of them your final answer, given in full again."
+)
 
 MCP_NOTE = """
 Tools named `mcp_*` come from an MCP server that stays up for the whole run, so
@@ -120,7 +146,9 @@ def _redact(text: str) -> str:
 def _record(events: list[dict], event: dict) -> None:
     event = {**event, "message": _redact(str(event.get("message", "")))}
     events.append(event)
-    print(LIVE_MARKER + json.dumps(event), flush=True)
+    # One write, so a line from the back-off proxy's thread never splits another.
+    sys.stdout.write(LIVE_MARKER + json.dumps(event) + "\n")
+    sys.stdout.flush()
 
 
 def _clip(text: str, limit: int) -> str:
@@ -128,8 +156,8 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + f"… [{len(text) - limit} more chars]"
 
 
-def _config(mcp_command: list[str]) -> dict:
-    config = {
+def _config(mcp_command: list[str], base_url: str | None = None) -> dict:
+    config: dict = {
         "$schema": "https://opencode.ai/config.json",
         "model": os.environ["AGENT_MODEL"],
         "autoupdate": False,
@@ -145,6 +173,10 @@ def _config(mcp_command: list[str]) -> dict:
     # is enforced by `_read_run`, which stops a run that goes past it.
     if not config["model"].startswith(NO_TRAILING_ASSISTANT):
         config["agent"] = {"build": {"steps": STEP_LIMIT}}
+    # The back-off proxy stands in for the provider's API.
+    if base_url:
+        provider = config["model"].split("/", 1)[0]
+        config["provider"] = {provider: {"options": {"baseURL": base_url}}}
     if mcp_command:
         config["mcp"] = {
             MCP_NAME: {
@@ -155,6 +187,76 @@ def _config(mcp_command: list[str]) -> dict:
             }
         }
     return config
+
+
+def _backoff_proxy(upstream: str, wait: float, events: list[dict]) -> str:
+    """Start a local proxy to *upstream* that paces model calls. Its base URL.
+
+    Each call (a POST) waits until *wait* seconds have passed since the last
+    one finished, and calls go one at a time — so a provider's rate limit sees
+    a gap between every step, and between OpenCode's own retries too. Pausing
+    OpenCode between its events instead could not promise that: by the time a
+    step's end is read, the next request may already be on its way.
+
+    The response is relayed as it arrives, so streaming is unaffected.
+    """
+    target = urllib.parse.urlsplit(upstream)
+    lock = threading.Lock()
+    last_done = [0.0]
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args) -> None:  # quiet: stderr is OpenCode's
+            pass
+
+        def _forward(self, pace: bool) -> None:
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            headers = {k: v for k, v in self.headers.items() if k.lower() not in _HOP_HEADERS}
+            headers["Accept-Encoding"] = "identity"
+            with lock if pace else _nolock:
+                if pace and last_done[0]:
+                    left = last_done[0] + wait - time.time()
+                    if left > 0:
+                        _record(events, {"ts": time.time(), "source": "agent", "message": f"backing off {left:.1f}s before the next model call"})
+                        time.sleep(left)
+                conn = http.client.HTTPSConnection(target.netloc, timeout=600)
+                try:
+                    conn.request(self.command, target.path + self.path, body=body or None, headers=headers)
+                    resp = conn.getresponse()
+                    self.send_response(resp.status, resp.reason)
+                    for k, v in resp.getheaders():
+                        if k.lower() not in _HOP_HEADERS:
+                            self.send_header(k, v)
+                    # HTTP/1.0 and no length: the body ends when the connection does.
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    while chunk := resp.read1(65536):
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                finally:
+                    conn.close()
+                    if pace:
+                        last_done[0] = time.time()
+
+        def do_POST(self) -> None:
+            self._forward(pace=True)
+
+        def do_GET(self) -> None:
+            self._forward(pace=False)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_address[1]}"
+
+
+class _NoLock:
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *exc) -> None:
+        pass
+
+
+_nolock = _NoLock()
 
 
 def _check_mcp(events: list[dict]) -> str | None:
@@ -327,12 +429,24 @@ def _opencode(command: list[str], prompt: str, result: dict, until: int | None =
         return code, stderr.read()
 
 
+def _saved_files() -> bool:
+    """Whether the agent has saved anything in OUTPUTS_DIR, subfolders included."""
+    return any(files for _, _, files in os.walk(OUTPUTS_DIR))
+
+
 def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
     result: dict = {"started": time.time(), "model": os.environ["AGENT_MODEL"], "exit_status": "", "submission": "", "events": []}
     with open(task_path) as f:
         task = f.read()
+    base_url = None
+    if BACKOFF_SECONDS > 0:
+        upstream = UPSTREAMS.get(result["model"].split("/", 1)[0])
+        if upstream:
+            base_url = _backoff_proxy(upstream, BACKOFF_SECONDS, result["events"])
+        else:
+            _record(result["events"], {"ts": time.time(), "source": "agent", "message": f"back-off ignored: no known API for {result['model']}"})
     with open(os.path.join(WORKDIR, "opencode.json"), "w") as f:
-        json.dump(_config(mcp_command), f, indent=2)
+        json.dump(_config(mcp_command, base_url), f, indent=2)
 
     try:
         problem = _check_mcp(result["events"]) if mcp_command else None
@@ -341,7 +455,8 @@ def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
             result.update(exit_status="MCPServerFailed", steps=0, error=problem + (f"\nIt printed:\n{said}" if said else ""))
             return
         task += FINISHING.format(mcp=MCP_NOTE if mcp_command else "", steps=STEP_LIMIT)
-        if os.environ.get("AGENT_OUTPUT_FILES") == "1":
+        wants_files = os.environ.get("AGENT_OUTPUT_FILES") == "1"
+        if wants_files:
             os.makedirs(OUTPUTS_DIR, exist_ok=True)
             task += FILES_NOTE.format(outputs=OUTPUTS_DIR)
         # --title skips a model call spent naming the session.
@@ -365,9 +480,14 @@ def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
                 break
             result.pop("error", None)
             command, task = ["opencode", "run", "--format", "json", "--auto", "--continue"], nudge
+        continue_ = ["opencode", "run", "--format", "json", "--auto", "--continue"]
+        ended = result["exit_status"] == "Answered" or result["exit_status"].startswith("StepLimit")
+        if wants_files and ended and not _saved_files():
+            _record(result["events"], {"ts": time.time(), "source": "agent", "message": f"resuming: no files in {OUTPUTS_DIR}/ yet, asking for them, up to {SAVE_STEPS} steps"})
+            prompt = SAVE_FILES.format(outputs=OUTPUTS_DIR, steps=SAVE_STEPS)
+            code, said = _opencode(continue_, prompt, result, until=result["steps"] + SAVE_STEPS)
         if result["exit_status"].startswith("StepLimit"):
             _record(result["events"], {"ts": time.time(), "source": "agent", "message": "resuming: asking for the answer, one step, no tools"})
-            continue_ = ["opencode", "run", "--format", "json", "--auto", "--continue"]
             code, said = _opencode(continue_, WRAP_UP, result, until=result["steps"] + 1)
         stopped = result["exit_status"].startswith("StepLimit")
         if code and not stopped and not result.get("error") and result["exit_status"] != "Answered":

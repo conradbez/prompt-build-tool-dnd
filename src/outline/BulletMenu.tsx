@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Bullet } from '../types';
 import { actions, canTakeChild, getState } from '../store';
 import { filesEnabled, uploadFile } from '../api';
-import { ROW_KEYS } from '../lib/shortcuts';
+import { ROW_KEYS, SETTINGS_HINT } from '../lib/shortcuts';
 
 interface Props {
   bullet: Bullet;
@@ -113,6 +113,8 @@ export function BulletMenu({ bullet, shortcuts = false }: Props) {
               onClick={() => run(() => actions.openSettings(id))}
             >
               Settings…
+              {/* Bound app-wide (Toolbar), so shown in the map's menu too. */}
+              <kbd className="ol-menu__key">{SETTINGS_HINT}</kbd>
             </button>
           </li>
           {canUpload && (

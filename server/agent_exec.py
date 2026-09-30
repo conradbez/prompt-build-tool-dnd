@@ -71,6 +71,8 @@ MCP_KEY = "mcp_server"
 STEPS_KEY = "steps"
 # The config key saying the bullet must hand on files, not only text.
 FILES_KEY = "produces_files"
+# The config key holding the bullet's wait between model calls, in seconds.
+BACKOFF_KEY = "backoff"
 
 # Where an agent asked for files saves them — see `run_agent.FILES_NOTE`.
 OUTPUTS_DIR = "/root/outputs"
@@ -90,6 +92,8 @@ MCP_START_SECONDS = int(os.environ.get("AGENT_MCP_START_SECONDS", "180"))
 # a run may ask for another within MAX_STEP_LIMIT (Settings → agent steps).
 STEP_LIMIT = int(os.environ.get("AGENT_STEP_LIMIT", "30"))
 MAX_STEP_LIMIT = int(os.environ.get("AGENT_MAX_STEP_LIMIT", "200"))
+# The longest back-off a bullet may ask for between model calls, in seconds.
+MAX_BACKOFF = float(os.environ.get("AGENT_MAX_BACKOFF_SECONDS", "300"))
 
 # How `run_agent.py` flags a log event printed live — see its LIVE_MARKER.
 LIVE_MARKER = "@@agent-event "
@@ -171,9 +175,11 @@ def steps_for(requested: int | None) -> int:
     return min(int(requested), MAX_STEP_LIMIT)
 
 
-def config_line(mcp_server: str = "", steps: int = 0, produces_files: bool = False) -> str:
-    """The bullet's config line, naming its MCP server, step limit and whether
-    it hands on files, each only when set.
+def config_line(
+    mcp_server: str = "", steps: int = 0, produces_files: bool = False, backoff: float = 0
+) -> str:
+    """The bullet's config line, naming its MCP server, step limit, whether
+    it hands on files and its back-off, each only when set.
 
     The command goes through `json.dumps`, whose escapes Jinja's string
     literals read the same way, so no quote in it can end the literal early.
@@ -186,6 +192,8 @@ def config_line(mcp_server: str = "", steps: int = 0, produces_files: bool = Fal
         args.append("%s=%d" % (STEPS_KEY, int(steps)))
     if produces_files:
         args.append("%s=True" % FILES_KEY)
+    if backoff and backoff > 0:
+        args.append("%s=%g" % (BACKOFF_KEY, min(float(backoff), MAX_BACKOFF)))
     return "{{ config(%s) }}" % ", ".join(args)
 
 
@@ -362,7 +370,8 @@ def _run_sandbox(
 
         if command:
             log.add("modal", f"starting MCP server: {shlex.join(command)}")
-        log.add("agent", f"starting ({env['AGENT_MODEL']}, up to {env['AGENT_STEP_LIMIT']} steps), task of {len(task)} chars")
+        backoff = f", {env['AGENT_BACKOFF_SECONDS']}s between model calls" if env.get("AGENT_BACKOFF_SECONDS") else ""
+        log.add("agent", f"starting ({env['AGENT_MODEL']}, up to {env['AGENT_STEP_LIMIT']} steps{backoff}), task of {len(task)} chars")
         launched = time.time()
         # The server command goes as arguments, so no shell reads it. Read line
         # by line as it runs: each flagged line is a log event, relayed live.
@@ -515,7 +524,7 @@ async def _run(
 # Registered on import, like `modal_exec`: importing this module is what teaches
 # pbt the kind. The rendered text is a task in natural language, so the run's
 # global instruction is welcome here.
-@pbt.model_kind(MODEL_TYPE, config_keys={MCP_KEY, STEPS_KEY, FILES_KEY})
+@pbt.model_kind(MODEL_TYPE, config_keys={MCP_KEY, STEPS_KEY, FILES_KEY, BACKOFF_KEY})
 async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     """Hand the rendered bullet to a coding agent, with its MCP server if it names one.
 
@@ -539,18 +548,22 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     want_files = bool(call.spec.config.get(FILES_KEY))
     if want_files:
         env["AGENT_OUTPUT_FILES"] = "1"
+    # Pacing only — though, being in `config()`, changing it still misses the cache.
+    try:
+        backoff = min(float(call.spec.config.get(BACKOFF_KEY) or 0), MAX_BACKOFF)
+    except (TypeError, ValueError):
+        backoff = 0
+    if backoff > 0:
+        env["AGENT_BACKOFF_SECONDS"] = "%g" % backoff
     on_line = (lambda line: run.on_log(name, line)) if run.on_log else None
 
-    # `{{ config(...) }}` renders to nothing, so the server and the model are
-    # invisible in `rendered` — and the same task with a different toolbox or a
-    # different model is a different run.
     json_answer = call.spec.output_format == "json"
-    # The step limit too: a run allowed more steps may well answer differently.
-    cache_text = "\x00".join(
-        [rendered, mcp_server, env["AGENT_MODEL"], str(json_answer), env["AGENT_STEP_LIMIT"], str(want_files)]
-    )
+    # Keyed on `rendered` exactly: pbt stores the result under the key it builds
+    # from the rendered prompt, so any other text here is looked up but never
+    # found. The toolbox, steps, files and chosen model are all in the bullet's
+    # `config()`, which pbt already folds into that key.
     raw = await call.compute(
-        cache_text,
+        rendered,
         compute=lambda: _run(rendered.strip(), mcp_server, env, json_answer, on_line, want_files),
     )
     # An entry cached before results were returned as dicts is JSON text.
