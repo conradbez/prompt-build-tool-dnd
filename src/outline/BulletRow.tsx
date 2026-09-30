@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { PYTHON_CAPTION, type Bullet, type RunFile, type TestStatus } from '../types';
 import { FileThumbs } from '../RunFiles';
-import { actions, getState, titleMap } from '../store';
+import { actions, flatten, getState, titleMap } from '../store';
 import { register, getEditor } from './focusRegistry';
 import { BulletMenu } from './BulletMenu';
 import { JsonChip, KindChip } from '../mindmap/BulletNode';
@@ -53,6 +53,8 @@ interface Props {
   depth: number;
   /** True when this bullet is the one highlighted in the mind map. */
   selected: boolean;
+  /** Part of a multi-row selection — see `OutlineState.blockSel`. */
+  inBlock: boolean;
   /** True while this row (or an ancestor of it) is being dragged. */
   dragging: boolean;
   /** Press on the bullet dot — the drag handle. */
@@ -98,6 +100,7 @@ export function BulletRow({
   bullet,
   depth,
   selected,
+  inBlock,
   dragging,
   onDragStart,
   result,
@@ -236,6 +239,23 @@ export function BulletRow({
       return;
     }
 
+    // ---- Shift+Up/Down past a bullet's edge selects whole bullets ----
+    if (e.shiftKey && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      const up = e.key === 'ArrowUp';
+      const atEdge = up ? el.selectionStart === 0 : el.selectionEnd === el.value.length;
+      if (atEdge) {
+        const ids = flatten(getState()).map((r) => r.id);
+        const head = ids[ids.indexOf(id) + (up ? -1 : 1)];
+        if (head) {
+          e.preventDefault();
+          actions.setFocus(null);
+          el.blur();
+          actions.setBlockSel({ anchor: id, head });
+        }
+        return;
+      }
+    }
+
     // ---- Vertical navigation across bullets ----
     if (e.key === 'ArrowUp' && caretOnFirstLine(el)) {
       e.preventDefault();
@@ -297,7 +317,7 @@ export function BulletRow({
 
   return (
     <div
-      className={`ol-row ${bullet.kind !== 'prompt' ? `ol-row--${bullet.kind}` : ''} ${dragging ? 'ol-row--dragging' : ''}`}
+      className={`ol-row ${bullet.kind !== 'prompt' ? `ol-row--${bullet.kind}` : ''} ${dragging ? 'ol-row--dragging' : ''} ${inBlock ? 'ol-row--block' : ''}`}
       data-row={id}
       style={{ marginLeft: depth * INDENT }}
       onMouseMove={onMouseMove}

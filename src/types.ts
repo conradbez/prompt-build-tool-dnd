@@ -132,6 +132,11 @@ export interface OutlineState {
   focus: Focus | null;
   /** Highlighted bullet, shared between the outline and the mind map. */
   selectedId: string | null;
+  /**
+   * Whole bullets selected together (Workflowy's multi-row selection): the
+   * row the selection started on and the one it reaches to, in either order.
+   */
+  blockSel: { anchor: string; head: string } | null;
   /** Latest run results, keyed by bullet id. */
   results: Record<string, string>;
   /** Each test bullet's verdict from the latest run — see `TestStatus`. */

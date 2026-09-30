@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Info } from './Info';
 import { agentEnabled, pythonInfo } from './api';
+import { matchMcpServers } from './lib/mcpServers';
 import { actions, firstLine } from './store';
 import type { Bullet, BulletKind } from './types';
 
@@ -213,15 +214,7 @@ export function NodeSettingsModal({ bullet }: Props) {
                 </Info>
               </h3>
               <div className="res-col__body">
-                <input
-                  className="pd-input ns-mono"
-                  value={bullet.mcpServer}
-                  placeholder="uvx some-mcp-server"
-                  spellCheck={false}
-                  autoComplete="off"
-                  autoFocus
-                  onChange={(e) => actions.setMcpServer(id, e.target.value)}
-                />
+                <McpServerInput id={id} value={bullet.mcpServer} />
               </div>
             </section>
           )}
@@ -273,6 +266,74 @@ export function NodeSettingsModal({ bullet }: Props) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The MCP server command, with the known servers fuzzy-matched against what is
+ * typed below it. ↑/↓ pick one, Enter or a click takes it; anything else typed
+ * is kept as-is.
+ */
+function McpServerInput({ id, value }: { id: string; value: string }) {
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState(0);
+  const matches = open ? matchMcpServers(value).slice(0, 8) : [];
+  const take = (command: string) => {
+    actions.setMcpServer(id, command);
+    setOpen(false);
+  };
+
+  return (
+    <div className="mcp-pick">
+      <input
+        className="pd-input ns-mono"
+        value={value}
+        placeholder="uvx some-mcp-server — type to search known servers"
+        spellCheck={false}
+        autoComplete="off"
+        autoFocus
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onChange={(e) => {
+          actions.setMcpServer(id, e.target.value);
+          setOpen(true);
+          setSel(0);
+        }}
+        onKeyDown={(e) => {
+          if (!matches.length) return;
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const step = e.key === 'ArrowDown' ? 1 : -1;
+            setSel((i) => (i + step + matches.length) % matches.length);
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            take(matches[Math.min(sel, matches.length - 1)].command);
+          } else if (e.key === 'Escape') {
+            e.stopPropagation();
+            e.nativeEvent.stopImmediatePropagation();
+            setOpen(false);
+          }
+        }}
+      />
+      {matches.length > 0 && (
+        <ul className="mcp-pick__list">
+          {matches.map((m, i) => (
+            <li
+              key={m.command}
+              className={i === sel ? 'mcp-pick__item mcp-pick__item--sel' : 'mcp-pick__item'}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                take(m.command);
+              }}
+              onMouseEnter={() => setSel(i)}
+            >
+              <code>{m.command}</code>
+              <span>{m.desc}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

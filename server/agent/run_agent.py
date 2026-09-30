@@ -34,6 +34,13 @@ MCP_NAME = "mcp"
 STEP_LIMIT = int(os.environ.get("AGENT_STEP_LIMIT", "30"))
 # OpenCode providers whose API refuses a request ending on the model's message.
 NO_TRAILING_ASSISTANT = ("google/",)
+# How those providers refuse it. OpenCode sends one not only at its step limit
+# but whenever a step ends with neither an answer nor a tool call (finish
+# "unknown", as a malformed function call gives): it asks again, unchanged.
+TRAILING_MODEL_TURN = "ending with a model turn"
+# So the run is resumed, up to this many times, with a user message after it.
+RESUMES = 2
+NUDGE = "Your last reply had neither a tool call nor an answer. Carry on with the task."
 
 FINISHING = """
 
@@ -202,9 +209,11 @@ def _read_run(lines, result: dict, limit: int | None = None, stop=None) -> None:
     that carries on calling them is not stopped — and it is not set at all for
     Gemini. The step after the limit is the one the model was told to answer
     in; a step past that calls *stop*, and the run ends without an answer.
+
+    Steps and cost carry on from *result*'s, so a resumed run counts on.
     """
     events = result["events"]
-    step, cost = 0, 0.0
+    step, cost = result.get("steps", 0), result.get("cost", 0.0)
     over = False
     texts: dict[str, list[str]] = {}
     last_finish: dict = {}
@@ -241,7 +250,7 @@ def _read_run(lines, result: dict, limit: int | None = None, stop=None) -> None:
 
     answer = "\n".join(texts.get(last_finish.get("messageID", ""), [])).strip()
     said = [t for group in texts.values() for t in group]
-    result.update(steps=step, cost=cost, last_message=said[-1] if said else "")
+    result.update(steps=step, cost=cost, last_message=said[-1] if said else result.get("last_message", ""))
     if over:
         result.update(exit_status=f"StepLimit {limit}", steps=step - 1)
     elif errors:
@@ -263,6 +272,29 @@ def _stop(p: subprocess.Popen) -> None:
         pass
 
 
+def _opencode(command: list[str], prompt: str, result: dict) -> tuple[int, str]:
+    """Run OpenCode on *prompt*, folding its events into *result*. Its exit
+    code and stderr.
+
+    Read as it runs, not once it is done, so each step reaches the log live.
+    stderr goes to a file: a pipe nobody reads can fill and stall it.
+    """
+    with tempfile.TemporaryFile("w+") as stderr:
+        p = subprocess.Popen(
+            command,
+            cwd=WORKDIR, env=OPENCODE_ENV, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=stderr, text=True, bufsize=1,
+            # Its own group, so a stop takes the MCP server it started too.
+            start_new_session=True,
+        )
+        p.stdin.write(prompt)
+        p.stdin.close()
+        _read_run(p.stdout, result, limit=STEP_LIMIT, stop=lambda: _stop(p))
+        code = p.wait()
+        stderr.seek(0)
+        return code, stderr.read()
+
+
 def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
     result: dict = {"started": time.time(), "model": os.environ["AGENT_MODEL"], "exit_status": "", "submission": "", "events": []}
     with open(task_path) as f:
@@ -281,22 +313,14 @@ def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
             os.makedirs(OUTPUTS_DIR, exist_ok=True)
             task += FILES_NOTE.format(outputs=OUTPUTS_DIR)
         # --title skips a model call spent naming the session.
-        # Read as it runs, not once it is done, so each step reaches the log
-        # live. stderr goes to a file: a pipe nobody reads can fill and stall it.
-        with tempfile.TemporaryFile("w+") as stderr:
-            p = subprocess.Popen(
-                ["opencode", "run", "--format", "json", "--auto", "--title", "agent bullet"],
-                cwd=WORKDIR, env=OPENCODE_ENV, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=stderr, text=True, bufsize=1,
-                # Its own group, so a stop takes the MCP server it started too.
-                start_new_session=True,
-            )
-            p.stdin.write(task)
-            p.stdin.close()
-            _read_run(p.stdout, result, limit=STEP_LIMIT, stop=lambda: _stop(p))
-            code = p.wait()
-            stderr.seek(0)
-            said = stderr.read()
+        command = ["opencode", "run", "--format", "json", "--auto", "--title", "agent bullet"]
+        for resume in range(RESUMES + 1):
+            code, said = _opencode(command, task, result)
+            if resume == RESUMES or TRAILING_MODEL_TURN not in result.get("error", ""):
+                break
+            _record(result["events"], {"ts": time.time(), "source": "agent", "message": "resuming: the last step had neither a tool call nor an answer"})
+            del result["error"]
+            command, task = ["opencode", "run", "--format", "json", "--auto", "--continue"], NUDGE
         stopped = result["exit_status"].startswith("StepLimit")
         if code and not stopped and not result.get("error") and result["exit_status"] != "Answered":
             result["error"] = f"opencode exited {code}:\n{said.strip()[-3000:]}"

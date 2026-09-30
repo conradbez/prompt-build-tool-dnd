@@ -172,6 +172,7 @@ function seed(): OutlineState {
     ...doc,
     focus: { id: firstId, caret: 'end' },
     selectedId: firstId,
+    blockSel: null,
     results: {},
     tests: {},
     files: {},
@@ -328,6 +329,25 @@ function siblingsOf(s: OutlineState, id: string): { list: string[]; index: numbe
 // Mutations — each returns a fresh OutlineState (structural, shallow copies)
 // ---------------------------------------------------------------------------
 
+/** The bullets a block selection covers, in reading order. */
+export function blockIds(s: OutlineState = state): string[] {
+  if (!s.blockSel) return [];
+  const ids = flatten(s).map((r) => r.id);
+  const a = ids.indexOf(s.blockSel.anchor);
+  const h = ids.indexOf(s.blockSel.head);
+  if (a === -1 || h === -1) return [];
+  return ids.slice(Math.min(a, h), Math.max(a, h) + 1);
+}
+
+/** `ids` minus any whose ancestor is also in it — the roots of the block. */
+function topmost(s: OutlineState, ids: string[]): string[] {
+  const set = new Set(ids);
+  return ids.filter((id) => {
+    for (let p = s.bullets[id]?.parentId; p; p = s.bullets[p]?.parentId) if (set.has(p)) return false;
+    return !!s.bullets[id];
+  });
+}
+
 function clone(s: OutlineState): OutlineState {
   return { ...s, bullets: { ...s.bullets } };
 }
@@ -351,7 +371,10 @@ export const actions = {
   setFocus(focus: Focus | null) {
     const next = clone(state);
     next.focus = focus;
-    if (focus) next.selectedId = focus.id;
+    if (focus) {
+      next.selectedId = focus.id;
+      next.blockSel = null;
+    }
     emit(next);
   },
 
@@ -408,6 +431,7 @@ export const actions = {
       rootIds: doc.rootIds,
       focus: { id: firstId, caret: 'end' },
       selectedId: firstId,
+      blockSel: null,
       results: {},
       tests: {},
       files: {},
@@ -767,6 +791,69 @@ export const actions = {
     next.focus = target;
     next.selectedId = target ? target.id : null;
     emit(next);
+  },
+
+  /** Start, extend or clear the multi-row selection. Leaves the caret alone. */
+  setBlockSel(blockSel: OutlineState['blockSel']) {
+    if (state.blockSel?.anchor === blockSel?.anchor && state.blockSel?.head === blockSel?.head) return;
+    emit({ ...state, blockSel });
+  },
+
+  /** Delete several bullets, each with everything under it. */
+  deleteBullets(ids: string[]) {
+    const tops = topmost(state, ids);
+    if (tops.length === 0) return;
+    const order = focusOrder(state);
+    const firstIdx = order.findIndex((f) => f.id === tops[0]);
+    const next = clone(state);
+    const gone = new Set<string>();
+    for (const id of tops) {
+      gone.add(id);
+      const acc: string[] = [];
+      collectDescendants(next, id, acc);
+      acc.forEach((d) => gone.add(d));
+    }
+    for (const id of tops) {
+      const b = next.bullets[id];
+      const { list } = siblingsOf(next, id);
+      setChildren(next, b.parentId, list.filter((x) => x !== id));
+    }
+    for (const id of gone) delete next.bullets[id];
+    // scrub references to anything deleted, tokens included
+    for (const other of Object.values(next.bullets)) {
+      const dead = other.refs.filter((r) => gone.has(r));
+      if (dead.length === 0) continue;
+      next.bullets[other.id] = {
+        ...other,
+        text: dead.reduce((t, r) => stripMention(t, r), other.text),
+        refs: other.refs.filter((r) => !gone.has(r)),
+      };
+    }
+    // Never leave an empty outline — there'd be nowhere to type.
+    if (next.rootIds.length === 0) {
+      const nb = makeBullet({ id: nanoid(), parentId: null });
+      next.bullets[nb.id] = nb;
+      next.rootIds = [nb.id];
+    }
+    const prev = order.slice(0, Math.max(firstIdx, 0)).reverse().find((f) => next.bullets[f.id]);
+    const targetId = prev?.id ?? next.rootIds[0];
+    next.focus = { id: targetId, caret: 'end' };
+    next.selectedId = targetId;
+    next.blockSel = null;
+    emit(next);
+  },
+
+  /** Indent (+1) or outdent (-1) several bullets as one block. */
+  shiftBullets(ids: string[], dir: -1 | 1) {
+    const tops = topmost(state, ids);
+    // Outdenting drops each one just after its parent, so go bottom-up to
+    // keep them in order; indenting goes top-down for the same reason.
+    for (const id of dir === 1 ? tops : [...tops].reverse()) {
+      if (dir === 1) actions.indent(id);
+      else actions.outdent(id);
+    }
+    // indent/outdent move the caret to the bullet; a block keeps no caret.
+    emit({ ...state, focus: null });
   },
 
   setRunning(running: boolean) {

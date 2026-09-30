@@ -175,6 +175,14 @@ body,
   border-radius: 6px;
 }
 
+.ol-row--block {
+  background: #dbe8fb;
+}
+
+.ol-row--block .ol-text::selection {
+  background: transparent;
+}
+
 .ol-row--dragging .ol-dot {
   opacity: 0.25;
 }
@@ -2151,6 +2159,50 @@ body,
 
 .ns-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* An agent's MCP server field and the known servers matching it. */
+.mcp-pick {
+  position: relative;
+}
+
+.mcp-pick__list {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.mcp-pick__item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.mcp-pick__item code {
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.mcp-pick__item span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mcp-pick__item--sel {
+  background: var(--accent-soft);
 }
 
 /* ---------------------------------------------------------------------------
