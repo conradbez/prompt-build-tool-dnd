@@ -139,6 +139,8 @@ class RunSettings:
 
     provider: str = "gemini"
     api_key: str | None = None
+    # Settings → `llm_model`; None means the server's default for the provider.
+    model: str | None = None
     # Settings → agent steps; clamped by `steps_for`.
     steps: int = STEP_LIMIT
     # Where each log line goes the moment it happens, for the live run log.
@@ -238,8 +240,13 @@ def _lookup():
     return _app, _image
 
 
-def _secret_env(provider: str, api_key: str | None, steps: int = STEP_LIMIT) -> dict[str, str]:
+def _secret_env(
+    provider: str, api_key: str | None, steps: int = STEP_LIMIT, model: str | None = None
+) -> dict[str, str]:
     """What the sandbox needs to call the model: its name and the key.
+
+    A *model* the person chose wins over the deployment's `AGENT_MODEL`, so
+    an agent bullet answers with the same model as the prompt bullets around it.
 
     The key goes in under the name OpenCode reads for that provider, which is
     not always this server's: Google's is `GOOGLE_GENERATIVE_AI_API_KEY`, and
@@ -248,7 +255,10 @@ def _secret_env(provider: str, api_key: str | None, steps: int = STEP_LIMIT) -> 
     key = api_key or ""
     if not key:
         raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
-    model = os.environ.get("AGENT_MODEL") or f"{_OPENCODE_PROVIDER[provider]}/{model_name(provider)}"
+    if model:
+        model = f"{_OPENCODE_PROVIDER[provider]}/{model}"
+    else:
+        model = os.environ.get("AGENT_MODEL") or f"{_OPENCODE_PROVIDER[provider]}/{model_name(provider)}"
     return {
         _OPENCODE_KEY_ENV.get(provider, ENV_KEYS[provider]): key,
         "AGENT_MODEL": model,
@@ -522,7 +532,9 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
         own = int(call.spec.config.get(STEPS_KEY) or 0)
     except (TypeError, ValueError):
         own = 0
-    env = _secret_env(run.provider, run.api_key, steps_for(own) if own > 0 else run.steps)
+    env = _secret_env(
+        run.provider, run.api_key, steps_for(own) if own > 0 else run.steps, run.model
+    )
     name = call.spec.name
     want_files = bool(call.spec.config.get(FILES_KEY))
     if want_files:

@@ -43,6 +43,12 @@ export const varRefRe = () => /(?<![^\s([{])@([A-Za-z0-9_]+)/g;
 export const STANDARD_INSTRUCTIONS_VAR = 'coding_instructions';
 
 /**
+ * The model this person runs with. The server reads it by name and hands it
+ * to the LLM client and the agent sandbox; empty means the server's default.
+ */
+export const LLM_MODEL_VAR = 'llm_model';
+
+/**
  * The variables the app knows by name. They are always in the table, in this
  * order and above the rest: their *value* is yours to set, their name is not —
  * the server looks them up by name, so a renamed one is simply a variable the
@@ -65,6 +71,14 @@ export const RESERVED: ReservedVar[] = [
       'more with a PEP 723 header. Left empty, the server writes it — and only ' +
       'the server knows the real package list. Fill it in to say your own thing.',
     placeholder: 'Left empty, the server writes this for you',
+  },
+  {
+    name: LLM_MODEL_VAR,
+    hint:
+      'The model your bullets and agents run with, as the provider names it ' +
+      '(e.g. gemini-3.6-pro). Left empty, the server uses its default for the ' +
+      'provider. Kept in this browser only, so it is yours alone.',
+    placeholder: "Left empty, the server's default model",
   },
 ];
 

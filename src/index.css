@@ -554,19 +554,6 @@ body,
   text-overflow: ellipsis;
 }
 
-/* The row's `•••` lives in a gutter that reveals it on hover; there is no row
-   here to hover, so in the modal head it is simply always there. */
-.res-modal__menu .ol-menu__btn {
-  opacity: 1;
-  font-size: 11px;
-  width: 22px;
-}
-
-.res-modal__menu .ol-menu__pop {
-  left: 0;
-  right: auto;
-}
-
 /* The title already takes the slack (`flex: 1 1 auto` above), so the chips just
    have to refuse to be squeezed by it. */
 .res-modal__head .tpl-chip {
@@ -587,11 +574,75 @@ body,
   color: var(--text);
 }
 
+/* The node's settings, folded above the three columns. The columns keep
+   whatever height is left; the settings scroll on their own past a cap so
+   they can never push the columns off screen. */
+.res-expander {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.res-expander__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: var(--panel);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.res-expander__toggle:hover {
+  color: var(--text);
+}
+
+.res-expander__caret {
+  display: inline-block;
+  transition: transform 0.12s;
+}
+
+.res-expander--open .res-expander__caret {
+  transform: rotate(90deg);
+}
+
+/* Settings sections side by side, wrapping as the modal narrows. Nothing in
+   here scrolls on its own, so the MCP picker's list is not clipped. */
+.res-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  max-height: 40vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.res-settings .res-col__body {
+  overflow: visible;
+}
+
+.res-settings .res-col__head {
+  border-bottom: none;
+  background: transparent;
+  padding-bottom: 0;
+}
+
+.res-settings .res-col:first-child {
+  border-left: none;
+}
+
 /* Your text | Model input | Model response. Equal thirds, each scrolling on
    its own so a long answer never drags the other two columns down with it. */
 .res-modal__cols {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
@@ -1779,24 +1830,6 @@ body,
   .tb__gear--wants {
     animation: none;
   }
-}
-
-.tb__errors {
-  margin-top: 6px;
-  padding: 8px 10px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  color: #b91c1c;
-  font-size: 12px;
-  line-height: 1.4;
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-.tb__error {
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .tb__gear {

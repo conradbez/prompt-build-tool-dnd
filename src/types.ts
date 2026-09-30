@@ -166,7 +166,8 @@ export interface OutlineState {
    * the same modal, and only one of them is on screen at a time.
    */
   openResultId: string | null;
-  /** Whose settings modal is open, if any — kind, JSON, packages, MCP. */
+  /** Set with `openResultId` when the node modal should open with its
+   *  settings expander already open. */
   openSettingsId: string | null;
 }
 

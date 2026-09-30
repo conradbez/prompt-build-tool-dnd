@@ -112,13 +112,17 @@ def make_llm_call(
     api_key: Optional[str] = None,
     provider: str = "gemini",
     classifier: Optional[dict] = None,
+    model: Optional[str] = None,
 ) -> Callable[..., str]:
     """Return an ``llm_call(prompt, files=None, config=None)`` bound to a provider.
 
     The key is only ever ``api_key`` (sent from the UI) — the server's own
     environment keys are never used, so a public deploy can't spend them.
-    ``classifier`` holds the settings for classifier-judged tests.
+    ``classifier`` holds the settings for classifier-judged tests. ``model`` is
+    the person's own choice from Settings; without one the server's default
+    for the provider (`model_name`) answers.
     """
+    chosen = model or (model_name(provider) if provider in MODEL_ENV else "")
 
     def llm_call(prompt: str, files: Any = None, config: Any = None) -> str:
         if config and config.get("judge") == "classifier":
@@ -145,7 +149,7 @@ def make_llm_call(
             ]
             parts.append(prompt)
             resp = client.models.generate_content(
-                model=model_name("gemini"),
+                model=chosen,
                 contents=parts,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
                 if _wants_json(config)
@@ -166,7 +170,7 @@ def make_llm_call(
 
             client = openai.OpenAI(api_key=key)
             resp = client.chat.completions.create(
-                model=model_name("openai"),
+                model=chosen,
                 messages=[{"role": "user", "content": prompt}],
                 # JSON mode refuses a prompt that never says "JSON"; the server
                 # appends that instruction to every JSON bullet, so it does.
@@ -179,7 +183,7 @@ def make_llm_call(
 
             client = anthropic.Anthropic(api_key=key)
             msg = client.messages.create(
-                model=model_name("anthropic"),
+                model=chosen,
                 max_tokens=4096,
                 messages=[{"role": "user", "content": prompt}],
             )

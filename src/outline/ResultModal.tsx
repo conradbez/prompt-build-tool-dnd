@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { FileGallery } from '../RunFiles';
 import { renderMarkdown } from '../lib/markdown';
 import { displayToRaw, toDisplay } from '../lib/mentions';
 import { usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
 import { actions, firstLine, getState, titleMap, useOutline } from '../store';
 import { PYTHON_CAPTION, type Bullet } from '../types';
-import { BulletMenu } from './BulletMenu';
+import { NodeSettings } from '../NodeSettings';
 import { JsonChip, KindChip } from '../mindmap/BulletNode';
 
 interface Props {
@@ -31,18 +31,21 @@ interface Props {
  * by side is exactly when you work out what the prompt should have said, and
  * having to close the modal to act on that is the wrong shape.
  *
- * The head carries the same `•••` menu the outline row does, and the same chips,
- * for the same reason: what a bullet *is* — template, python, agent, held to JSON
- * — is half the answer to "why did it say that", and changing it is the other
- * half. Neither should need the modal closed first.
+ * Above the columns sits the bullet's settings, folded away behind an
+ * expander: what a bullet *is* — template, python, agent, held to JSON — is half
+ * the answer to "why did it say that", and changing it is the other half.
+ * Neither should need the modal closed first. Opened via "Settings…" in the
+ * outline, it starts expanded.
  */
 export function ResultModal({ bullet, prompt, result }: Props) {
   const close = () => actions.openResult(null);
+  const [showSettings, setShowSettings] = useState(
+    () => getState().openSettingsId === bullet.id,
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // A settings modal open on top takes the Escape for itself.
-      if (e.key === 'Escape' && !getState().openSettingsId) close();
+      if (e.key === 'Escape') close();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -59,9 +62,6 @@ export function ResultModal({ bullet, prompt, result }: Props) {
     <div className="res-modal" onClick={close} role="dialog" aria-modal="true">
       <div className="res-modal__panel" onClick={(e) => e.stopPropagation()}>
         <div className="res-modal__head">
-          <div className="res-modal__menu">
-            <BulletMenu bullet={bullet} />
-          </div>
           <h2 className="res-modal__title" title={title}>
             {title}
           </h2>
@@ -70,6 +70,20 @@ export function ResultModal({ bullet, prompt, result }: Props) {
           <button className="res-modal__close" onClick={close} aria-label="Close">
             ✕
           </button>
+        </div>
+
+        <div className={`res-expander ${showSettings ? 'res-expander--open' : ''}`}>
+          <button
+            className="res-expander__toggle"
+            aria-expanded={showSettings}
+            onClick={() => setShowSettings((v) => !v)}
+          >
+            <span className="res-expander__caret" aria-hidden="true">
+              ▸
+            </span>
+            Settings
+          </button>
+          {showSettings && <NodeSettings bullet={bullet} />}
         </div>
 
         <div className="res-modal__cols">

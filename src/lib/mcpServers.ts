@@ -1,6 +1,5 @@
 /** MCP servers offered as suggestions in an agent's MCP server field. */
 export const KNOWN_MCP_SERVERS: { command: string; desc: string }[] = [
-  { command: 'uv tool run --python 3.12 build123d-mcp@latest --version', desc: 'build123d CAD' },
   { command: 'uvx --python 3.12 build123d-mcp@latest', desc: 'build123d CAD' },
   { command: 'npx -y @playwright/mcp@latest', desc: 'Playwright browser' },
   { command: 'uvx mcp-server-fetch', desc: 'fetch web pages' },

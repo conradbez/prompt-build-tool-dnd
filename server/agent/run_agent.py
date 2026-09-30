@@ -41,6 +41,21 @@ TRAILING_MODEL_TURN = "ending with a model turn"
 # So the run is resumed, up to this many times, with a user message after it.
 RESUMES = 2
 NUDGE = "Your last reply had neither a tool call nor an answer. Carry on with the task."
+# A provider's rate limit or quota error. The run waits and is resumed, up to
+# QUOTA_RETRIES times, the wait doubling from QUOTA_WAIT_START to at most
+# QUOTA_WAIT_MAX seconds.
+QUOTA_ERROR = re.compile(r"\b429\b|RESOURCE_EXHAUSTED|quota|rate.?limit|too many requests", re.I)
+QUOTA_RETRIES = int(os.environ.get("AGENT_QUOTA_RETRIES", "6"))
+QUOTA_WAIT_START = 5
+QUOTA_WAIT_MAX = 30
+QUOTA_NUDGE = "Carry on with the task."
+# A run stopped at its step limit is resumed once with this, and given one step
+# to answer in: without it a model that kept calling tools (Gemini is never told
+# tools are off, see `_config`) ends with nothing at all.
+WRAP_UP = (
+    "You have used all your steps. Do not call any more tools. Reply now with "
+    "your final answer, from what you have so far; say what is unfinished."
+)
 
 FINISHING = """
 
@@ -87,7 +102,23 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 LIVE_MARKER = "@@agent-event "
 
 
+# Values of the sandbox's secrets (the model's API key). The agent can print
+# them (`env`, `cat /proc/self/environ`), and what it prints lands in the log
+# and the answer, so every event and the result file are scrubbed of them.
+SECRETS = [
+    v for k, v in os.environ.items()
+    if re.search(r"KEY|TOKEN|SECRET|PASSWORD", k) and len(v) >= 8
+]
+
+
+def _redact(text: str) -> str:
+    for secret in SECRETS:
+        text = text.replace(secret, "[redacted]")
+    return text
+
+
 def _record(events: list[dict], event: dict) -> None:
+    event = {**event, "message": _redact(str(event.get("message", "")))}
     events.append(event)
     print(LIVE_MARKER + json.dumps(event), flush=True)
 
@@ -196,7 +227,7 @@ def _tool_event(part: dict, step: int, ts: float) -> dict:
     return {"ts": started / 1000 if started else ts, "source": source, "message": message}
 
 
-def _read_run(lines, result: dict, limit: int | None = None, stop=None) -> None:
+def _read_run(lines, result: dict, limit: int | None = None, stop=None, until: int | None = None) -> None:
     """Fold OpenCode's JSON event stream into *result*: the log, the answer,
     steps and cost.
 
@@ -208,7 +239,8 @@ def _read_run(lines, result: dict, limit: int | None = None, stop=None) -> None:
     tells the model that tools are off while still sending them — a model
     that carries on calling them is not stopped — and it is not set at all for
     Gemini. The step after the limit is the one the model was told to answer
-    in; a step past that calls *stop*, and the run ends without an answer.
+    in; a step past that (or past *until*, when given) calls *stop*, and the
+    run ends without an answer.
 
     Steps and cost carry on from *result*'s, so a resumed run counts on.
     """
@@ -228,7 +260,7 @@ def _read_run(lines, result: dict, limit: int | None = None, stop=None) -> None:
         kind = e.get("type")
         if kind == "step_start":
             step += 1
-            if limit and step > limit + 1:
+            if limit and step > (until or limit + 1):
                 over = True
                 _record(events, {"ts": ts, "source": "agent", "message": f"stopped: step limit of {limit} reached without an answer"})
                 if stop:
@@ -272,7 +304,7 @@ def _stop(p: subprocess.Popen) -> None:
         pass
 
 
-def _opencode(command: list[str], prompt: str, result: dict) -> tuple[int, str]:
+def _opencode(command: list[str], prompt: str, result: dict, until: int | None = None) -> tuple[int, str]:
     """Run OpenCode on *prompt*, folding its events into *result*. Its exit
     code and stderr.
 
@@ -289,7 +321,7 @@ def _opencode(command: list[str], prompt: str, result: dict) -> tuple[int, str]:
         )
         p.stdin.write(prompt)
         p.stdin.close()
-        _read_run(p.stdout, result, limit=STEP_LIMIT, stop=lambda: _stop(p))
+        _read_run(p.stdout, result, limit=STEP_LIMIT, stop=lambda: _stop(p), until=until)
         code = p.wait()
         stderr.seek(0)
         return code, stderr.read()
@@ -314,13 +346,29 @@ def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
             task += FILES_NOTE.format(outputs=OUTPUTS_DIR)
         # --title skips a model call spent naming the session.
         command = ["opencode", "run", "--format", "json", "--auto", "--title", "agent bullet"]
-        for resume in range(RESUMES + 1):
+        resumes = waits = 0
+        while True:
             code, said = _opencode(command, task, result)
-            if resume == RESUMES or TRAILING_MODEL_TURN not in result.get("error", ""):
+            error = result.get("error", "")
+            if TRAILING_MODEL_TURN in error and resumes < RESUMES:
+                resumes += 1
+                _record(result["events"], {"ts": time.time(), "source": "agent", "message": "resuming: the last step had neither a tool call nor an answer"})
+                nudge = NUDGE
+            # The error may be an event or, when OpenCode gives up, only on stderr.
+            elif QUOTA_ERROR.search(error or (said if code else "")) and waits < QUOTA_RETRIES:
+                wait = min(QUOTA_WAIT_START * 2 ** waits, QUOTA_WAIT_MAX)
+                waits += 1
+                _record(result["events"], {"ts": time.time(), "source": "agent", "message": f"rate limited: waiting {wait}s, then resuming ({waits}/{QUOTA_RETRIES})"})
+                time.sleep(wait)
+                nudge = QUOTA_NUDGE
+            else:
                 break
-            _record(result["events"], {"ts": time.time(), "source": "agent", "message": "resuming: the last step had neither a tool call nor an answer"})
-            del result["error"]
-            command, task = ["opencode", "run", "--format", "json", "--auto", "--continue"], NUDGE
+            result.pop("error", None)
+            command, task = ["opencode", "run", "--format", "json", "--auto", "--continue"], nudge
+        if result["exit_status"].startswith("StepLimit"):
+            _record(result["events"], {"ts": time.time(), "source": "agent", "message": "resuming: asking for the answer, one step, no tools"})
+            continue_ = ["opencode", "run", "--format", "json", "--auto", "--continue"]
+            code, said = _opencode(continue_, WRAP_UP, result, until=result["steps"] + 1)
         stopped = result["exit_status"].startswith("StepLimit")
         if code and not stopped and not result.get("error") and result["exit_status"] != "Answered":
             result["error"] = f"opencode exited {code}:\n{said.strip()[-3000:]}"
@@ -328,7 +376,7 @@ def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
         result.update(exit_status=type(e).__name__, error=str(e))
     finally:
         with open(result_path, "w") as f:
-            json.dump(result, f)
+            f.write(_redact(json.dumps(result)))
 
 
 if __name__ == "__main__":

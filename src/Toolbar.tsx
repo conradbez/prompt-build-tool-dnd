@@ -171,7 +171,7 @@ export function Toolbar() {
         </button>
         {state.runLog.length > 0 && (
           <button
-            className={`tb__log${progress.failed ? ' tb__log--failed' : ''}${state.running ? ' tb__log--live' : ''}`}
+            className={`tb__log${progress.failed || state.runErrors.length ? ' tb__log--failed' : ''}${state.running ? ' tb__log--live' : ''}`}
             onClick={() => actions.openProgress(true)}
             title="Run progress and logs"
             aria-label="Run progress and logs"
@@ -209,16 +209,6 @@ export function Toolbar() {
       )}
 
       {state.progressOpen && <RunProgress />}
-
-      {state.runErrors.length > 0 && (
-        <div className="tb__errors">
-          {state.runErrors.map((e, i) => (
-            <div key={i} className="tb__error">
-              {e}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

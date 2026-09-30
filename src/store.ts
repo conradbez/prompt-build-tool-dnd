@@ -857,7 +857,10 @@ export const actions = {
   },
 
   setRunning(running: boolean) {
-    emit({ ...state, running, ...(running ? { runErrors: [] } : {}) });
+    if (running) runStartedAt = 0;
+    // A new run clears the last one's log, so a run that fails before it
+    // starts doesn't leave its error under the previous run's lines.
+    emit({ ...state, running, ...(running ? { runErrors: [], runLog: [] } : {}) });
   },
 
   /**
@@ -942,15 +945,16 @@ export const actions = {
     emit({ ...state, progressOpen: open });
   },
 
-  /** Open (or close, with null) the answer modal for one bullet. */
+  /** Open the node modal for one bullet with its settings expanded. */
   openSettings(id: string | null) {
-    if (state.openSettingsId === id) return;
-    emit({ ...state, openSettingsId: id });
+    if (state.openSettingsId === id && state.openResultId === id) return;
+    emit({ ...state, openSettingsId: id, openResultId: id });
   },
 
+  /** Open (or close, with null) the node modal for one bullet. */
   openResult(id: string | null) {
-    if (state.openResultId === id) return;
-    emit({ ...state, openResultId: id });
+    if (state.openResultId === id && state.openSettingsId === null) return;
+    emit({ ...state, openResultId: id, openSettingsId: null });
   },
 
   setRunResult(
@@ -965,7 +969,15 @@ export const actions = {
     const runStatus = Object.fromEntries(
       Object.entries(state.runStatus).filter(([, s]) => s !== 'queued' && s !== 'running'),
     );
-    emit({ ...state, results: outputs, prompts, tests, files, runErrors: errors, running: false, runStatus });
+    // Errors about the run as a whole (the server was unreachable, nothing to
+    // run) have no bullet to land on, so they go in the log. When bullets
+    // failed, the errors are theirs and the log already carries them.
+    const bulletFailed = state.runLog.some((l) => l.kind === 'error' || l.kind === 'skipped');
+    const at = runStartedAt ? Date.now() - runStartedAt : 0;
+    const runLog = bulletFailed
+      ? state.runLog
+      : [...state.runLog, ...errors.map((e) => ({ at, kind: 'error' as const, title: 'Run failed', detail: e }))];
+    emit({ ...state, results: outputs, prompts, tests, files, runErrors: errors, running: false, runStatus, runLog });
   },
 
   /** Reparent `id` under `newParentId` (used by mind-map / future drag ops). */

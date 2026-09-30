@@ -94,6 +94,30 @@ CLASSIFIER_SEPARATOR = "---"
 # Both keys are read by `llm.py`, not pbt — registered so pbt does not warn.
 pbt.register_config_keys("judge", "threshold")
 
+# The run variable a person sets in Settings to pick the model they run with.
+# pbt reads `config()` before any promptdata exists, so the server resolves it
+# itself: it goes straight to the LLM client and the agent sandbox, and into
+# the config of every bullet that calls a model — only so pbt's prompt cache,
+# keyed on config, never hands back an answer from a different model.
+LLM_MODEL_VAR = "llm_model"
+_MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@-]+$")
+pbt.register_config_keys(LLM_MODEL_VAR)
+
+
+def _llm_model(promptdata: dict[str, str]) -> str | None:
+    """The model this person chose, or None for the server's default.
+
+    Anything that could not be a model id is ignored rather than trusted: the
+    value is written into a Jinja `config()` call.
+    """
+    value = promptdata.get(LLM_MODEL_VAR, "").strip()
+    return value if _MODEL_ID.match(value) else None
+
+
+def _calls_model(node: Node) -> bool:
+    """Whether a bullet's answer comes from the LLM (or an agent driving one)."""
+    return node.kind in ("prompt", "agent") or (node.kind == "test" and not _is_classifier(node))
+
 
 def _classifier_config_line(threshold: float) -> str:
     return '{{ config(judge="classifier", threshold="%s", global_instruction=False) }}' % threshold
@@ -954,6 +978,12 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
     children = _children(nodes)
     models = _models(nodes, children, id_to_slug, req.sessionId, promptdata)
     feeds = _feeding(nodes, id_to_slug)
+    llm_model = _llm_model(promptdata)
+    if llm_model:
+        model_line = '{{ config(%s="%s") }}' % (LLM_MODEL_VAR, llm_model)
+        for n in nodes:
+            if _calls_model(n):
+                models[id_to_slug[n.id]] = model_line + "\n" + models[id_to_slug[n.id]]
 
     # Pull each bullet's attachments once, keyed the way the config declares
     # them, so pbt can route them to the model that asked.
@@ -1024,6 +1054,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
         agent_exec.RunSettings(
             provider=req.provider,
             api_key=req.apiKey,
+            model=llm_model,
             steps=agent_exec.steps_for(req.agentSteps),
             on_log=lambda name, line: emit(
                 {"type": "log", "id": slug_to_id.get(name, name), "line": line}
@@ -1032,7 +1063,10 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
     )
     try:
         llm = make_llm_call(
-            api_key=req.apiKey, provider=req.provider, classifier=req.classifier.model_dump()
+            api_key=req.apiKey,
+            provider=req.provider,
+            classifier=req.classifier.model_dump(),
+            model=llm_model,
         )
         outputs = await pbt.async_run(
             models_from_dict=models,
