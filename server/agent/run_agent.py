@@ -32,7 +32,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 WORKDIR = "/root"
 # OpenCode finds its project, and so its config, by $PWD rather than the
 # process's actual directory — an inherited PWD would lose the MCP server.
-OPENCODE_ENV = {**os.environ, "PWD": WORKDIR}
+# Its websearch tool is only offered on OpenCode's own provider unless Exa is
+# switched on; Exa's hosted endpoint needs no key.
+OPENCODE_ENV = {**os.environ, "PWD": WORKDIR, "OPENCODE_ENABLE_EXA": "1"}
 # The MCP server's name in OpenCode's config, which prefixes its tools.
 MCP_NAME = "mcp"
 STEP_LIMIT = int(os.environ.get("AGENT_STEP_LIMIT", "30"))
