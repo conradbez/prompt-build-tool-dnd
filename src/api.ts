@@ -60,6 +60,9 @@ export interface RunResponse {
 
 export const SERVER_URL_STORAGE = 'wm.serverUrl';
 
+/** The deployed runner every production build talks to by default. */
+export const DEFAULT_SERVER_URL = 'https://prompt-build-tool-dnd-production.up.railway.app';
+
 /**
  * Grab a server URL from the page's own address, e.g.
  * `https://my-frontend/?server=https://app.up.railway.app`, and remember it.
@@ -81,17 +84,13 @@ export function initServerUrlFromQuery(): void {
  *   1. a URL saved in the toolbar or grabbed from `?server=` (localStorage);
  *   2. the `VITE_SERVER_URL` build-time env;
  *   3. dev → `/api` (Vite proxies it to localhost:8000);
- *   4. production → the current page's own origin, so a frontend served by the
- *      server posts to that same URL with no configuration.
- *
- * A 405 usually means requests hit a static host (GitHub Pages, `vite preview`)
- * that isn't the server — override with `?server=…` or `VITE_SERVER_URL`.
+ *   4. production → the Railway deployment (`DEFAULT_SERVER_URL`), so the app
+ *      works the same from GitHub Pages, Railway or anywhere else.
  */
 export function getServerUrl(): string {
   const saved = (typeof localStorage !== 'undefined' && localStorage.getItem(SERVER_URL_STORAGE)) || '';
   const envUrl = (import.meta as any).env?.VITE_SERVER_URL || '';
-  const pageOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  const fallback = (import.meta as any).env?.DEV ? '/api' : pageOrigin;
+  const fallback = (import.meta as any).env?.DEV ? '/api' : DEFAULT_SERVER_URL;
   return (saved || envUrl || fallback).replace(/\/+$/, '');
 }
 
