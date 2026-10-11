@@ -112,10 +112,10 @@ goes below the text. The API key is remembered per provider in this browser's
   together, so the deployed URL works with no extra config (recommended).
 - **Dev:** the Vite dev server proxies `/api/*` → `http://localhost:8000`, so
   running the server locally needs no extra config.
-- **Deployed frontend:** the API URL defaults to the **page's own origin**, so a
-  frontend served by the server (the Dockerfile above) posts to `/run` on the
-  same URL with no configuration. For a separately-hosted frontend, override it
-  with `VITE_SERVER_URL` at build time or a `?server=https://…` link.
+- **Deployed frontend:** production builds post to
+  `https://prompt-build-tool-dnd-production.up.railway.app` (`DEFAULT_SERVER_URL`
+  in `src/api.ts`), wherever the page is hosted (GitHub Pages included). Override
+  it with `VITE_SERVER_URL` at build time or a `?server=https://…` link.
 
 ### Deliberately left out
 
