@@ -129,7 +129,7 @@ RESULT_PATH = "/tmp/agent_result.json"
 MAX_LOG_LINES = 400
 
 # OpenCode's name for each provider this server offers.
-_OPENCODE_PROVIDER = {"gemini": "google", "openai": "openai", "anthropic": "anthropic"}
+_OPENCODE_PROVIDER = {"gemini": "google", "openai": "openai", "anthropic": "anthropic", "openrouter": "openrouter"}
 # The key variable OpenCode reads, where it differs from this server's ENV_KEYS.
 _OPENCODE_KEY_ENV = {"gemini": "GOOGLE_GENERATIVE_AI_API_KEY"}
 

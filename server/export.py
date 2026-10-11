@@ -88,7 +88,7 @@ def warnings(nodes: list["Node"]) -> list[str]:
 # The generated files
 # --------------------------------------------------------------------------
 
-_ENV_KEY = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+_ENV_KEY = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
 
 
 def _lit(text: str) -> str:
@@ -151,6 +151,16 @@ def _llm_call(provider: str) -> str:
             '        messages=[{"role": "user", "content": prompt}],\n'
             "    )\n"
             '    return "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")'
+        ),
+        "openrouter": (
+            "    import openai\n\n"
+            '    client = openai.OpenAI(api_key=KEY, base_url="https://openrouter.ai/api/v1")\n'
+            "    resp = client.chat.completions.create(\n"
+            '        model="deepseek/deepseek-v4.1-flash",\n'
+            '        messages=[{"role": "user", "content": prompt}],\n'
+            '        **({"response_format": {"type": "json_object"}} if wants_json else {}),\n'
+            "    )\n"
+            '    return resp.choices[0].message.content or ""'
         ),
     }
     body = calls.get(provider, calls["gemini"])

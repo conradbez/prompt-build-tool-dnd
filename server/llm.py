@@ -8,6 +8,7 @@ an attachment on a bullet goes to the model along with that bullet's prompt.
 
 from __future__ import annotations
 
+import base64
 import json
 import mimetypes
 import os
@@ -17,6 +18,7 @@ ENV_KEYS = {
     "gemini": "GEMINI_API_KEY",
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
 }
 
 # The model each provider runs, overridable per deployment. Shared with the
@@ -25,6 +27,7 @@ MODEL_ENV = {
     "gemini": ("GEMINI_MODEL", "gemini-3.6-flash"),
     "openai": ("OPENAI_MODEL", "gpt-4o-mini"),
     "anthropic": ("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+    "openrouter": ("OPENROUTER_MODEL", "deepseek/deepseek-v4.1-flash"),
 }
 
 
@@ -36,13 +39,38 @@ def model_name(provider: str) -> str:
 
 def _read_files(files: Any) -> list[tuple[bytes, str]]:
     """Read pbt's file objects into (bytes, mime type) pairs."""
-    out: list[tuple[bytes, str]] = []
+    return [(data, mime) for data, mime, _ in _read_named_files(files)]
+
+
+def _read_named_files(files: Any) -> list[tuple[bytes, str, str]]:
+    """Read pbt's file objects into (bytes, mime type, file name) triples."""
+    out: list[tuple[bytes, str, str]] = []
     for f in files or []:
         data = f.read() if hasattr(f, "read") else bytes(f)
         if hasattr(f, "seek"):
             f.seek(0)  # a file may be shared by several models in one run
-        out.append((data, _detect_mime(data, getattr(f, "name", ""))))
+        name = os.path.basename(getattr(f, "name", "") or "")
+        out.append((data, _detect_mime(data, name), name))
     return out
+
+
+def _openrouter_parts(prompt: str, files: list[tuple[bytes, str, str]]) -> list[dict]:
+    """OpenAI-style content parts for OpenRouter: images as `image_url`, text
+    inlined, everything else (PDFs first of all) as a `file` part, which
+    OpenRouter parses for models that cannot read the format themselves."""
+    parts: list[dict] = []
+    for i, (data, mime, name) in enumerate(files, 1):
+        name = name or f"file-{i}"
+        url = f"data:{mime};base64,{base64.b64encode(data).decode()}"
+        if mime.startswith("image/"):
+            parts.append({"type": "image_url", "image_url": {"url": url}})
+        elif mime.startswith("text/") or mime in ("application/json", "application/xml"):
+            text = data.decode("utf-8", errors="replace")
+            parts.append({"type": "text", "text": f"<file name={name!r}>\n{text}\n</file>"})
+        else:
+            parts.append({"type": "file", "file": {"filename": name, "file_data": url}})
+    parts.append({"type": "text", "text": prompt})
+    return parts
 
 
 def _detect_mime(data: bytes, name: str = "") -> str:
@@ -137,6 +165,20 @@ def make_llm_call(
         if not key:
             raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
 
+        if provider == "openrouter":
+            import openai
+
+            client = openai.OpenAI(api_key=key, base_url="https://openrouter.ai/api/v1")
+            named = _read_named_files(files)
+            resp = client.chat.completions.create(
+                model=chosen,
+                messages=[
+                    {"role": "user", "content": _openrouter_parts(prompt, named) if named else prompt}
+                ],
+                **({"response_format": {"type": "json_object"}} if _wants_json(config) else {}),
+            )
+            return resp.choices[0].message.content or ""
+
         file_data = _read_files(files)
 
         if provider == "gemini":
@@ -158,10 +200,10 @@ def make_llm_call(
             return resp.text or ""
 
         if file_data:
-            # Only the Gemini path builds multimodal parts so far. Say so
+            # Only Gemini and OpenRouter build multimodal parts so far. Say so
             # rather than quietly dropping the attachment from the prompt.
             raise RuntimeError(
-                f"Attachments are only wired up for Gemini; '{provider}' received "
+                f"Attachments are only wired up for Gemini and OpenRouter; '{provider}' received "
                 f"{len(file_data)} file(s) it cannot send."
             )
 

@@ -46,7 +46,7 @@ from llm import make_llm_call
 # app and the API and same-origin `/run` works with no configuration.
 DIST_DIR = pathlib.Path(__file__).resolve().parent.parent / "dist"
 
-PROVIDERS = {"gemini", "openai", "anthropic"}
+PROVIDERS = {"gemini", "openai", "anthropic", "openrouter"}
 
 # Attachments are held in memory on the way through, so keep them modest.
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024

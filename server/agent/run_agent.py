@@ -62,6 +62,7 @@ UPSTREAMS = {
     "google": "https://generativelanguage.googleapis.com/v1beta",
     "openai": "https://api.openai.com/v1",
     "anthropic": "https://api.anthropic.com/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
 }
 # Not forwarded either way: hop-by-hop, or set again for the new connection.
 # The body is asked for uncompressed, so it streams through as it arrives.

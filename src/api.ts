@@ -3,12 +3,13 @@
  * bullet graph, get each bullet's result back after flowing through pbt.
  */
 
-export type Provider = 'gemini' | 'openai' | 'anthropic';
+export type Provider = 'gemini' | 'openai' | 'anthropic' | 'openrouter';
 
 export const PROVIDERS: { id: Provider; label: string }[] = [
   { id: 'gemini', label: 'Gemini' },
   { id: 'openai', label: 'OpenAI' },
   { id: 'anthropic', label: 'Anthropic' },
+  { id: 'openrouter', label: 'OpenRouter' },
 ];
 
 import type { BulletKind, FileRef, RunFile, TestJudge, TestStatus } from './types';

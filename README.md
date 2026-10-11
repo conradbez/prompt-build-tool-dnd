@@ -261,7 +261,7 @@ AWS_SECRET_ACCESS_KEY=…
 
 Locally they go in `.env` (git-ignored) next to your model key. Without them
 `GET /files/enabled` reports `false` and the UI simply doesn't offer attaching.
-Uploads are capped at 20 MB, and only **Gemini** currently receives the file
+Uploads are capped at 20 MB, and only **Gemini** and **OpenRouter** currently receive the file
 bytes — the other providers raise a clear error rather than silently dropping
 an attachment from the prompt.
 

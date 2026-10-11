@@ -11,7 +11,7 @@ bullet graph as JSON and returns each bullet's result after flowing through
 ```jsonc
 // request
 {
-  "provider": "anthropic",          // gemini | openai | anthropic
+  "provider": "anthropic",          // gemini | openai | anthropic | openrouter
   "apiKey": "sk-...",               // required; the server never uses its own keys
   "promptdata": { "tone": "formal" },  // optional; run variables, see below
   "nodes": [
@@ -497,3 +497,4 @@ No state is stored between requests, so a single instance scales trivially.
 | Gemini    | `GEMINI_API_KEY`    | `GEMINI_MODEL` (`gemini-3.6-flash`) |
 | OpenAI    | `OPENAI_API_KEY`    | `OPENAI_MODEL` (`gpt-4o-mini`)      |
 | Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` (`claude-sonnet-4-5`) |
+| OpenRouter | `OPENROUTER_API_KEY` | `OPENROUTER_MODEL` (`deepseek/deepseek-v4.1-flash`) |
