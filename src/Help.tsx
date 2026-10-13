@@ -45,7 +45,7 @@ const RUNNING: Row[] = [
   { keys: '••• → Settings… → Template', desc: 'TPL — not sent to the LLM: the text, with every reference filled in, is the output' },
   { keys: '@coding_instructions', desc: 'Drop into a prompt that asks for a script: the server fills in that the answer is executed, which packages the sandbox has, and how to ask for more (a PEP 723 header). Its row is filled in for you unless you type your own' },
   { keys: '••• → Settings… → Python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output. Extra packages for its sandbox are set in the same modal' },
-  { keys: '••• → Settings… → Agent', desc: 'AGENT — the text, with its inputs filled in, is a task for a coding agent in a sandbox: it works with bash until it submits an answer. Its output is JSON: output (the answer), logs (the run end to end on Modal) and run_time (seconds). its MCP server field gives it a stdio MCP server\u2019s tools too (e.g. uvx some-mcp-server)' },
+  { keys: '••• → Settings… → Agent', desc: 'AGENT — the text, with its inputs filled in, is a task for a Hermes agent on its own Agent37 computer: it works with a terminal and a browser until it answers. Its output is JSON: output (the answer), logs (the run end to end on Agent37, with a link to watch the agent\u2019s screen) and run_time (seconds). its MCP server field gives it a stdio MCP server\u2019s tools too (e.g. uvx some-mcp-server)' },
   { keys: '••• → Settings… → Enforce JSON', desc: 'JSON — the answer is parsed and validated (pbt\u2019s output_format="json"); one that is not JSON fails the bullet instead of flowing on as prose. Works on any kind of bullet' },
 ];
 

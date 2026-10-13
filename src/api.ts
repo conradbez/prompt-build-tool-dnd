@@ -31,8 +31,6 @@ export interface NodePayload {
   mcpServer: string;
   /** An agent bullet's step limit; 0 for the run's (Settings → agent steps). */
   agentSteps: number;
-  /** An agent bullet's wait between model calls, in seconds; 0 for none. */
-  agentBackoff: number;
   /** An agent bullet that hands on files — see `Bullet.producesFiles`. */
   producesFiles: boolean;
   /** A python bullet's extra sandbox packages, comma-separated; empty for none. */
@@ -122,7 +120,7 @@ export async function pythonInfo(): Promise<PythonInfo> {
 }
 
 export interface AgentInfo {
-  /** Whether the server can run `agent` bullets (Modal configured, as for python). */
+  /** Whether the server can run `agent` bullets (an Agent37 key configured). */
   enabled: boolean;
   /** The step limit a run gets when Settings leaves it blank, and the most it may ask for. */
   defaultSteps: number;

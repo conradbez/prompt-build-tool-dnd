@@ -9,11 +9,11 @@ import type { ModelRunStatus } from './api';
  * - `python`   — its text is Python, run in a Modal sandbox rather than on the
  *   server. Whatever it prints is its output, and the upstream outputs arrive
  *   as `inputs`. Emitted as `{{ config(model_type="python_modal") }}`.
- * - `agent`    — its rendered text is a *task* for a coding agent
- *   (OpenCode) working in a Modal sandbox with its own tools and, optionally, an
- *   MCP server's tools. Its output is `{output, logs, run_time}`: the answer,
- *   the run end to end on Modal, and how long it took. Emitted as
- *   `{{ config(model_type="agent_modal") }}`.
+ * - `agent`    — its rendered text is a *task* for a Hermes agent on a fresh
+ *   Agent37 instance with its own tools and, optionally, an MCP server's tools.
+ *   Its output is `{output, logs, run_time}`: the answer, the run end to end on
+ *   Agent37, and how long it took. Emitted as
+ *   `{{ config(model_type="agent37") }}`.
  * - `test`     — its text is an *assertion* about the bullets connected into it
  *   (children or `@` references). The model is asked for a verdict rather than
  *   an answer, and the node shows it: see `TestStatus`. A test's output never
@@ -101,13 +101,8 @@ export interface Bullet {
    */
   agentSteps: number;
   /**
-   * An agent bullet's back-off: seconds it waits after each model reply before
-   * making the next call, to stay under a provider's rate limit. 0 for none.
-   */
-  agentBackoff: number;
-  /**
    * An agent bullet that must hand on files, not only text: it is told to save
-   * them in `/root/outputs/`, and the prompt bullets it feeds receive them as
+   * them in `~/outputs/`, and the prompt bullets it feeds receive them as
    * attachments. Ignored on every other kind.
    */
   producesFiles: boolean;

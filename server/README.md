@@ -303,12 +303,84 @@ has installed); the UI annotates the "Convert to python" action when it is not.
 
 ## Agent bullets (`agent`, optionally with an MCP server)
 
-An agent bullet is shaped like a prompt — its text, `@` references filled in
-where they stand, children's outputs below, the global instruction on top — but
-instead of one model call, that rendered text is handed to
-[OpenCode](https://opencode.ai), run headless, as a task. The agent works in a
-fresh Modal sandbox with its own tools (bash, reading and editing files, …) and
-any MCP server's until it answers; its final message is the answer.
+An agent bullet is shaped like a prompt: its text, `@` references filled in
+where they stand, children's outputs below, the global instruction on top. But
+instead of one model call, that rendered text is sent as one turn to a
+[Hermes](https://github.com/NousResearch/hermes-agent) agent on a fresh
+[Agent37](https://www.agent37.com/docs/agents-api/desktop) instance. The agent
+uses its tools (terminal, files, a browser, any MCP server's) until it answers,
+and its final message is the answer. It is emitted as
+`{{ config(model_type="agent37", mcp_server="…", steps=…, produces_files=True) }}`,
+a kind `agent_exec.py` registers with pbt on import.
+
+```
+Agent37 instance    (template `hermes-vnc-desktop`, one per bullet run)
+├── Hermes          POST /v1/responses, streamed: each tool call is a log line
+├── Chromium        on a visible desktop the agent's browser tool drives
+└── noVNC :6901     that desktop, linked from the log by a signed URL
+```
+
+One bullet run goes like this:
+
+1. **Create.** `POST /v1/instances` from the template.
+2. **Wait.** Poll `/v1/health` until the agent reports healthy.
+3. **Link the desktop.** Mint a signed URL for port 6901 and log it as a
+   `vnc.html` link.
+4. **Configure.** Over exec, `hermes config set` writes the run's provider and
+   key (`custom_providers`, `model`), the step limit (`agent.max_turns`) and
+   the MCP server (`mcp_servers.task`). With an MCP server, restart the agent
+   so it connects.
+5. **Run.** Send the task as one streamed turn.
+6. **Collect.** For a files bullet, collect `~/outputs/`.
+7. **Delete.** Delete the instance, whether the run succeeded or failed.
+
+### One-off: build the template
+
+The desktop template is built once per Agent37 workspace. The build runs on
+Agent37, so you don't need Docker:
+
+```bash
+git clone https://github.com/agent37-platform/examples
+cd examples/custom-images/hermes-vnc-desktop
+export AGENT37_API_KEY=sk_live_...
+npx agent37 templates build . --name hermes-vnc-desktop --default-port 3737
+```
+
+### Watching the agent
+
+While the agent runs, the log has a line like:
+
+```
+[    9.1s] desktop: watch the agent's screen: https://ab12cd34ef-6901.agent37.app/vnc.html?a37_token=…&autoconnect=1&resize=scale
+```
+
+* **Open it in a top-level tab.** In an iframe it gets 401s, because the
+  token's cookie is not sent cross-site.
+* **Watch without control.** Add `&view_only=1`.
+* **Open it soon.** The link expires after `AGENT37_DESKTOP_TTL_SECONDS` (5
+  minutes by default). The token grants full control and can't be revoked.
+  The instance is deleted when the bullet ends, so the link is dead after that
+  anyway.
+* **The agent knows you're watching.** Its task tells it that the person can
+  see its screen. When a site needs a sign-in, it says so instead of asking
+  for a password in chat.
+
+### The model
+
+The agent uses the **run's provider and key**, the same ones prompt bullets
+use. They are written into Hermes' config as a custom provider pointing at
+the provider's OpenAI-compatible endpoint (`agent_exec._PROVIDER_URL`).
+
+Agent37 documents instance env (`AGENT37_LLM_PROXY_URL` and friends) for this.
+Don't use it: this template rewires the managed model at boot and sends the
+token to Agent37's own proxy, which answers `Invalid starter token`.
+
+The key never goes into the model source, where it would land in the cache key
+and in exports. `main.run` binds it in a context variable for the tasks pbt
+spawns. Set `AGENT37_MANAGED_MODEL=1` to use Agent37's managed model instead,
+billed to the workspace within `AGENT37_BUDGET_MICROS`.
+
+### Output
 
 The bullet's output is a JSON object:
 
@@ -316,121 +388,52 @@ The bullet's output is a JSON object:
 {
   "output": "…the agent's answer…",   // parsed, when the bullet enforces JSON
   "logs": [
-    "[    0.0s] modal: creating sandbox (app mindmap-agent, 2 cpu, 4096 MB, timeout 900s)",
-    "[    1.2s] modal: sandbox sb-… up",
-    "[    1.2s] modal: starting MCP server: uvx counter-mcp",
-    "[    1.2s] agent: starting (anthropic/claude-sonnet-4-5, up to 30 steps), task of 94 chars",
-    "[    6.9s] mcp: server connected in 5.6s",
-    "[    9.4s] agent: step 1: I'll bump the counter by 3.",
-    "[    9.5s] mcp: step 1 mcp_bump {\"by\": 3} -> completed\ncounter=3",
-    "[   10.8s] tool: step 2 $ ls /root -> completed\nopencode.json",
+    "[    0.0s] agent37: creating instance (template hermes-vnc-desktop)",
+    "[   38.2s] agent37: instance ab12cd34ef up; waiting for the agent",
+    "[   41.0s] desktop: watch the agent's screen: https://ab12cd34ef-6901.agent37.app/vnc.html?a37_token=…",
+    "[   41.9s] agent: starting (up to 30 steps), task of 94 chars",
+    "[   47.3s] tool: terminal: uname -a",
     "…",
-    "[   21.2s] agent: finished: Answered after 4 steps, $0.0123",
-    "[   21.3s] modal: sandbox terminated"
+    "[   80.4s] agent: finished, 18402 in / 912 out tokens, $0.0123",
+    "[   81.0s] agent37: instance deleted"
   ],
-  "run_time": 21.3                    // seconds, sandbox created → terminated
+  "run_time": 81.0                    // seconds, instance created → deleted
 }
 ```
 
-`logs` is the run end to end, one line per event at its offset from the start.
-Each line is tagged with where it came from:
+Each log line is tagged with where it came from:
 
-| Tag | What |
+| Tag | What it covers |
 |---|---|
-| `modal` | the sandbox being created and terminated, and the MCP server being started |
-| `mcp` | the server coming up, and every call to one of its tools, with its arguments, status and output |
-| `tool` | every call to one of OpenCode's own tools (`$ command` for bash), with its status and output |
-| `agent` | each step's text, any error, and how the run finished (status, steps, cost) |
+| `agent37` | the instance being created, restarted and deleted |
+| `desktop` | the link to watch the agent's screen |
+| `tool` | every tool call, with Hermes' one-line label |
+| `agent` | the turn starting and how it finished (tokens, cost) |
+| `files` | each file collected from `~/outputs/` |
 
-The sandbox's clock and this server's are lined up by the moment the agent is
-launched. Each step's text is clipped (600 chars of reasoning, 1,500 of output),
-an image a tool returned is logged as `[N image(s) shown to the model]`, and a log
-over 400 lines keeps its first and last 200. It is a summary of the run: the
-model saw everything.
+A log over 400 lines keeps its first and last 200 lines.
 
-The object is returned to pbt as a structured value, so it passes on as one,
-and `outputs` shows it as pretty-printed JSON. With JSON enforced on the bullet,
-the agent is asked for JSON and `output` holds the answer *parsed*; an answer
-that won't parse fails the bullet.
+With JSON enforced on the bullet, `output` holds the answer *parsed*, and an
+answer that won't parse fails the bullet. Everything downstream gets the whole
+object, logs included. A failed run fails the bullet, and its error message
+ends with the last 40 lines of the log.
 
-**Everything downstream gets the whole object, logs included.** A parent bullet,
-or an `@` reference to an agent bullet, renders it in full, so the logs go into
-that prompt as well. That's the point when the next bullet is meant to judge
-the run. When it only needs the answer, it costs tokens.
+### Server-side settings
 
-A failed run doesn't produce the object: the bullet fails, so pbt skips what
-depends on it. Its error message ends with the last 40 lines of the log.
+All are optional except the key:
 
-A node may name an **MCP server**: any command that starts one over stdio.
-
-```jsonc
-{ "id": "a", "kind": "agent", "text": "Make a 60x40x6mm plate…",
-  "mcpServer": "uvx --python 3.12 build123d-mcp@latest" }
-```
-
-It is emitted as `{{ config(model_type="agent_modal", mcp_server="…") }}`, a
-kind `agent_exec.py` registers with pbt on import. Everything lives inside one
-sandbox — nothing is hosted and no ports are exposed:
-
-```
-Modal sandbox       (main process: a plain `sleep`)
-└── run_agent.py    writes /root/opencode.json, checks the MCP server comes up
-                    (`opencode mcp list`), runs `opencode run --format json`
-                    with the task on stdin, and folds its events into a result
-```
-
-OpenCode is an MCP client itself. It launches the server over stdio and holds
-one session for the whole run, which keeps the server's state (open files, CAD
-sessions, DB connections) alive across steps, and hands the model the server's
-tools as `mcp_<tool>` next to its own. With **no** MCP server the agent has
-OpenCode's tools alone. The source is `server/agent/run_agent.py`; OpenCode's
-version is pinned in `agent_exec.py` (`OPENCODE_VERSION`), since the log and
-the answer are read from its JSON event stream.
-
-| Server type | `mcpServer` |
-|---|---|
-| Python package (PyPI) | `uvx package-name` |
-| Node package (npm) | `npx -y @scope/server …args` |
-| Needs system libraries / API keys | the same, plus `AGENT_APT_PACKAGES` / `AGENT_MODAL_SECRETS` below |
-
-The agent uses the **run's provider and key** — the same ones prompt bullets
-use, as OpenCode's `<provider>/<*_MODEL>` (Gemini is `google/…` there). The
-key never goes into the model source (it would land in the cache key and in
-exports): `main.run` binds it in a context variable for the tasks pbt spawns,
-and it reaches the sandbox as a Modal secret made for that one sandbox. The MCP server inherits the sandbox's
-environment, key included — the agent can read it anyway.
-
-A server that will not start fails the bullet before the agent runs, with
-OpenCode's reason and what the server printed when started on its own. An
-agent that ends without an answer (a model error, a crash) fails the bullet
-with its exit status and the last thing it said, rather than passing on half an
-answer. The MCP server's own stderr is otherwise not in the log: OpenCode keeps
-it.
-
-Images a tool returns are **shown to the model**: OpenCode passes them on as
-image blocks. That needs a vision-capable model, and every image stays in the
-conversation — each costs tokens on every later step — so the agent is told to
-ask for renders sparingly.
-
-Server-side settings, all optional:
-
-| Variable | Default | |
+| Variable | Default | What it sets |
 |---|---|---|
-| `AGENT_MODEL` | provider's model | an OpenCode `provider/model` id, overriding the run's provider for every agent |
-| `AGENT_STEP_LIMIT` | `30` | steps before the model is told to stop using tools and answer — an instruction, not a cutoff |
-| `AGENT_TIMEOUT_SECONDS` | `900` | the sandbox's whole lifetime, the limit that always holds |
-| `AGENT_MCP_START_SECONDS` | `180` | how long an MCP server may take to come up (`uvx`/`npx` download first) |
-| `AGENT_APT_PACKAGES` | — | system packages an MCP server needs, e.g. `libgl1 libxrender1` |
-| `AGENT_PIP_PACKAGES` | — | extra Python packages in the agent image |
-| `AGENT_MODAL_SECRETS` | — | Modal secret names attached to every agent sandbox, for an MCP server's own keys |
+| `AGENT37_API_KEY` | (none) | **required**: a `sk_live_` key from a funded Agent37 workspace |
+| `AGENT37_TEMPLATE` | `hermes-vnc-desktop` | the template each instance is created from |
+| `AGENT37_BUDGET_MICROS` | `1000000` | managed-services credit per instance ($1); compute is billed separately |
+| `AGENT37_MANAGED_MODEL` | off | run on Agent37's managed model instead of the run's provider and key |
+| `AGENT37_DESKTOP_TTL_SECONDS` | `300` | how long the desktop link opens |
+| `AGENT_STEP_LIMIT` | `30` | Hermes' `max_turns` when neither the bullet nor the run sets one |
+| `AGENT_TIMEOUT_SECONDS` | `900` | the longest a turn may run before it is cancelled |
+| `AGENT_READY_SECONDS` | `240` | how long a new instance's agent may take to report healthy |
 
-As with `MODAL_PACKAGES`, the image and the secrets are the **deployment's** to
-choose; nothing that arrives over HTTP adds to them. The MCP command itself does
-arrive over HTTP — it runs inside the sandbox, which also runs whatever commands
-the agent picks, so the sandbox is the boundary: don't attach a secret to it you
-would mind the agent reading.
-
-`GET /agent/enabled` reports whether Modal is configured for them.
+`GET /agent/enabled` reports whether `AGENT37_API_KEY` is set.
 
 `GET /healthz` is a health check. `GET /` serves the built frontend when a
 `dist/` folder sits next to `server/` (see Docker below); otherwise it 404s and
@@ -446,13 +449,14 @@ uvicorn main:app --port 8000 --reload
 
 Keys are read from the **repo-root `.env`** (loaded by `main.py` at import), or
 from the environment. LLM provider keys are the exception: they are only ever
-sent per request from the UI, never read from the server. Modal is server-side
+sent per request from the UI, never read from the server. Modal and Agent37 are server-side
 only:
 
 ```ini
 GEMINI_API_KEY=...
 MODAL_TOKEN_ID=ak-...
 MODAL_TOKEN_SECRET=as-...
+AGENT37_API_KEY=sk_live_...   # agent bullets
 MODAL_PACKAGES=scipy, pillow   # optional — on top of numpy/pandas/requests
 ```
 

@@ -76,8 +76,8 @@ def warnings(nodes: list["Node"]) -> list[str]:
         )
     if any(n.kind == "agent" for n in nodes):
         out.append(
-            "Agent bullets need the `agent_modal` model kind, which is this "
-            "server's, not pbt's. Copy `server/agent_exec.py` and `server/agent/` "
+            "Agent bullets need the `agent37` model kind, which is this "
+            "server's, not pbt's. Copy `server/agent_exec.py` "
             "next to the export and import it, and call `agent_exec.use_run` "
             "before running, or those bullets will fail."
         )

@@ -37,7 +37,7 @@ from pbt.files import contains_files, iter_files, to_jsonable
 
 import export as exporter
 import files as attachments
-import agent_exec  # registers `model_type="agent_modal"` with pbt on import
+import agent_exec  # registers `model_type="agent37"` with pbt on import
 import modal_exec  # registers `model_type="python_modal"` with pbt on import
 from llm import make_llm_call
 
@@ -96,7 +96,7 @@ pbt.register_config_keys("judge", "threshold")
 
 # The run variable a person sets in Settings to pick the model they run with.
 # pbt reads `config()` before any promptdata exists, so the server resolves it
-# itself: it goes straight to the LLM client and the agent sandbox, and into
+# itself: it goes straight to the LLM client and the agent instance, and into
 # the config of every bullet that calls a model — only so pbt's prompt cache,
 # keyed on config, never hands back an answer from a different model.
 LLM_MODEL_VAR = "llm_model"
@@ -240,12 +240,10 @@ class Node(BaseModel):
     # Else treated as a prompt rather than rejected: a bullet is not worth a 422.
     kind: str = "prompt"
     # An agent bullet's MCP server: the command that starts it over stdio, e.g.
-    # `uvx some-mcp-server`. Empty means the agent has bash alone.
+    # `uvx some-mcp-server`. Empty means the agent has its own tools alone.
     mcpServer: str = ""
     # An agent bullet's step limit; 0 means the run's (`RunRequest.agentSteps`).
     agentSteps: int = 0
-    # An agent bullet's wait between model calls, in seconds; 0 for none.
-    agentBackoff: float = 0
     # An agent bullet that hands on files, not only text — see `agent_exec`.
     producesFiles: bool = False
     # A python bullet's extra sandbox packages, comma-separated — see
@@ -369,7 +367,7 @@ def _build_source(
 
     A python node gets the `python_modal` config line instead, and its refs go
     into a Jinja *comment* — see `_python_source`. An agent node keeps the
-    ordinary shape — its rendered text is the agent's task — plus the `agent_modal` config line naming its MCP server, if
+    ordinary shape — its rendered text is the agent's task — plus the `agent37` config line naming its MCP server, if
     any (see `agent_exec.py`).
 
     A prompt bullet fed by one in *file_sources* — an agent set to produce
@@ -408,11 +406,9 @@ def _build_source(
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
     if node.kind == "agent":
-        # The sandbox never sees attachments, so none are declared either.
+        # The instance never sees attachments, so none are declared either.
         return (
-            agent_exec.config_line(
-                node.mcpServer, node.agentSteps, node.producesFiles, node.agentBackoff
-            )
+            agent_exec.config_line(node.mcpServer, node.agentSteps, node.producesFiles)
             + "\n"
             + source
         )
@@ -803,7 +799,7 @@ def python_enabled() -> dict:
 
 @app.get("/agent/enabled")
 def agent_enabled() -> dict:
-    """Whether agent bullets can run here — they need Modal, as python does —
+    """Whether agent bullets can run here — they need an Agent37 key —
     and the step limits a run may choose between."""
     return {
         "enabled": agent_exec.enabled(),
@@ -1051,7 +1047,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
         except Exception:  # noqa: BLE001 — a progress event is never worth failing the run
             pass
 
-    # Agent bullets call the model from inside their sandbox, so they need this
+    # Agent bullets call the model from inside their instance, so they need this
     # run's provider and key too — bound for the tasks pbt spawns, not globally —
     # along with its step limit and where to send their log lines live.
     run_token = agent_exec.use_run(

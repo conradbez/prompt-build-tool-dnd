@@ -28,7 +28,7 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
   {
     kind: 'agent',
     label: 'Agent',
-    desc: 'Its text is a task for a coding agent in a Modal sandbox, working with bash — and an MCP server’s tools, if you set one.',
+    desc: 'Its text is a task for a Hermes agent on its own Agent37 computer, with a terminal and a browser you can watch — and an MCP server’s tools, if you set one.',
   },
   {
     kind: 'test',
@@ -62,9 +62,11 @@ export function NodeSettings({ bullet }: Props) {
 
   const current = KINDS.find((k) => k.kind === kind)!;
   const notReady =
-    (kind === 'python' && !python.enabled) || (kind === 'agent' && !agent)
+    kind === 'python' && !python.enabled
       ? ' This server has not reported Modal as configured — running it will say what is missing.'
-      : '';
+      : kind === 'agent' && !agent
+        ? ' This server has not reported Agent37 as configured — running it will say what is missing.'
+        : '';
 
   return (
     <div className="res-settings">
@@ -192,9 +194,9 @@ export function NodeSettings({ bullet }: Props) {
           <h3 className="res-col__head">
             MCP server
             <Info>
-              The command that starts a stdio MCP server in the agent&rsquo;s sandbox, e.g.{' '}
+              The command that starts a stdio MCP server on the agent&rsquo;s computer, e.g.{' '}
               <code>uvx some-mcp-server</code> or <code>npx -y @scope/server</code>. Empty means
-              none — the agent works with bash alone.
+              none — the agent works with its own tools alone.
             </Info>
           </h3>
           <div className="res-col__body">
@@ -209,7 +211,7 @@ export function NodeSettings({ bullet }: Props) {
             Files
             <Info>
               The agent is told to save the files it makes — images, documents, data — in{' '}
-              <code>/root/outputs/</code>. They are handed to the prompt bullets this one feeds as
+              <code>~/outputs/</code>. They are handed to the prompt bullets this one feeds as
               attachments, and shown with its answer. An agent that saves none fails, since the
               bullets after it are waiting for them.
             </Info>
@@ -249,30 +251,6 @@ export function NodeSettings({ bullet }: Props) {
         </section>
       )}
 
-      {kind === 'agent' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Back-off
-            <Info>
-              Seconds the agent waits after each model reply before its next call, to stay under a
-              provider&rsquo;s rate limit. The wait counts against the sandbox&rsquo;s time limit
-              (15 min), so keep it × steps well under that. Blank or 0 means no wait.
-            </Info>
-          </h3>
-          <div className="res-col__body">
-            <input
-              className="pd-input"
-              type="number"
-              min={0}
-              max={300}
-              step={1}
-              value={bullet.agentBackoff || ''}
-              placeholder="0 — no wait (seconds)"
-              onChange={(e) => actions.setAgentBackoff(id, Number(e.target.value))}
-            />
-          </div>
-        </section>
-      )}
     </div>
   );
 }

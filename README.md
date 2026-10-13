@@ -206,20 +206,23 @@ instead, rather than a button that appears to do nothing.
 ## Agents with MCP tools
 
 `•••` → **Settings…** → **Agent** marks a bullet `AGENT`. Its text — with its inputs
-filled in, exactly as a prompt's would be — becomes a **task** for a coding
-agent ([OpenCode](https://opencode.ai), run headless) working in a Modal
-sandbox. It uses its tools (bash, reading and editing files) until it answers.
+filled in, exactly as a prompt's would be — becomes a **task** for a
+[Hermes](https://github.com/NousResearch/hermes-agent) agent on its own
+[Agent37](https://www.agent37.com) instance, a Linux computer with a terminal
+and a visible browser. The instance is created for the run and deleted after
+it. While it runs, the live log carries a link to **watch the agent's screen**
+(noVNC). Open it in a new tab, add `&view_only=1` to only watch, and take over
+when a site needs you to sign in.
 The bullet's output is a JSON object: `output` (the answer), `logs` (the whole
-run, timestamped, from sandbox start to teardown: every step, command and MCP
-tool call) and `run_time` (in seconds). Bullets downstream receive all of it,
+run, timestamped, from instance creation to deletion, every tool call
+included) and `run_time` (in seconds). Bullets downstream receive all of it,
 logs included.
 
 The **MCP server** field in the same modal gives the agent any stdio MCP server's tools as
 well: type the command that starts it (`uvx some-mcp-server`,
-`npx -y @scope/server`), and the chip becomes `AGENT+MCP`. Leave it empty for
-an agent with bash alone. The agent uses the provider and key in the toolbar.
-See [`server/README.md`](server/README.md) for the sandbox layout and what the
-server can configure.
+`npx -y @scope/server`), and the chip becomes `AGENT+MCP`. The agent uses the
+provider and key in the toolbar. See [`server/README.md`](server/README.md) for
+the one-off template build and what the server can configure.
 
 ## Enforcing JSON
 
