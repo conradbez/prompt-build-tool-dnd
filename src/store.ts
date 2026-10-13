@@ -26,6 +26,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     agentSteps: 0,
     agentBackoff: 0,
     producesFiles: false,
+    remoteBrowser: false,
     packages: '',
     judge: 'llm',
     threshold: 0.5,
@@ -102,6 +103,7 @@ export function parseDoc(value: unknown): Doc | null {
         agentSteps: typeof b.agentSteps === 'number' && b.agentSteps > 0 ? Math.floor(b.agentSteps) : 0,
         agentBackoff: typeof b.agentBackoff === 'number' && b.agentBackoff > 0 ? b.agentBackoff : 0,
         producesFiles: !!b.producesFiles,
+        remoteBrowser: !!b.remoteBrowser,
         packages: typeof b.packages === 'string' ? b.packages : '',
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
         threshold: typeof b.threshold === 'number' ? clampThreshold(b.threshold) : 0.5,
@@ -255,6 +257,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     agentSteps: b.agentSteps,
     agentBackoff: b.agentBackoff,
     producesFiles: b.producesFiles,
+    remoteBrowser: b.remoteBrowser,
     packages: b.packages,
     judge: b.judge,
     threshold: b.threshold,
@@ -485,6 +488,15 @@ export const actions = {
     if (!b || b.producesFiles === on) return;
     const next = clone(state);
     next.bullets[id] = { ...b, producesFiles: on };
+    emit(next);
+  },
+
+  /** Whether an agent bullet gets a remote browser — see `Bullet.remoteBrowser`. */
+  setRemoteBrowser(id: string, on: boolean) {
+    const b = state.bullets[id];
+    if (!b || b.remoteBrowser === on) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, remoteBrowser: on };
     emit(next);
   },
 

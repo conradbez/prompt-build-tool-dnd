@@ -52,6 +52,7 @@ import json
 import os
 import pathlib
 import re
+import secrets as secrets_mod
 import shlex
 import time
 from dataclasses import dataclass
@@ -73,6 +74,16 @@ STEPS_KEY = "steps"
 FILES_KEY = "produces_files"
 # The config key holding the bullet's wait between model calls, in seconds.
 BACKOFF_KEY = "backoff"
+# The config key giving the agent a visible Chromium that a person can watch
+# and take over, over noVNC on a Modal tunnel — see `_start_browser`.
+BROWSER_KEY = "remote_browser"
+
+# The remote browser: a virtual display, Chromium on it with the DevTools
+# protocol open to the agent, and noVNC serving that display on a tunnel.
+DISPLAY = ":99"
+SCREEN = "1280x800x24"
+CDP_PORT = 9222
+VNC_PORT = 6080
 
 # Where an agent asked for files saves them — see `run_agent.FILES_NOTE`.
 OUTPUTS_DIR = "/root/outputs"
@@ -176,10 +187,15 @@ def steps_for(requested: int | None) -> int:
 
 
 def config_line(
-    mcp_server: str = "", steps: int = 0, produces_files: bool = False, backoff: float = 0
+    mcp_server: str = "",
+    steps: int = 0,
+    produces_files: bool = False,
+    backoff: float = 0,
+    remote_browser: bool = False,
 ) -> str:
     """The bullet's config line, naming its MCP server, step limit, whether
-    it hands on files and its back-off, each only when set.
+    it hands on files, its back-off and whether it has a remote browser, each
+    only when set.
 
     The command goes through `json.dumps`, whose escapes Jinja's string
     literals read the same way, so no quote in it can end the literal early.
@@ -194,6 +210,8 @@ def config_line(
         args.append("%s=True" % FILES_KEY)
     if backoff and backoff > 0:
         args.append("%s=%g" % (BACKOFF_KEY, min(float(backoff), MAX_BACKOFF)))
+    if remote_browser:
+        args.append("%s=True" % BROWSER_KEY)
     return "{{ config(%s) }}" % ", ".join(args)
 
 
@@ -221,15 +239,17 @@ def rejected() -> list[str]:
 
 _app = None
 _image = None
+_browser_image = None
 
 
-def _lookup():
-    """The Modal app and agent image, created once and reused.
+def _lookup(browser: bool = False):
+    """The Modal app and agent image, created once and reused. With *browser*,
+    the image that also has a display, Chromium and noVNC.
 
     Deferred rather than done at import, like `modal_exec._lookup`: both hit
     the network, and a server with no Modal credentials must still start.
     """
-    global _app, _image
+    global _app, _image, _browser_image
     if _app is None:
         import modal
 
@@ -237,14 +257,28 @@ def _lookup():
         _app = modal.App.lookup(APP_NAME, create_if_missing=True)
         _image = (
             modal.Image.debian_slim(python_version="3.12")
-            # Node for `npx` servers, git and curl because an agent reaches for them.
-            .apt_install("nodejs", "npm", "git", "curl", *apt)
+            # git and curl because an agent reaches for them.
+            .apt_install("git", "curl", "ca-certificates", *apt)
+            # Node for `npx` servers — 22 from NodeSource, since Debian's 18 is
+            # too old for many of them (Playwright's needs 20+).
+            .run_commands(
+                "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
+                "apt-get install -y nodejs",
+                "node --version",
+            )
             # A single prebuilt binary; npm only picks the one for this platform.
             .run_commands(f"npm install -g opencode-ai@{OPENCODE_VERSION}", "opencode --version")
             # uv for `uvx` servers.
             .uv_pip_install("uv", *pip)
             .add_local_file(AGENT_DIR / "run_agent.py", "/opt/agent/run_agent.py", copy=True)
         )
+    if browser:
+        if _browser_image is None:
+            # Its own image, so agents without a browser do not pull Chromium.
+            _browser_image = _image.apt_install(
+                "xvfb", "x11vnc", "novnc", "websockify", "chromium", "fonts-liberation"
+            )
+        return _app, _browser_image
     return _app, _image
 
 
@@ -329,6 +363,41 @@ def _read(sb, path: str) -> str:
     return text if p.wait() == 0 else ""
 
 
+def _start_browser(sb, log: _Log) -> str:
+    """Start the display, Chromium and noVNC in *sb*; the URL to watch it at.
+
+    The VNC password rides in the URL, so the link alone lets you in and the
+    tunnel alone does not. VNC passwords stop at eight characters.
+    """
+    password = secrets_mod.token_hex(4)
+    script = f"""
+set -e
+Xvfb {DISPLAY} -screen 0 {SCREEN} >/tmp/xvfb.log 2>&1 &
+for i in $(seq 50); do [ -e /tmp/.X11-unix/X{DISPLAY[1:]} ] && break; sleep 0.1; done
+DISPLAY={DISPLAY} chromium --no-sandbox --disable-dev-shm-usage --no-first-run \
+  --no-default-browser-check --user-data-dir=/root/.browser \
+  --window-position=0,0 --window-size={SCREEN.rsplit("x", 1)[0].replace("x", ",")} \
+  --remote-debugging-port={CDP_PORT} about:blank >/tmp/chromium.log 2>&1 &
+x11vnc -storepasswd {password} /tmp/vncpass >/dev/null 2>&1
+x11vnc -display {DISPLAY} -forever -shared -rfbauth /tmp/vncpass -rfbport 5900 >/tmp/x11vnc.log 2>&1 &
+websockify --web /usr/share/novnc {VNC_PORT} localhost:5900 >/tmp/websockify.log 2>&1 &
+for i in $(seq 150); do curl -sf http://localhost:{CDP_PORT}/json/version >/dev/null && exit 0; sleep 0.2; done
+echo "Chromium did not open its DevTools port:"; tail -n 20 /tmp/chromium.log; exit 1
+"""
+    log.add("browser", "starting display, Chromium and noVNC")
+    p = sb.exec("bash", "-c", script)
+    out = p.stdout.read() + p.stderr.read()
+    if p.wait() != 0:
+        log.add("browser", f"failed to start:\n{out.strip()[-2000:]}")
+        raise AgentError("The remote browser did not start.", log)
+    url = (
+        f"{sb.tunnels()[VNC_PORT].url}/vnc.html"
+        f"?autoconnect=1&resize=scale&password={password}"
+    )
+    log.add("browser", f"watch live at {url}")
+    return url
+
+
 def _run_sandbox(
     task: str,
     mcp_server: str,
@@ -336,13 +405,14 @@ def _run_sandbox(
     json_answer: bool,
     on_line: Callable[[str], None] | None = None,
     want_files: bool = False,
+    browser: bool = False,
 ) -> dict:
     """Run the agent on *task* in a fresh sandbox. Blocking — call it off the loop."""
     import modal
 
     log = _Log(on_line)
     files: list[pbt.File] = []
-    app, image = _lookup()
+    app, image = _lookup(browser)
     command = shlex.split(mcp_server) if mcp_server.strip() else []
 
     log.add("modal", f"creating sandbox (app {APP_NAME}, {CPU} cpu, {MEMORY_MB} MB, timeout {TIMEOUT_SECONDS}s)")
@@ -356,10 +426,13 @@ def _run_sandbox(
         cpu=CPU,
         memory=MEMORY_MB,
         secrets=[modal.Secret.from_dict(env), *(modal.Secret.from_name(s) for s in secrets())],
+        encrypted_ports=[VNC_PORT] if browser else [],
     )
     log.add("modal", f"sandbox {sb.object_id} up")
     result: dict[str, Any] = {}
     try:
+        if browser:
+            _start_browser(sb, log)
         # Through stdin, not argv: a rendered bullet can be long, and nothing
         # in it should be read by a shell.
         put = sb.exec("sh", "-c", f"cat > {TASK_PATH}")
@@ -499,6 +572,7 @@ async def _run(
     json_answer: bool,
     on_line: Callable[[str], None] | None = None,
     want_files: bool = False,
+    browser: bool = False,
 ) -> dict:
     if not enabled():
         raise RuntimeError(
@@ -517,14 +591,14 @@ async def _run(
     # Returned as it is: pbt's cache stores a dict — and the files in it, by
     # hash — and hands the same back on a hit.
     return await asyncio.to_thread(
-        _run_sandbox, task, mcp_server, env, json_answer, on_line, want_files
+        _run_sandbox, task, mcp_server, env, json_answer, on_line, want_files, browser
     )
 
 
 # Registered on import, like `modal_exec`: importing this module is what teaches
 # pbt the kind. The rendered text is a task in natural language, so the run's
 # global instruction is welcome here.
-@pbt.model_kind(MODEL_TYPE, config_keys={MCP_KEY, STEPS_KEY, FILES_KEY, BACKOFF_KEY})
+@pbt.model_kind(MODEL_TYPE, config_keys={MCP_KEY, STEPS_KEY, FILES_KEY, BACKOFF_KEY, BROWSER_KEY})
 async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     """Hand the rendered bullet to a coding agent, with its MCP server if it names one.
 
@@ -548,6 +622,11 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     want_files = bool(call.spec.config.get(FILES_KEY))
     if want_files:
         env["AGENT_OUTPUT_FILES"] = "1"
+    browser = bool(call.spec.config.get(BROWSER_KEY))
+    if browser:
+        # Every process in the sandbox — the agent's shell, the MCP server —
+        # draws on the display the person is watching.
+        env.update(AGENT_REMOTE_BROWSER="1", DISPLAY=DISPLAY, AGENT_CDP_URL=f"http://localhost:{CDP_PORT}")
     # Pacing only — though, being in `config()`, changing it still misses the cache.
     try:
         backoff = min(float(call.spec.config.get(BACKOFF_KEY) or 0), MAX_BACKOFF)
@@ -564,7 +643,9 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     # `config()`, which pbt already folds into that key.
     raw = await call.compute(
         rendered,
-        compute=lambda: _run(rendered.strip(), mcp_server, env, json_answer, on_line, want_files),
+        compute=lambda: _run(
+            rendered.strip(), mcp_server, env, json_answer, on_line, want_files, browser
+        ),
     )
     # An entry cached before results were returned as dicts is JSON text.
     return raw if isinstance(raw, dict) else json.loads(raw)

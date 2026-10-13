@@ -149,9 +149,21 @@ function LiveLog({ id, waiting }: { id: string; waiting: boolean }) {
     const el = ref.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [lines.length]);
+  // Posted by `agent_exec._start_browser` once the sandbox's browser is up.
+  const browser = lines.map((l) => l.title.match(/watch live at (\S+)/)?.[1]).find(Boolean);
   return (
     <section className="res-col">
-      <h3 className="res-col__head">Agent log — live</h3>
+      <h3 className="res-col__head">
+        Agent log — live
+        {browser && (
+          <>
+            {' · '}
+            <a href={browser} target="_blank" rel="noreferrer">
+              Open remote browser
+            </a>
+          </>
+        )}
+      </h3>
       {lines.length ? (
         <pre className="res-col__log" ref={ref}>
           {lines.map((l) => l.title).join('\n')}

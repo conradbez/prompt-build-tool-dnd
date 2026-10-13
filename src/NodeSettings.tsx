@@ -230,6 +230,31 @@ export function NodeSettings({ bullet }: Props) {
       {kind === 'agent' && (
         <section className="res-col">
           <h3 className="res-col__head">
+            Browser
+            <Info>
+              Opens a Chromium in the agent&rsquo;s sandbox that you can watch and take over from
+              your own browser — the link shows up in the agent&rsquo;s live log. The agent drives
+              it over the DevTools protocol at <code>http://localhost:9222</code>; pair it with the
+              MCP server <code>npx @playwright/mcp@latest --cdp-endpoint http://localhost:9222</code>{' '}
+              to give it browser tools. It closes when the agent finishes.
+            </Info>
+          </h3>
+          <div className="res-col__body">
+            <label className="ns-check">
+              <input
+                type="checkbox"
+                checked={bullet.remoteBrowser}
+                onChange={(e) => actions.setRemoteBrowser(id, e.target.checked)}
+              />
+              Expose remote browser
+            </label>
+          </div>
+        </section>
+      )}
+
+      {kind === 'agent' && (
+        <section className="res-col">
+          <h3 className="res-col__head">
             Max steps
             <Info>
               How many steps this agent may take — one per reply — before it is told to stop using

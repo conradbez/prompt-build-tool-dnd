@@ -35,6 +35,8 @@ export interface NodePayload {
   agentBackoff: number;
   /** An agent bullet that hands on files — see `Bullet.producesFiles`. */
   producesFiles: boolean;
+  /** An agent bullet with a remote browser — see `Bullet.remoteBrowser`. */
+  remoteBrowser: boolean;
   /** A python bullet's extra sandbox packages, comma-separated; empty for none. */
   packages: string;
   /** Validate this bullet's answer as JSON (pbt's `output_format="json"`). */

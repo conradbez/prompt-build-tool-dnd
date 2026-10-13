@@ -98,6 +98,15 @@ files, so save at least one; your final message is handed on as text beside
 them, so say what each file is rather than pasting its contents.
 """
 
+BROWSER_NOTE = """
+A Chromium window is open on display {display}, and a person may be watching it
+live — and may click or type in it themselves. Use that browser, not a new
+one, so they see what you do: drive it over the DevTools protocol at {cdp}
+(e.g. Playwright's `connect_over_cdp("{cdp}")`, reusing its open page). If a
+page needs something only the person can give — a login, a captcha — say so
+in plain words and wait for it.
+"""
+
 # Where files the task asks for are saved; `agent_exec.py` collects them.
 OUTPUTS_DIR = "/root/outputs"
 
@@ -462,6 +471,8 @@ def main(task_path: str, result_path: str, mcp_command: list[str]) -> None:
         if wants_files:
             os.makedirs(OUTPUTS_DIR, exist_ok=True)
             task += FILES_NOTE.format(outputs=OUTPUTS_DIR)
+        if os.environ.get("AGENT_REMOTE_BROWSER") == "1":
+            task += BROWSER_NOTE.format(display=os.environ.get("DISPLAY", ":99"), cdp=os.environ["AGENT_CDP_URL"])
         # --title skips a model call spent naming the session.
         command = ["opencode", "run", "--format", "json", "--auto", "--title", "agent bullet"]
         resumes = waits = 0

@@ -112,6 +112,12 @@ export interface Bullet {
    */
   producesFiles: boolean;
   /**
+   * An agent bullet with a visible Chromium in its sandbox, which a person can
+   * watch and take over in their own browser (noVNC) while the agent drives it
+   * over the DevTools protocol. Ignored on every other kind.
+   */
+  remoteBrowser: boolean;
+  /**
    * A python bullet's extra sandbox packages, comma-separated, e.g.
    * `beautifulsoup4, scipy==1.*` — installed on top of the server's own before
    * it runs. Empty means none. Ignored on every other kind.

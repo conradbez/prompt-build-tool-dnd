@@ -248,6 +248,8 @@ class Node(BaseModel):
     agentBackoff: float = 0
     # An agent bullet that hands on files, not only text — see `agent_exec`.
     producesFiles: bool = False
+    # An agent bullet with a Chromium a person can watch and take over — see `agent_exec`.
+    remoteBrowser: bool = False
     # A python bullet's extra sandbox packages, comma-separated — see
     # `modal_exec.config_line`. Ignored on every other kind.
     packages: str = ""
@@ -411,7 +413,11 @@ def _build_source(
         # The sandbox never sees attachments, so none are declared either.
         return (
             agent_exec.config_line(
-                node.mcpServer, node.agentSteps, node.producesFiles, node.agentBackoff
+                node.mcpServer,
+                node.agentSteps,
+                node.producesFiles,
+                node.agentBackoff,
+                node.remoteBrowser,
             )
             + "\n"
             + source
