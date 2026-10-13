@@ -3,9 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      // iOS Safari zooms in on any field under 16px when it is focused, so
+      // tapping a bullet shifted the whole page. `maximum-scale=1` stops that
+      // auto-zoom; iOS ignores it for pinch-zoom, so zooming by hand still
+      // works. Only on iOS: elsewhere it would disable pinch-zoom.
+      // The `ios` class trims the UI for a phone or tablet (see index.css).
+      if (/iP(hone|ad|od)/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+        document.querySelector('meta[name=viewport]').content += ', maximum-scale=1';
+        document.documentElement.classList.add('ios');
+      }
+    </script>
     <title>Workflowy Mind Map</title>
-    <script type="module" crossorigin src="./assets/index-C8cTJdCZ.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DsSmh4h9.css">
+    <script type="module" crossorigin src="./assets/index-C33_-lGI.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CcI9H3mD.css">
   </head>
   <body>
     <div id="root"></div>
