@@ -27,6 +27,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     agentBackoff: 0,
     producesFiles: false,
     remoteBrowser: false,
+    persistDisk: false,
     packages: '',
     judge: 'llm',
     threshold: 0.5,
@@ -104,6 +105,7 @@ export function parseDoc(value: unknown): Doc | null {
         agentBackoff: typeof b.agentBackoff === 'number' && b.agentBackoff > 0 ? b.agentBackoff : 0,
         producesFiles: !!b.producesFiles,
         remoteBrowser: !!b.remoteBrowser,
+        persistDisk: !!b.persistDisk,
         packages: typeof b.packages === 'string' ? b.packages : '',
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
         threshold: typeof b.threshold === 'number' ? clampThreshold(b.threshold) : 0.5,
@@ -261,6 +263,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     agentBackoff: b.agentBackoff,
     producesFiles: b.producesFiles,
     remoteBrowser: b.remoteBrowser,
+    persistDisk: b.persistDisk,
     packages: b.packages,
     judge: b.judge,
     threshold: b.threshold,
@@ -500,6 +503,15 @@ export const actions = {
     if (!b || b.remoteBrowser === on) return;
     const next = clone(state);
     next.bullets[id] = { ...b, remoteBrowser: on };
+    emit(next);
+  },
+
+  /** Whether an agent bullet keeps its disk between runs — see `Bullet.persistDisk`. */
+  setPersistDisk(id: string, on: boolean) {
+    const b = state.bullets[id];
+    if (!b || b.persistDisk === on) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, persistDisk: on };
     emit(next);
   },
 

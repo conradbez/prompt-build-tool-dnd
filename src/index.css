@@ -2845,3 +2845,15 @@ body,
 .ios .tb__gear {
   padding: 0;
 }
+
+/* Agent options a preserved-disk agent does not use: shown, but off. */
+.ns-off {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.ns-off:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}

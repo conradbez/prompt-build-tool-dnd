@@ -118,6 +118,12 @@ export interface Bullet {
    */
   remoteBrowser: boolean;
   /**
+   * An agent bullet that keeps one Agent37 instance across runs, so what the
+   * agent leaves on disk is there next time. Overrides the MCP server, files,
+   * browser and back-off; the step limit still applies.
+   */
+  persistDisk: boolean;
+  /**
    * A python bullet's extra sandbox packages, comma-separated, e.g.
    * `beautifulsoup4, scipy==1.*` — installed on top of the server's own before
    * it runs. Empty means none. Ignored on every other kind.

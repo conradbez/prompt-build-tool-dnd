@@ -38,6 +38,7 @@ from pbt.files import contains_files, iter_files, to_jsonable
 import export as exporter
 import files as attachments
 import agent_exec  # registers `model_type="agent_modal"` with pbt on import
+import agent37_exec  # registers `model_type="agent37"` with pbt on import
 import modal_exec  # registers `model_type="python_modal"` with pbt on import
 from llm import make_llm_call
 
@@ -250,6 +251,10 @@ class Node(BaseModel):
     producesFiles: bool = False
     # An agent bullet with a Chromium a person can watch and take over — see `agent_exec`.
     remoteBrowser: bool = False
+    # An agent bullet that keeps one Agent37 instance across runs, so its disk
+    # outlives the run — see `agent37_exec`. Overrides every other agent option
+    # but the step limit.
+    persistDisk: bool = False
     # A python bullet's extra sandbox packages, comma-separated — see
     # `modal_exec.config_line`. Ignored on every other kind.
     packages: str = ""
@@ -412,6 +417,8 @@ def _build_source(
         source = JSON_CONFIG_LINE + "\n" + source
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
+    if node.kind == "agent" and node.persistDisk:
+        return agent37_exec.config_line(node.id, node.agentSteps) + "\n" + source
     if node.kind == "agent":
         # The sandbox never sees attachments, so none are declared either.
         return (
@@ -455,7 +462,7 @@ def _models(
     """Every bullet's pbt source, keyed by its model name — for a run and an
     export alike."""
     feeds = _feeding(nodes, names)
-    producers = {n.id for n in nodes if n.kind == "agent" and n.producesFiles}
+    producers = {n.id for n in nodes if n.kind == "agent" and n.producesFiles and not n.persistDisk}
     return {
         names[n.id]: _build_source(
             n, children[n.id], feeds, session_id, set(promptdata), producers
@@ -834,6 +841,7 @@ def agent_enabled() -> dict:
     and the step limits a run may choose between."""
     return {
         "enabled": agent_exec.enabled(),
+        "persistDisk": agent37_exec.enabled(),
         "rejected": agent_exec.rejected(),
         "defaultSteps": agent_exec.STEP_LIMIT,
         "maxSteps": agent_exec.MAX_STEP_LIMIT,

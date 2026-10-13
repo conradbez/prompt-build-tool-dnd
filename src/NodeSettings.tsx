@@ -63,7 +63,7 @@ export function NodeSettings({ bullet }: Props) {
 
   const current = KINDS.find((k) => k.kind === kind)!;
   const notReady =
-    (kind === 'python' && !python.enabled) || (kind === 'agent' && !agent)
+    (kind === 'python' && !python.enabled) || (kind === 'agent' && !agent && !bullet.persistDisk)
       ? ' This server has not reported Modal as configured — running it will say what is missing.'
       : '';
 
@@ -206,6 +206,30 @@ export function NodeSettings({ bullet }: Props) {
       {kind === 'agent' && (
         <section className="res-col">
           <h3 className="res-col__head">
+            Disk
+            <Info>
+              Runs this agent on its own Agent37 machine, kept between runs: whatever it leaves on
+              disk — a checkout, installed tools, notes — is there next time. The machine is stopped
+              (disk-only billing) when the run ends. Turns off the MCP server, files, browser and
+              back-off below; the step limit still applies.
+            </Info>
+          </h3>
+          <div className="res-col__body">
+            <label className="ns-check">
+              <input
+                type="checkbox"
+                checked={bullet.persistDisk}
+                onChange={(e) => actions.setPersistDisk(id, e.target.checked)}
+              />
+              Preserve disk between runs
+            </label>
+          </div>
+        </section>
+      )}
+
+      {kind === 'agent' && (
+        <section className="res-col">
+          <h3 className="res-col__head">
             MCP server
             <Info>
               The command that starts a stdio MCP server in the agent&rsquo;s sandbox, e.g.{' '}
@@ -213,9 +237,11 @@ export function NodeSettings({ bullet }: Props) {
               none — the agent works with bash alone.
             </Info>
           </h3>
-          <div className="res-col__body">
-            <McpServerInput id={id} value={bullet.mcpServer} />
-          </div>
+          <fieldset className="ns-off" disabled={bullet.persistDisk}>
+            <div className="res-col__body">
+              <McpServerInput id={id} value={bullet.mcpServer} />
+            </div>
+          </fieldset>
         </section>
       )}
 
@@ -230,16 +256,18 @@ export function NodeSettings({ bullet }: Props) {
               bullets after it are waiting for them.
             </Info>
           </h3>
-          <div className="res-col__body">
-            <label className="ns-check">
-              <input
-                type="checkbox"
-                checked={bullet.producesFiles}
-                onChange={(e) => actions.setProducesFiles(id, e.target.checked)}
-              />
-              Produces files
-            </label>
-          </div>
+          <fieldset className="ns-off" disabled={bullet.persistDisk}>
+            <div className="res-col__body">
+              <label className="ns-check">
+                <input
+                  type="checkbox"
+                  checked={bullet.producesFiles}
+                  onChange={(e) => actions.setProducesFiles(id, e.target.checked)}
+                />
+                Produces files
+              </label>
+            </div>
+          </fieldset>
         </section>
       )}
 
@@ -255,16 +283,18 @@ export function NodeSettings({ bullet }: Props) {
               to give it browser tools. It closes when the agent finishes.
             </Info>
           </h3>
-          <div className="res-col__body">
-            <label className="ns-check">
-              <input
-                type="checkbox"
-                checked={bullet.remoteBrowser}
-                onChange={(e) => actions.setRemoteBrowser(id, e.target.checked)}
-              />
-              Expose remote browser
-            </label>
-          </div>
+          <fieldset className="ns-off" disabled={bullet.persistDisk}>
+            <div className="res-col__body">
+              <label className="ns-check">
+                <input
+                  type="checkbox"
+                  checked={bullet.remoteBrowser}
+                  onChange={(e) => actions.setRemoteBrowser(id, e.target.checked)}
+                />
+                Expose remote browser
+              </label>
+            </div>
+          </fieldset>
         </section>
       )}
 
@@ -300,18 +330,20 @@ export function NodeSettings({ bullet }: Props) {
               (15 min), so keep it × steps well under that. Blank or 0 means no wait.
             </Info>
           </h3>
-          <div className="res-col__body">
-            <input
-              className="pd-input"
-              type="number"
-              min={0}
-              max={300}
-              step={1}
-              value={bullet.agentBackoff || ''}
-              placeholder="0 — no wait (seconds)"
-              onChange={(e) => actions.setAgentBackoff(id, Number(e.target.value))}
-            />
-          </div>
+          <fieldset className="ns-off" disabled={bullet.persistDisk}>
+            <div className="res-col__body">
+              <input
+                className="pd-input"
+                type="number"
+                min={0}
+                max={300}
+                step={1}
+                value={bullet.agentBackoff || ''}
+                placeholder="0 — no wait (seconds)"
+                onChange={(e) => actions.setAgentBackoff(id, Number(e.target.value))}
+              />
+            </div>
+          </fieldset>
         </section>
       )}
     </div>
