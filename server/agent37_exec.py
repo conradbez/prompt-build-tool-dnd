@@ -17,8 +17,10 @@ A stopped instance bills disk only. Delete it on Agent37 to start the bullet
 over from a blank disk.
 
 It is emitted as ``{{ config(model_type="agent37", disk="<bullet id>") }}``.
-MCP servers, files, the Modal browser and back-off are the Modal agent's and
-are not offered here; the step limit is.
+MCP servers, the Modal browser and back-off are the Modal agent's and are not
+offered here; the step limit and ``produces_files=True`` are. Files are saved in
+``~/outputs/``, which is emptied at the start of each run so only that run's
+files are handed on.
 
 The run's provider, key, steps and log sink come from `agent_exec`'s run
 context, which `main.run` binds for every agent bullet alike.
@@ -55,6 +57,15 @@ MODEL_TYPE = "agent37"
 DISK_KEY = "disk"
 # The config key holding the bullet's own step limit. Absent means the run's.
 STEPS_KEY = agent_exec.STEPS_KEY
+# The config key saying the bullet must hand on files, not only text.
+FILES_KEY = agent_exec.FILES_KEY
+
+# Where an agent asked for files saves them, relative to the instance user's
+# home. Emptied at the start of every run — the rest of the disk is kept — so
+# only this run's files are handed on.
+OUTPUTS_DIR = "~/outputs"
+MAX_FILES = agent_exec.MAX_FILES
+MAX_FILES_BYTES = agent_exec.MAX_FILES_BYTES
 
 API = os.environ.get("AGENT37_API_URL", "https://api.agent37.com/v1")
 API_KEY_ENV = "AGENT37_API_KEY"
@@ -126,12 +137,23 @@ Your final message is what the person reads, so make it the answer itself —
 not a description of what you did or where you put it.
 """
 
+FILES_NOTE = """
+This task must produce files. Save every file the person should get — images,
+documents, data — in {outputs}/ (it exists already, and is emptied before each
+run; keep anything you want for later elsewhere). They are handed on as files,
+so save at least one; your final message is handed on as text beside them, so
+say what each file is rather than pasting its contents.
+"""
 
-def config_line(disk: str, steps: int = 0) -> str:
-    """The bullet's config line, naming its disk and, when set, its step limit."""
+
+def config_line(disk: str, steps: int = 0, produces_files: bool = False) -> str:
+    """The bullet's config line, naming its disk and, when set, its step limit
+    and whether it hands on files."""
     args = ['model_type="%s"' % MODEL_TYPE, "%s=%s" % (DISK_KEY, json.dumps(disk))]
     if steps and steps > 0:
         args.append("%s=%d" % (STEPS_KEY, int(steps)))
+    if produces_files:
+        args.append("%s=True" % FILES_KEY)
     return "{{ config(%s) }}" % ", ".join(args)
 
 
@@ -337,7 +359,9 @@ def _desktop_url(inst: _Instance) -> str:
     return f"https://{u.netloc}/vnc.html?a37_token={token}&autoconnect=1&resize=scale"
 
 
-def _configure(inst: _Instance, steps: int, provider: _Provider | None, log: _Log) -> None:
+def _configure(
+    inst: _Instance, steps: int, provider: _Provider | None, want_files: bool, log: _Log
+) -> None:
     """Set the model and step limit with Hermes' own `config set`.
 
     Done every run, not only the first: the run's provider, key and steps can
@@ -364,6 +388,8 @@ def _configure(inst: _Instance, steps: int, provider: _Provider | None, log: _Lo
             f" && f=\"$(hermes config env-path)\" && touch \"$f\""
             f" && sed -i '/^{provider.key_env}=/d' \"$f\" && printf '%s\\n' {env_line} >> \"$f\""
         )
+    if want_files:
+        setup += f" && rm -rf {OUTPUTS_DIR} && mkdir -p {OUTPUTS_DIR}"
     out = inst.exec(setup + " < /dev/null")
     if out.get("exit_code") != 0:
         said = (out.get("stderr") or out.get("stdout") or "").strip()[-2000:]
@@ -416,6 +442,46 @@ def _stream_turn(inst: _Instance, task: str, log: _Log) -> dict:
     raise AgentError("The agent's stream ended without a result.", log)
 
 
+def _collect_files(inst: _Instance, log: _Log) -> list[pbt.File]:
+    """The files the agent saved in OUTPUTS_DIR this run, as pbt files.
+
+    Subfolders are flattened into the name (`plots/a.png` → `plots_a.png`):
+    pbt file names never carry a path. A bullet that promised files and saved
+    none fails, because everything downstream is waiting to be handed them.
+    """
+    listing = inst.exec(f"cd {OUTPUTS_DIR} && find . -type f -printf '%s\\t%P\\n'").get("stdout", "")
+    found = []
+    for line in listing.splitlines():
+        size, _, rel = line.partition("\t")
+        if rel and size.isdigit():
+            found.append((rel, int(size)))
+    found.sort()
+    if not found:
+        raise AgentError(
+            f"This bullet is set to produce files, but the agent saved none in {OUTPUTS_DIR}/.", log
+        )
+
+    files: list[pbt.File] = []
+    taken: set[str] = set()
+    total = 0
+    for rel, size in found:
+        if len(files) >= MAX_FILES or total + size > MAX_FILES_BYTES:
+            log.add("files", f"skipped {rel} ({size} bytes): over the limit of {MAX_FILES} files / {MAX_FILES_BYTES} bytes")
+            continue
+        data = inst._agent("GET", "/v1/files/content", params={"path": f"{OUTPUTS_DIR}/{rel}"}, timeout=300).content
+        name = rel.replace("/", "_")
+        stem, dot, ext = name.rpartition(".")
+        n = 2
+        while name in taken:
+            name = f"{stem}_{n}{dot}{ext}" if dot else f"{ext}_{n}"
+            n += 1
+        taken.add(name)
+        total += len(data)
+        files.append(pbt.File(data, name=name))
+        log.add("files", f"collected {name} ({len(data)} bytes)")
+    return files
+
+
 def _answer(text: str, json_answer: bool, log: _Log) -> Any:
     text = text.strip()
     if not text:
@@ -435,11 +501,13 @@ def _run_instance(
     steps: int,
     json_answer: bool,
     on_line: Callable[[str], None] | None = None,
+    want_files: bool = False,
 ) -> dict:
     """Run the agent on *task* on the bullet's kept instance. Blocking — call it off the loop."""
     key = os.environ[API_KEY_ENV]
     log = _Log(on_line)
     name = _name(disk)
+    files: list[pbt.File] = []
     with httpx.Client(timeout=60) as client:
         found = _find(client, key, name)
         if found:
@@ -457,10 +525,13 @@ def _run_instance(
                 log.add("desktop", f"watch the agent's screen: {_desktop_url(inst)}")
             except Exception as exc:  # noqa: BLE001 — the run does not need the view
                 log.add("desktop", f"no desktop link: {exc}")
-            _configure(inst, steps, provider, log)
+            _configure(inst, steps, provider, want_files, log)
 
             log.add("agent", f"starting (up to {steps} steps), task of {len(task)} chars")
-            done = _stream_turn(inst, task + FINISHING.format(steps=steps), log)
+            text = task + FINISHING.format(steps=steps)
+            if want_files:
+                text += FILES_NOTE.format(outputs=OUTPUTS_DIR)
+            done = _stream_turn(inst, text, log)
             if done["event"] == "response.failed":
                 err = done.get("error") or {}
                 raise AgentError(f"The agent failed: {err.get('code', '')} {err.get('message', '')}".strip(), log)
@@ -472,6 +543,9 @@ def _run_instance(
                 + (f", ${usage['cost_usd']:.4f}" if usage.get("cost_usd") else ""),
             )
             answer = _answer(done.get("output_text") or "", json_answer, log)
+            # Before the stop, while the agent's file API still answers.
+            if want_files:
+                files = _collect_files(inst, log)
         finally:
             try:
                 inst.stop()
@@ -479,7 +553,10 @@ def _run_instance(
             except Exception as exc:  # noqa: BLE001
                 log.add("agent37", f"could not stop instance {inst.id}: {exc}")
 
-    return {"output": answer, "logs": log.lines(), "run_time": round(time.time() - log.t0, 1)}
+    out: dict[str, Any] = {"output": answer}
+    if want_files:
+        out["files"] = files
+    return {**out, "logs": log.lines(), "run_time": round(time.time() - log.t0, 1)}
 
 
 async def _run(
@@ -489,6 +566,7 @@ async def _run(
     steps: int,
     json_answer: bool,
     on_line: Callable[[str], None] | None = None,
+    want_files: bool = False,
 ) -> dict:
     if not enabled():
         raise RuntimeError(
@@ -496,10 +574,12 @@ async def _run(
         )
     if not task.strip():
         raise RuntimeError("An agent bullet needs a task — its text, or something from below it.")
-    return await asyncio.to_thread(_run_instance, task, disk, provider, steps, json_answer, on_line)
+    return await asyncio.to_thread(
+        _run_instance, task, disk, provider, steps, json_answer, on_line, want_files
+    )
 
 
-@pbt.model_kind(MODEL_TYPE, config_keys={DISK_KEY, STEPS_KEY})
+@pbt.model_kind(MODEL_TYPE, config_keys={DISK_KEY, STEPS_KEY, FILES_KEY})
 async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     """Hand the rendered bullet to the Hermes agent on the bullet's kept instance.
 
@@ -516,8 +596,9 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     name = call.spec.name
     on_line = (lambda line: run.on_log(name, line)) if run.on_log else None
     json_answer = call.spec.output_format == "json"
+    want_files = bool(call.spec.config.get(FILES_KEY))
     raw = await call.compute(
         rendered,
-        compute=lambda: _run(rendered.strip(), disk, provider, steps, json_answer, on_line),
+        compute=lambda: _run(rendered.strip(), disk, provider, steps, json_answer, on_line, want_files),
     )
     return raw if isinstance(raw, dict) else json.loads(raw)

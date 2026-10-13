@@ -253,7 +253,7 @@ class Node(BaseModel):
     remoteBrowser: bool = False
     # An agent bullet that keeps one Agent37 instance across runs, so its disk
     # outlives the run — see `agent37_exec`. Overrides every other agent option
-    # but the step limit.
+    # but the step limit and producing files.
     persistDisk: bool = False
     # A python bullet's extra sandbox packages, comma-separated — see
     # `modal_exec.config_line`. Ignored on every other kind.
@@ -418,7 +418,7 @@ def _build_source(
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
     if node.kind == "agent" and node.persistDisk:
-        return agent37_exec.config_line(node.id, node.agentSteps) + "\n" + source
+        return agent37_exec.config_line(node.id, node.agentSteps, node.producesFiles) + "\n" + source
     if node.kind == "agent":
         # The sandbox never sees attachments, so none are declared either.
         return (
@@ -462,7 +462,7 @@ def _models(
     """Every bullet's pbt source, keyed by its model name — for a run and an
     export alike."""
     feeds = _feeding(nodes, names)
-    producers = {n.id for n in nodes if n.kind == "agent" and n.producesFiles and not n.persistDisk}
+    producers = {n.id for n in nodes if n.kind == "agent" and n.producesFiles}
     return {
         names[n.id]: _build_source(
             n, children[n.id], feeds, session_id, set(promptdata), producers
