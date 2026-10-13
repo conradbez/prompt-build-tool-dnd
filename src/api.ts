@@ -304,6 +304,8 @@ export async function runGraph(
   agentSteps?: number,
   /** Called with each progress event as it arrives, `final` included. */
   onEvent?: (event: RunEvent) => void,
+  /** Run just these bullets and what feeds them; empty runs the whole graph. */
+  select?: string[],
 ): Promise<RunResponse> {
   const url = `${getServerUrl()}/run`;
   let res: Response;
@@ -320,6 +322,7 @@ export async function runGraph(
         promptdata: promptdata || {},
         classifier: classifier || {},
         agentSteps: agentSteps || 0,
+        select: select || [],
       }),
     });
   } catch (err) {

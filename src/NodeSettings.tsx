@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Info } from './Info';
 import { agentEnabled, pythonInfo } from './api';
 import { matchMcpServers } from './lib/mcpServers';
-import { actions } from './store';
+import { actions, useOutline } from './store';
 import type { Bullet, BulletKind } from './types';
 
 interface Props {
@@ -50,6 +50,7 @@ export function NodeSettings({ bullet }: Props) {
   });
   const [agent, setAgent] = useState(true);
   const { id, kind } = bullet;
+  const { running } = useOutline();
 
   useEffect(() => {
     let live = true;
@@ -94,6 +95,21 @@ export function NodeSettings({ bullet }: Props) {
           </div>
         </div>
         {notReady && <p className="res-col__note res-col__note--warn">{notReady.trim()}</p>}
+      </section>
+
+      <section className="res-col">
+        <h3 className="res-col__head">
+          Run
+          <Info>
+            Runs this bullet and every bullet it depends on, using pbt&rsquo;s{' '}
+            <code>select</code>. Everything else keeps its last answer.
+          </Info>
+        </h3>
+        <div className="res-col__body">
+          <button className="ns-kind" disabled={running} onClick={() => actions.runNode(id)}>
+            {running ? 'Running…' : 'Run this node'}
+          </button>
+        </div>
       </section>
 
       {kind !== 'test' && (

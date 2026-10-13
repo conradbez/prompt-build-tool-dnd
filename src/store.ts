@@ -198,6 +198,9 @@ let state: OutlineState = seed();
 // the state because nothing renders them directly; the log lines carry both.
 let runStartedAt = 0;
 let runTitles: Record<string, string> = {};
+// The toolbar owns the provider, key and settings a run needs, so it hands
+// over how to run; a bullet's settings call it through `actions.runNode`.
+let runner: ((id: string) => void) | null = null;
 const listeners = new Set<() => void>();
 
 function emit(next: OutlineState) {
@@ -879,6 +882,15 @@ export const actions = {
     }
     // indent/outdent move the caret to the bullet; a block keeps no caret.
     emit({ ...state, focus: null });
+  },
+
+  setRunner(fn: (id: string) => void) {
+    runner = fn;
+  },
+
+  /** Run one bullet and everything that feeds it (pbt's `select`). */
+  runNode(id: string) {
+    if (!state.running) runner?.(id);
   },
 
   setRunning(running: boolean) {

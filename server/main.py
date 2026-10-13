@@ -286,6 +286,9 @@ class RunRequest(BaseModel):
     # Settings → agent steps: how many steps an agent bullet may take before it
     # is told to answer. 0 means the server's default (see `agent_exec`).
     agentSteps: int = 0
+    # Run just these bullets and what feeds them (pbt's `select`). Empty runs
+    # the whole graph.
+    select: list[str] = []
 
 
 class ExportRequest(BaseModel):
@@ -508,6 +511,24 @@ def _deps(node: Node, child_ids: list[str], id_to_slug: dict[str, str]) -> list[
         if r in id_to_slug and r not in dep_ids:
             dep_ids.append(r)
     return dep_ids
+
+
+def _upstream(
+    ids: list[str],
+    by_node: dict[str, Node],
+    children: dict[str, list[str]],
+    feeds: dict[str, str],
+) -> set[str]:
+    """These bullets and every bullet they depend on, however far back."""
+    seen: set[str] = set()
+    todo = list(ids)
+    while todo:
+        i = todo.pop()
+        if i in seen:
+            continue
+        seen.add(i)
+        todo.extend(_deps(by_node[i], children[i], feeds))
+    return seen
 
 
 def _python_source(node: Node, dep_slugs: list[str], packages: str = "") -> str:
@@ -995,11 +1016,20 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
             if _calls_model(n):
                 models[id_to_slug[n.id]] = model_line + "\n" + models[id_to_slug[n.id]]
 
+    # A selected run is the selection and everything upstream of it: pbt works
+    # that out from the models itself, but the plan, prompts and verdicts sent
+    # back should name only what will actually run.
+    select = [i for i in req.select if i in by_node]
+    if req.select and not select:
+        return RunResponse(errors=["The bullet to run is empty or not runnable."])
+    in_run = _upstream(select, by_node, children, feeds) if select else set(by_node)
+    planned = [n for n in nodes if n.id in in_run]
+
     # Pull each bullet's attachments once, keyed the way the config declares
     # them, so pbt can route them to the model that asked.
     promptfiles: dict[str, Any] = {}
     try:
-        for n in nodes:
+        for n in planned:
             if n.kind in ("python", "agent", "test"):
                 continue  # a sandbox never sees attachments — don't fetch them
             for key in _node_file_keys(n, req.sessionId):
@@ -1008,7 +1038,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
     except Exception as exc:  # noqa: BLE001 — a missing object shouldn't 500
         return RunResponse(errors=[f"Could not read an attached file: {exc}"])
 
-    emit({"type": "plan", "models": [{"id": n.id, "title": titles[n.id]} for n in nodes]})
+    emit({"type": "plan", "models": [{"id": n.id, "title": titles[n.id]} for n in planned]})
 
     # What downstream prompts rendered so far, so a finished bullet's "Model
     # input" can be rebuilt the moment it lands: its inputs all finished first.
@@ -1087,6 +1117,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
             # and points at promptdata — but a variable is exactly what belongs
             # there, so `@name` is rewritten here too.
             global_instruction=_as_promptdata(global_instruction, var_names) or None,
+            select=[id_to_slug[i] for i in select] or None,
             verbose=False,
             on_model_start=on_start,
             on_model_done=on_done,
@@ -1111,7 +1142,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
         rendered[node_id] = str(outputs[slug])  # see `on_done`
 
     prompts = {}
-    for n in nodes:
+    for n in planned:
         deps = _deps(n, children[n.id], feeds)
         body = _model_input(n, deps, rendered, global_instruction, promptdata)
         if n.id in skipped:
@@ -1124,7 +1155,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
     # A test that ran says pass or fail; one skipped because what it checks
     # failed did not run; one that errored itself could not say it passed.
     tests = {}
-    for n in nodes:
+    for n in planned:
         if n.kind != "test":
             continue
         if n.id in skipped:

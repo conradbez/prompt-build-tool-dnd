@@ -194,6 +194,17 @@ export function Outline() {
     if (drag?.active && drag.target) {
       actions.moveTo(drag.id, drag.target.parentId, drag.target.index);
     }
+    if (drag?.active) {
+      // The pointer is captured by the dot, so letting go also clicks it — and
+      // a click on the dot opens the bullet. A drag is not a click: swallow it.
+      const swallow = (ev: MouseEvent) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+      };
+      window.addEventListener('click', swallow, { capture: true, once: true });
+      // No click follows if the pointer was let go off the dot's element.
+      setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0);
+    }
     setDrag(null);
   }
 

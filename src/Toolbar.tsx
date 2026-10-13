@@ -110,6 +110,9 @@ export function Toolbar() {
     return () => clearTimeout(t);
   }, [needsKey]);
 
+  // Lets a bullet's settings run just that bullet (see `actions.runNode`).
+  useEffect(() => actions.setRunner((id) => run([id])));
+
   const statuses = Object.values(state.runStatus);
   const progress = {
     total: statuses.length,
@@ -117,7 +120,9 @@ export function Toolbar() {
     failed: statuses.filter((s) => s === 'error').length,
   };
 
-  const run = async () => {
+  // `select` runs those bullets and what feeds them, keeping every other
+  // bullet's last answer; without it the whole graph runs.
+  const run = async (select?: string[]) => {
     actions.setRunning(true);
     try {
       const nodes = buildNodePayloads(getState());
@@ -130,6 +135,7 @@ export function Toolbar() {
         classifier,
         agentSteps,
         actions.runEvent,
+        select,
       );
       if (res.needsKey) {
         // Nothing ran, so the last run's answers stand; the flash says why.
@@ -138,12 +144,15 @@ export function Toolbar() {
         actions.setRunResult(s.results, [], s.prompts, s.tests, s.files);
         return;
       }
+      const s = getState();
+      const keep = <T,>(prev: Record<string, T>, next: Record<string, T> | undefined) =>
+        select ? { ...prev, ...next } : next || {};
       actions.setRunResult(
-        res.outputs || {},
+        keep(s.results, res.outputs),
         res.errors || [],
-        res.prompts || {},
-        res.tests || {},
-        res.files || {},
+        keep(s.prompts, res.prompts),
+        keep(s.tests, res.tests),
+        keep(s.files, res.files),
       );
     } catch (err) {
       actions.setRunResult(
@@ -185,7 +194,7 @@ export function Toolbar() {
           spellCheck={false}
           autoComplete="off"
         />
-        <button className="tb__run" onClick={run} disabled={state.running}>
+        <button className="tb__run" onClick={() => run()} disabled={state.running}>
           {state.running ? `Running ${progress.done}/${progress.total}…` : 'Run'}
         </button>
         {state.runLog.length > 0 && (
@@ -207,7 +216,8 @@ export function Toolbar() {
           aria-label="Settings"
           aria-expanded={settingsOpen}
         >
-          ⚙
+          {/* U+FE0E: the text glyph, not iOS's colour emoji. */}
+          {'⚙\uFE0E'}
         </button>
       </div>
 

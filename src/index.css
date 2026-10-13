@@ -1740,6 +1740,7 @@ body,
   gap: 6px;
   padding: 6px;
   background: rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -2815,4 +2816,32 @@ body,
 
 .rf-file__dl {
   color: var(--accent);
+}
+
+/* ------------------------------------------------------------------- iOS */
+
+/* `ios` is set on <html> by index.html. No keyboard, so no shortcut hints and
+   no shortcut help; the provider and key live in Settings only, at any width
+   (an iPad is wider than the narrow breakpoint that hides them elsewhere). */
+.ios .ol-menu__key,
+.ios .help__fab,
+.ios .tb__select,
+.ios .tb__key {
+  display: none;
+}
+
+/* Safari gives buttons its own padding and draws ⚙ as a colour emoji, which
+   pushed the icon off-centre in the bottom-left row. */
+.ios .tb__run,
+.ios .tb__log,
+.ios .tb__gear {
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ios .tb__log,
+.ios .tb__gear {
+  padding: 0;
 }
