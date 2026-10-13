@@ -94,6 +94,9 @@ MAX_FILES_BYTES = int(os.environ.get("AGENT_MAX_FILES_BYTES", str(20 * 1024 * 10
 
 # The longest a turn may run before it is cancelled and the bullet fails.
 TIMEOUT_SECONDS = int(os.environ.get("AGENT_TIMEOUT_SECONDS", "900"))
+# How long a bullet waits for a free instance when the workspace is at its
+# instance limit (a plan of one runs agent bullets one at a time).
+QUEUE_SECONDS = int(os.environ.get("AGENT37_QUEUE_SECONDS", "900"))
 # How long a new instance's agent may take to report healthy.
 READY_SECONDS = int(os.environ.get("AGENT_READY_SECONDS", "240"))
 # Steps (model turns) Hermes may take. The default; a run may ask for another
@@ -126,6 +129,11 @@ _PROVIDER_URL = {
 }
 # The custom provider's name in Hermes' config.
 PROVIDER_NAME = "Run"
+# The key variable Hermes' built-in provider reads, for a provider it handles
+# itself whatever the config says: an `openrouter.ai` URL goes through its own
+# OpenRouter client, which ignores the custom provider's key and fails `401
+# User not found` without this.
+_HERMES_KEY_ENV = {"openrouter": "OPENROUTER_API_KEY"}
 
 FINISHING = """
 
@@ -233,6 +241,8 @@ class _Provider:
     base_url: str
     api_key: str
     model: str
+    # Also written to ~/.hermes/.env under this name — see `_HERMES_KEY_ENV`.
+    key_env: str | None = None
 
 
 def _provider(provider: str, api_key: str | None, model: str | None) -> _Provider | None:
@@ -247,7 +257,9 @@ def _provider(provider: str, api_key: str | None, model: str | None) -> _Provide
         raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
     if provider not in _PROVIDER_URL:
         raise RuntimeError(f"Agent bullets cannot run on '{provider}'.")
-    return _Provider(_PROVIDER_URL[provider], api_key, model or model_name(provider))
+    return _Provider(
+        _PROVIDER_URL[provider], api_key, model or model_name(provider), _HERMES_KEY_ENV.get(provider)
+    )
 
 
 class _Log:
@@ -342,6 +354,32 @@ def _raise_for(r: httpx.Response) -> None:
     raise RuntimeError(f"Agent37 {r.request.method} {r.request.url.path} → {r.status_code} {detail}")
 
 
+def _create(client: httpx.Client, key: str, log: _Log) -> dict:
+    """Create the instance, waiting for a free slot while the workspace is at
+    its instance limit: another agent bullet, or one still being deleted."""
+    deadline = time.time() + QUEUE_SECONDS
+    waiting = False
+    while True:
+        r = client.post(
+            f"{API}/instances",
+            headers={"Authorization": f"Bearer {key}"},
+            json={
+                "template": TEMPLATE,
+                "name": "mindmap-agent",
+                "budget": {"credit_micros": BUDGET_MICROS},
+            },
+            timeout=600,
+        )
+        limited = r.status_code == 409 and "instance_limit" in r.text
+        if not limited or time.time() > deadline:
+            _raise_for(r)
+            return r.json()
+        if not waiting:
+            log.add("agent37", "at the workspace's instance limit; waiting for a free slot")
+            waiting = True
+        time.sleep(10)
+
+
 def _desktop_url(inst: _Instance) -> str:
     """A signed link to the instance's desktop, at noVNC's page rather than `/`."""
     signed = inst._api("POST", "/signed-url", json={"port": DESKTOP_PORT, "ttl_seconds": DESKTOP_TTL_SECONDS})
@@ -385,6 +423,9 @@ def _configure(
             ("mcp_servers.task.args", json.dumps(command[1:])),
         ]
     setup = " && ".join(f"hermes config set {k} {shlex.quote(v)}" for k, v in sets)
+    if provider and provider.key_env:
+        line = shlex.quote(f"{provider.key_env}={provider.api_key}")
+        setup += f" && printf '%s\\n' {line} >> \"$(hermes config env-path)\""
     if want_files:
         setup += f" && mkdir -p {OUTPUTS_DIR}"
     out = inst.exec(setup + " < /dev/null")
@@ -469,18 +510,7 @@ def _run_instance(
     files: list[pbt.File] = []
     with httpx.Client(timeout=60) as client:
         log.add("agent37", f"creating instance (template {TEMPLATE})")
-        r = client.post(
-            f"{API}/instances",
-            headers={"Authorization": f"Bearer {key}"},
-            json={
-                "template": TEMPLATE,
-                "name": "mindmap-agent",
-                "budget": {"credit_micros": BUDGET_MICROS},
-            },
-            timeout=600,
-        )
-        _raise_for(r)
-        inst = _Instance(client, key, r.json())
+        inst = _Instance(client, key, _create(client, key, log))
         try:
             log.add("agent37", f"instance {inst.id} up; waiting for the agent")
             inst.wait_healthy(READY_SECONDS)

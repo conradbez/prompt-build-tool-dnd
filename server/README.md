@@ -431,6 +431,7 @@ All are optional except the key:
 | `AGENT37_DESKTOP_TTL_SECONDS` | `300` | how long the desktop link opens |
 | `AGENT_STEP_LIMIT` | `30` | Hermes' `max_turns` when neither the bullet nor the run sets one |
 | `AGENT_TIMEOUT_SECONDS` | `900` | the longest a turn may run before it is cancelled |
+| `AGENT37_QUEUE_SECONDS` | `900` | how long a bullet waits for a free instance when the workspace is at its instance limit |
 | `AGENT_READY_SECONDS` | `240` | how long a new instance's agent may take to report healthy |
 
 `GET /agent/enabled` reports whether `AGENT37_API_KEY` is set.
