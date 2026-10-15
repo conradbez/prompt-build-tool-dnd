@@ -11,6 +11,7 @@ const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
 const keyStorage = (p: Provider) => `wm.apiKey.${p}`;
 const CLASSIFIER_STORAGE = 'wm.classifier';
 const AGENT_STEPS_STORAGE = 'wm.agentSteps';
+const AGENT37_KEY_STORAGE = 'wm.agent37Key';
 
 function loadClassifier(): ClassifierSettings {
   const empty = { apiKey: '', baseUrl: '', model: '' };
@@ -54,6 +55,10 @@ export function Toolbar() {
   const [agentSteps, setAgentSteps] = useState<number>(
     () => Number(localStorage.getItem(AGENT_STEPS_STORAGE)) || 0,
   );
+  // The user's own Agent37 key; blank runs preserve-disk agents on the shared instance.
+  const [agent37Key, setAgent37Key] = useState<string>(
+    () => localStorage.getItem(AGENT37_KEY_STORAGE) || '',
+  );
   // Mod+, opens settings, as in most desktop apps; the browser leaves it to the
   // page once we take it, so it works in a tab too. On a bullet (caret in its
   // row, or its node clicked) it opens *that* bullet's settings; otherwise the
@@ -89,6 +94,11 @@ export function Toolbar() {
   const onAgentStepsChange = (v: number) => {
     setAgentSteps(v);
     localStorage.setItem(AGENT_STEPS_STORAGE, String(v));
+  };
+
+  const onAgent37KeyChange = (v: string) => {
+    setAgent37Key(v);
+    localStorage.setItem(AGENT37_KEY_STORAGE, v);
   };
 
   const onProviderChange = (p: Provider) => {
@@ -134,6 +144,7 @@ export function Toolbar() {
         vars,
         classifier,
         agentSteps,
+        agent37Key,
         actions.runEvent,
         select,
       );
@@ -234,6 +245,8 @@ export function Toolbar() {
           onClassifierChange={onClassifierChange}
           agentSteps={agentSteps}
           onAgentStepsChange={onAgentStepsChange}
+          agent37Key={agent37Key}
+          onAgent37KeyChange={onAgent37KeyChange}
         />
       )}
 

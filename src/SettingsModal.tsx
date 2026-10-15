@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { AccountSection } from './Account';
 import { Info } from './Info';
+import { useAccount } from './lib/account';
 import { PROVIDERS, agentInfo, exportGraph, type ClassifierSettings, type ExportTarget, type Provider } from './api';
 import {
   NAME_RE,
@@ -14,7 +16,7 @@ import {
   cleanName,
   hasSave,
   listSaves,
-  readSave,
+  loadSave,
   setOpenSave,
   useOpenSave,
   writeSave,
@@ -47,6 +49,9 @@ interface Props {
   /** Steps an agent bullet may take before it must answer; 0 = server default. */
   agentSteps: number;
   onAgentStepsChange: (v: number) => void;
+  /** The user's own Agent37 key for preserve-disk agents; blank = shared instance. */
+  agent37Key: string;
+  onAgent37KeyChange: (v: string) => void;
 }
 
 /**
@@ -76,6 +81,8 @@ export function SettingsModal({
   onClassifierChange,
   agentSteps,
   onAgentStepsChange,
+  agent37Key,
+  onAgent37KeyChange,
 }: Props) {
   // The server's own limits, shown so a blank field says what it means.
   const [{ defaultSteps, maxSteps }, setLimits] = useState({ defaultSteps: 30, maxSteps: 200 });
@@ -207,7 +214,36 @@ export function SettingsModal({
             </div>
           </section>
 
+          <section className="res-col">
+            <h3 className="res-col__head">
+              Agent37 key — for agents that preserve disk
+              <Info>
+                By default, agents set to <em>preserve disk between runs</em> run on one Agent37
+                machine shared by everyone using this server. You get your own profile there (your
+                model key, memory and chats), and each agent its own chat and folder — but it is one
+                disk, so other people&rsquo;s agents could still read your files by path.
+                <br />
+                Add your own Agent37 API key for a machine of your own in your Agent37 workspace —
+                isolated from everyone else, billed to you. It sleeps when idle (disk-only billing)
+                and wakes on the next run. The key stays in this browser and is sent with each run.
+              </Info>
+            </h3>
+            <div className="res-col__body pd-model">
+              <input
+                className="pd-input"
+                type="password"
+                placeholder="sk_live_… (blank uses the shared machine)"
+                value={agent37Key}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => onAgent37KeyChange(e.target.value)}
+              />
+            </div>
+          </section>
+
           <VarTable />
+
+          <AccountSection />
 
           <Documents provider={provider} globalInstruction={value} />
         </div>
@@ -347,6 +383,9 @@ function Documents({
   const [names, setNames] = useState<string[]>(() => listSaves());
   /** The save this map *is* — edits go back into it. Null until one is opened. */
   const open = useOpenSave();
+  const account = useAccount();
+  // Signing in or out swaps which saves there are; the sync ends by opening one.
+  useEffect(() => setNames(listSaves()), [open, account]);
   // The empty string is "no save chosen yet"; NEW_NAME reveals the text box.
   const [chosen, setChosen] = useState<string>(() => listSaves()[0] ?? NEW_NAME);
   const [typed, setTyped] = useState('');
@@ -452,9 +491,14 @@ function Documents({
     say(`Saved as “${name}”. Changes from here go into it as you make them.`);
   }
 
-  function onLoad() {
+  async function onLoad() {
     if (naming || !chosen) return say('Pick a saved document to load.', true);
-    const doc = readSave(chosen);
+    let doc: Doc | null;
+    try {
+      doc = await loadSave(chosen);
+    } catch (e) {
+      return say(`“${chosen}” could not be fetched: ${(e as Error).message}`, true);
+    }
     if (!doc) return say(`“${chosen}” could not be read.`, true);
     if (pending !== 'load') {
       setPending('load');
@@ -551,7 +595,8 @@ function Documents({
           ) : (
             <>Nothing is open: save this map under a name and edits will go into it. </>
           )}
-          Saves stay in this browser. Loading replaces what is on screen and keeps a copy as “
+          {account ? `Saves are kept on the server for ${account.email}.` : 'Saves stay in this browser.'}{' '}
+          Loading replaces what is on screen and keeps a copy as “
           {BEFORE_LOAD}”.
         </Info>
       </h3>
@@ -648,7 +693,7 @@ function Documents({
               className={`pd-btn ${pending === 'load' || pending === 'paste' ? 'pd-btn--confirm' : ''}`}
               disabled={naming && pending === null}
               title={naming ? 'Pick a saved map first' : `Put “${chosen}” on screen`}
-              onClick={() => act(() => (pending === 'paste' ? void onPaste() : onLoad()))}
+              onClick={() => act(() => (pending === 'paste' ? void onPaste() : void onLoad()))}
             >
               {pending === 'load' || pending === 'paste' ? 'Replace this map?' : 'Load'}
             </button>

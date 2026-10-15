@@ -160,6 +160,12 @@ class RunSettings:
     steps: int = STEP_LIMIT
     # Where each log line goes the moment it happens, for the live run log.
     on_log: LogSink | None = None
+    # Settings → the user's own Agent37 key, for preserve-disk bullets on their
+    # own workspace; None runs them on the server's shared instance.
+    agent37_key: str | None = None
+    # Who is running: the signed-in email, else the browser's session id. An
+    # Agent37 bullet runs in this user's own Hermes profile.
+    user: str = ""
 
 
 # The run in progress. A context variable rather than a global because the

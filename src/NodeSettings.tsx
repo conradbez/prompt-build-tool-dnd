@@ -208,10 +208,11 @@ export function NodeSettings({ bullet }: Props) {
           <h3 className="res-col__head">
             Disk
             <Info>
-              Runs this agent on its own Agent37 machine, kept between runs: whatever it leaves on
-              disk — a checkout, installed tools, notes — is there next time. The machine is stopped
-              (disk-only billing) when the run ends. Turns off the MCP server, browser and back-off
-              below; files and the step limit still apply.
+              Runs this agent on the shared Agent37 machine, in its own session and folder, both kept
+              between runs: it remembers its earlier conversation, and whatever it leaves in its
+              folder is there next time. The machine sleeps (disk-only billing) when idle and wakes
+              on the next run. Turns off the MCP server, browser and back-off below; files and the
+              step limit still apply.
             </Info>
           </h3>
           <div className="res-col__body">
@@ -251,8 +252,8 @@ export function NodeSettings({ bullet }: Props) {
             Files
             <Info>
               The agent is told to save the files it makes — images, documents, data — in{' '}
-              <code>{bullet.persistDisk ? '~/outputs/' : '/root/outputs/'}</code>
-              {bullet.persistDisk && ', emptied at the start of each run (the rest of the disk is kept)'}.
+              <code>{bullet.persistDisk ? 'outputs/' : '/root/outputs/'}</code>
+              {bullet.persistDisk && ' in its own folder, emptied at the start of each run (the rest of the folder is kept)'}.
               They are handed to the prompt bullets this one feeds as attachments, and shown with its
               answer. An agent that saves none fails, since the
               bullets after it are waiting for them.

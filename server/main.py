@@ -22,7 +22,7 @@ import re
 from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,6 +39,7 @@ import export as exporter
 import files as attachments
 import agent_exec  # registers `model_type="agent_modal"` with pbt on import
 import agent37_exec  # registers `model_type="agent37"` with pbt on import
+import accounts
 import modal_exec  # registers `model_type="python_modal"` with pbt on import
 from llm import make_llm_call
 
@@ -251,8 +252,8 @@ class Node(BaseModel):
     producesFiles: bool = False
     # An agent bullet with a Chromium a person can watch and take over — see `agent_exec`.
     remoteBrowser: bool = False
-    # An agent bullet that keeps one Agent37 instance across runs, so its disk
-    # outlives the run — see `agent37_exec`. Overrides every other agent option
+    # An agent bullet run in its own session on the shared Agent37 instance, so
+    # its conversation and folder outlive the run — see `agent37_exec`. Overrides every other agent option
     # but the step limit and producing files.
     persistDisk: bool = False
     # A python bullet's extra sandbox packages, comma-separated — see
@@ -291,6 +292,9 @@ class RunRequest(BaseModel):
     # Settings → agent steps: how many steps an agent bullet may take before it
     # is told to answer. 0 means the server's default (see `agent_exec`).
     agentSteps: int = 0
+    # Settings → the user's own Agent37 key. Empty runs preserve-disk agents on
+    # the server's shared instance; set, on an instance in the user's workspace.
+    agent37Key: str = ""
     # Run just these bullets and what feeds them (pbt's `select`). Empty runs
     # the whole graph.
     select: list[str] = []
@@ -807,6 +811,9 @@ app.add_middleware(
 )
 
 
+app.include_router(accounts.router)
+
+
 @app.get("/healthz")
 def health() -> dict:
     """Lightweight health check."""
@@ -932,7 +939,7 @@ def export(req: ExportRequest) -> ExportResponse:
 
 
 @app.post("/run")
-async def run(req: RunRequest) -> StreamingResponse:
+async def run(req: RunRequest, authorization: Optional[str] = Header(None)) -> StreamingResponse:
     """Run the graph, streaming its progress as newline-delimited JSON.
 
     One event per line, so the UI can show a run as it happens rather than a
@@ -946,6 +953,9 @@ async def run(req: RunRequest) -> StreamingResponse:
     - ``final`` — the whole `RunResponse`, the same answer a batch run gives.
       A run that never starts (no key, nothing to run) sends only this.
     """
+    # Who is running, for their own Hermes profile on Agent37: the signed-in
+    # email, else this browser's session id.
+    user = accounts.user_or_none(authorization) or req.sessionId
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
@@ -955,7 +965,7 @@ async def run(req: RunRequest) -> StreamingResponse:
 
     async def work() -> None:
         try:
-            final = await _run(req, emit)
+            final = await _run(req, emit, user)
         except Exception as exc:  # noqa: BLE001 — surface any failure to the client
             final = RunResponse(errors=[str(exc)])
         emit({"type": "final", **final.model_dump()})
@@ -972,7 +982,7 @@ async def run(req: RunRequest) -> StreamingResponse:
     return StreamingResponse(lines(), media_type="application/x-ndjson")
 
 
-async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
+async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") -> RunResponse:
     if req.provider not in PROVIDERS:
         return RunResponse(errors=[f"Unsupported provider: {req.provider}"])
 
@@ -1104,6 +1114,8 @@ async def _run(req: RunRequest, emit: Callable[[dict], None]) -> RunResponse:
             api_key=req.apiKey,
             model=llm_model,
             steps=agent_exec.steps_for(req.agentSteps),
+            agent37_key=req.agent37Key.strip() or None,
+            user=user,
             on_log=lambda name, line: emit(
                 {"type": "log", "id": slug_to_id.get(name, name), "line": line}
             ),

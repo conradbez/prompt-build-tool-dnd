@@ -118,8 +118,8 @@ export interface Bullet {
    */
   remoteBrowser: boolean;
   /**
-   * An agent bullet that keeps one Agent37 instance across runs, so what the
-   * agent leaves on disk is there next time. Overrides the MCP server, browser
+   * An agent bullet that runs in its own session on the shared Agent37
+   * instance, so its conversation and folder are there next time. Overrides the MCP server, browser
    * and back-off; files and the step limit still apply.
    */
   persistDisk: boolean;

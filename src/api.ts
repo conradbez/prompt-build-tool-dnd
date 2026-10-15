@@ -13,6 +13,7 @@ export const PROVIDERS: { id: Provider; label: string }[] = [
 ];
 
 import type { BulletKind, FileRef, RunFile, TestJudge, TestStatus } from './types';
+import { getAccount } from './lib/account';
 import { getSessionId } from './lib/session';
 
 export interface NodePayload {
@@ -304,17 +305,24 @@ export async function runGraph(
   classifier?: ClassifierSettings,
   /** Settings → steps an agent bullet may take; 0 for the server's default. */
   agentSteps?: number,
+  /** Settings → the user's own Agent37 key; blank for the shared instance. */
+  agent37Key?: string,
   /** Called with each progress event as it arrives, `final` included. */
   onEvent?: (event: RunEvent) => void,
   /** Run just these bullets and what feeds them; empty runs the whole graph. */
   select?: string[],
 ): Promise<RunResponse> {
   const url = `${getServerUrl()}/run`;
+  const account = getAccount();
   let res: Response;
   try {
     res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // Signed in, the server runs Agent37 agents in this person's own profile.
+      headers: {
+        'Content-Type': 'application/json',
+        ...(account ? { Authorization: `Bearer ${account.token}` } : {}),
+      },
       body: JSON.stringify({
         nodes,
         provider,
@@ -324,6 +332,7 @@ export async function runGraph(
         promptdata: promptdata || {},
         classifier: classifier || {},
         agentSteps: agentSteps || 0,
+        agent37Key: agent37Key?.trim() || '',
         select: select || [],
       }),
     });

@@ -330,3 +330,6 @@ sketch
 todo *.md
 .pbt/pbt.db
 .pbt/pbt.db
+
+# Local SQLite for accounts and maps (Railway uses its volume instead).
+server/data/
