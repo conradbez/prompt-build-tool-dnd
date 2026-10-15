@@ -90,6 +90,11 @@ export interface Bullet {
    */
   jsonOutput: boolean;
   /**
+   * Reuse pbt's cached answer when nothing changed. Off, a prompt or agent
+   * bullet runs fresh every time (pbt's `config(cache=False)`).
+   */
+  cache: boolean;
+  /**
    * An agent bullet's MCP server: the command that starts it over stdio, e.g.
    * `uvx some-mcp-server` or `npx -y @scope/server`. Empty means none — the
    * agent works with bash alone. Ignored on every other kind.

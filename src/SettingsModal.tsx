@@ -116,6 +116,10 @@ export function SettingsModal({
         </div>
 
         <div className="res-modal__cols">
+          <AccountSection />
+
+          <Documents provider={provider} globalInstruction={value} />
+
           <section className="res-col">
             <h3 className="res-col__head">Model</h3>
             <div className="res-col__body pd-model">
@@ -144,60 +148,6 @@ export function SettingsModal({
 
           <section className="res-col">
             <h3 className="res-col__head">
-              Global instruction prepended to every LLM call
-              <Info>
-                Template and python bullets are left alone — only prompts get it.
-              </Info>
-            </h3>
-            <textarea
-              className="res-col__edit"
-              value={value}
-              spellCheck={false}
-              placeholder="e.g. Answer in British English, and keep it under 200 words."
-              onChange={(e) => onChange(e.target.value)}
-            />
-          </section>
-
-          <section className="res-col">
-            <h3 className="res-col__head">
-              Classifier for tests
-              <Info>
-                Used by test bullets judged by a classifier instead of the LLM. Any{' '}
-                <code>/v1/systemone</code> endpoint: blank means TypeSafe&rsquo;s hosted Jev; for a
-                local Ollaya use <code>http://localhost:11435</code> and <code>laya:en</code>.
-              </Info>
-            </h3>
-            <div className="res-col__body pd-model">
-              <input
-                className="pd-input"
-                type="password"
-                placeholder="TypeSafe API key (blank for local)"
-                value={classifier.apiKey}
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => onClassifierChange({ ...classifier, apiKey: e.target.value })}
-              />
-              <input
-                className="pd-input"
-                placeholder="https://api.typesafe.ai"
-                value={classifier.baseUrl}
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => onClassifierChange({ ...classifier, baseUrl: e.target.value })}
-              />
-              <input
-                className="pd-input"
-                placeholder="jev-latest"
-                value={classifier.model}
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => onClassifierChange({ ...classifier, model: e.target.value })}
-              />
-            </div>
-          </section>
-
-          <section className="res-col">
-            <h3 className="res-col__head">
               Agent steps
               <Info>
                 How many steps an agent bullet may take — one per reply — before it is told to stop
@@ -218,41 +168,146 @@ export function SettingsModal({
             </div>
           </section>
 
-          <section className="res-col">
-            <h3 className="res-col__head">
-              Agent37 key — for agents that preserve disk
-              <Info>
-                By default, agents set to <em>preserve disk between runs</em> run on one Agent37
-                machine shared by everyone using this server. You get your own profile there (your
-                model key, memory and chats), and each agent its own chat and folder — but it is one
-                disk, so other people&rsquo;s agents could still read your files by path.
-                <br />
-                Add your own Agent37 API key for a machine of your own in your Agent37 workspace —
-                isolated from everyone else, billed to you. It sleeps when idle (disk-only billing)
-                and wakes on the next run. The key stays in this browser and is sent with each run.
-              </Info>
-            </h3>
-            <div className="res-col__body pd-model">
-              <input
-                className="pd-input"
-                type="password"
-                placeholder="sk_live_… (blank uses the shared machine)"
-                value={agent37Key}
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => onAgent37KeyChange(e.target.value)}
-              />
-            </div>
-          </section>
+          <ApiKeys
+            classifier={classifier}
+            onClassifierChange={onClassifierChange}
+            agent37Key={agent37Key}
+            onAgent37KeyChange={onAgent37KeyChange}
+          />
 
           <VarTable />
 
-          <AccountSection />
-
-          <Documents provider={provider} globalInstruction={value} />
+          <section className="res-col">
+            <h3 className="res-col__head">
+              Global instruction
+              <Info>
+                Prepended to every LLM call in a run. Template and python bullets are left alone —
+                only prompts get it.
+              </Info>
+            </h3>
+            <textarea
+              className="res-col__edit"
+              value={value}
+              spellCheck={false}
+              placeholder="e.g. Answer in British English, and keep it under 200 words."
+              onChange={(e) => onChange(e.target.value)}
+            />
+          </section>
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Keys and endpoints for services other than the run's model, one row each in
+ * the variables' table layout: the name fixed on the left, the value yours.
+ * The heading's "i" says what each one is for.
+ */
+function ApiKeys({
+  classifier,
+  onClassifierChange,
+  agent37Key,
+  onAgent37KeyChange,
+}: {
+  classifier: ClassifierSettings;
+  onClassifierChange: (v: ClassifierSettings) => void;
+  agent37Key: string;
+  onAgent37KeyChange: (v: string) => void;
+}) {
+  const rows: {
+    name: string;
+    value: string;
+    secret?: boolean;
+    placeholder: string;
+    set: (v: string) => void;
+  }[] = [
+    {
+      name: 'agent37_key',
+      value: agent37Key,
+      secret: true,
+      placeholder: 'sk_live_… (blank: shared machine)',
+      set: onAgent37KeyChange,
+    },
+    {
+      name: 'classifier_key',
+      value: classifier.apiKey,
+      secret: true,
+      placeholder: 'TypeSafe key (blank for local)',
+      set: (v) => onClassifierChange({ ...classifier, apiKey: v }),
+    },
+    {
+      name: 'classifier_url',
+      value: classifier.baseUrl,
+      placeholder: 'https://api.typesafe.ai',
+      set: (v) => onClassifierChange({ ...classifier, baseUrl: v }),
+    },
+    {
+      name: 'classifier_model',
+      value: classifier.model,
+      placeholder: 'jev-latest',
+      set: (v) => onClassifierChange({ ...classifier, model: v }),
+    },
+  ];
+
+  return (
+    <section className="res-col">
+      <h3 className="res-col__head">
+        API keys
+        <Info>
+          <b>agent37_key</b> — for agents set to run on <em>Agent37 — persistent</em>. Blank runs
+          them on one Agent37 machine shared by everyone on this server: your own profile and
+          folder, but one disk, so other people&rsquo;s agents could read your files by path. Your
+          own key gets a machine of your own, billed to you; it sleeps when idle (disk-only
+          billing) and wakes on the next run.
+          <br />
+          <b>classifier_key / _url / _model</b> — for test bullets judged by a classifier instead
+          of the LLM. Any <code>/v1/systemone</code> endpoint: blank means TypeSafe&rsquo;s hosted
+          Jev; for a local Ollaya use <code>http://localhost:11435</code> and <code>laya:en</code>.
+          <br />
+          All stay in this browser and are sent with each run.
+        </Info>
+      </h3>
+      <div className="res-col__body pd-body">
+        <table className="pd-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Value</th>
+              {/* Empty, so the columns line up with the variables' table below. */}
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.name}>
+                <td>
+                  <input
+                    className="pd-input pd-input--name pd-input--fixed"
+                    value={row.name}
+                    readOnly
+                    tabIndex={-1}
+                    onMouseDown={(e) => e.preventDefault()}
+                  />
+                </td>
+                <td>
+                  <input
+                    className="pd-input"
+                    type={row.secret ? 'password' : 'text'}
+                    value={row.value}
+                    placeholder={row.placeholder}
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(e) => row.set(e.target.value)}
+                  />
+                </td>
+                <td />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -319,6 +374,9 @@ function VarTable() {
                       }${fixed ? ' pd-input--fixed' : ''}`}
                       value={row.name}
                       readOnly={!!fixed}
+                      // A fixed name is a label: no caret, no selection, not a tab stop.
+                      tabIndex={fixed ? -1 : undefined}
+                      onMouseDown={fixed ? (e) => e.preventDefault() : undefined}
                       spellCheck={false}
                       autoComplete="off"
                       placeholder={last ? 'tone' : ''}
@@ -590,7 +648,7 @@ function Documents({
   return (
     <section className="res-col" ref={section}>
       <h3 className="res-col__head">
-        This map — save, load, export
+        This map
         <Info>
           {open ? (
             <>
@@ -655,7 +713,7 @@ function Documents({
               aria-label="Other places to put this map"
               onClick={() => openMenu('save')}
             >
-              ▴
+              <Chevron />
             </button>
             {menu === 'save' && (
               <ul className="pd-pop" role="menu">
@@ -708,7 +766,7 @@ function Documents({
               aria-label="Other places to load a map from"
               onClick={() => openMenu('load')}
             >
-              ▴
+              <Chevron />
             </button>
             {menu === 'load' && (
               <ul className="pd-pop" role="menu">
@@ -786,4 +844,13 @@ function download(filename: string, text: string) {
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/** The split buttons' menu caret, drawn to match a native select's chevron. */
+function Chevron() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+      <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }

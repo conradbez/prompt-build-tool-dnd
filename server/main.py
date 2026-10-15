@@ -113,6 +113,9 @@ LLM_MODEL_VAR = "llm_model"
 _MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@-]+$")
 pbt.register_config_keys(LLM_MODEL_VAR)
 
+# A bullet with caching off: pbt skips the cache lookup and always runs it.
+NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"
+
 
 def _llm_model(promptdata: dict[str, str]) -> str | None:
     """The model this person chose, or None for the server's default.
@@ -298,6 +301,8 @@ class Node(BaseModel):
     packages: str = ""
     # Hold this bullet's answer to JSON — pbt's `output_format="json"`.
     jsonOutput: bool = False
+    # Reuse pbt's cached answer. Off, it gets pbt's `config(cache=False)`.
+    cache: bool = True
     # A test bullet's judge: "llm" asks the run's model for a verdict,
     # "classifier" asks the classifier for P(yes) and passes at `threshold`.
     judge: str = "llm"
@@ -458,6 +463,8 @@ def _build_source(
         source = JSON_CONFIG_LINE + "\n" + source
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
+    if not node.cache and node.kind in ("prompt", "agent"):
+        source = NO_CACHE_CONFIG_LINE + "\n" + source
     if node.kind == "agent" and node.persistDisk:
         return (
             agent37_exec.config_line(

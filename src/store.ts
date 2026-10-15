@@ -22,6 +22,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     pos: null,
     kind: 'prompt',
     jsonOutput: false,
+    cache: true,
     mcpServer: '',
     agentSteps: 0,
     agentBackoff: 0,
@@ -101,6 +102,7 @@ export function parseDoc(value: unknown): Doc | null {
         pos: isPos(b.pos) ? b.pos : null,
         kind: isKind(b.kind) ? b.kind : 'prompt',
         jsonOutput: !!b.jsonOutput,
+        cache: b.cache !== false,
         mcpServer: typeof b.mcpServer === 'string' ? b.mcpServer : '',
         agentSteps: typeof b.agentSteps === 'number' && b.agentSteps > 0 ? Math.floor(b.agentSteps) : 0,
         agentBackoff: typeof b.agentBackoff === 'number' && b.agentBackoff > 0 ? b.agentBackoff : 0,
@@ -260,6 +262,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     refs: b.refs.filter((r) => s.bullets[r]),
     kind: b.kind,
     jsonOutput: b.jsonOutput,
+    cache: b.cache,
     mcpServer: b.mcpServer,
     agentSteps: b.agentSteps,
     agentBackoff: b.agentBackoff,
@@ -552,6 +555,15 @@ export const actions = {
     if (!b || b.packages === packages) return;
     const next = clone(state);
     next.bullets[id] = { ...b, packages };
+    emit(next);
+  },
+
+  /** Let one bullet reuse pbt's cached answer, or not — see `Bullet.cache`. */
+  setCache(id: string, on: boolean) {
+    const b = state.bullets[id];
+    if (!b || b.cache === on) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, cache: on };
     emit(next);
   },
 

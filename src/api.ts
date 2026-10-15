@@ -46,6 +46,8 @@ export interface NodePayload {
   packages: string;
   /** Validate this bullet's answer as JSON (pbt's `output_format="json"`). */
   jsonOutput: boolean;
+  /** Reuse pbt's cached answer — see `Bullet.cache`. */
+  cache: boolean;
   /** A test bullet's judge, and the P(yes) a classifier-judged one needs. */
   judge: TestJudge;
   threshold: number;

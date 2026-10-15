@@ -1376,12 +1376,14 @@ body,
 }
 
 .pd-btn--caret {
-  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
   border-left: none;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  font-size: 10px;
-  color: var(--muted);
+  color: #52606d;
 }
 
 /* The seam belongs to whichever half is not being hovered, so hovering one
@@ -1393,10 +1395,9 @@ body,
 .pd-pop {
   position: absolute;
   z-index: 60;
-  /* Upward: this row is the last thing in a panel that scrolls, so a menu
-     hanging below it is clipped by the panel's own edge. There is always room
-     above — the sections it covers are the ones you are not using. */
-  bottom: calc(100% + 4px);
+  /* Downward: this row sits near the top of Settings, with the sections it
+     covers below it — upward it would be clipped by the panel's header. */
+  top: calc(100% + 4px);
   left: 0;
   margin: 0;
   padding: 4px;
@@ -1564,11 +1565,14 @@ body,
   color: #0f766e;
 }
 
-/* A name the server owns: readable, selectable, not editable. */
+/* A name the server owns: a label, not a field — readable, but not editable,
+   selectable or focusable (see the inputs' `tabIndex` and `onMouseDown`). */
 .pd-input--fixed {
   background: #f5f7fa;
   color: #3e4c59;
   cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .pd-input--bad {

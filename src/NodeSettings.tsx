@@ -120,6 +120,22 @@ export function NodeSettings({ bullet }: Props) {
           </Row>
         )}
 
+        {(kind === 'prompt' || kind === 'agent') && (
+          <Row
+            label="Cache"
+            info="Ticked, a run with the same prompt and settings as an earlier one reuses that answer instantly instead of calling the model again. Unticked, this bullet runs fresh every time — for an agent whose job has side effects, or an answer you want redone."
+          >
+            <label className="ns-check">
+              <input
+                type="checkbox"
+                checked={bullet.cache}
+                onChange={(e) => actions.setCache(id, e.target.checked)}
+              />
+              Reuse cached answer
+            </label>
+          </Row>
+        )}
+
         {kind === 'test' && (
           <Row
             label="Judge"
