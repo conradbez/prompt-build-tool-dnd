@@ -64,8 +64,8 @@ import httpx
 import pbt
 from pbt.executor.run_context import parse_json_output as pbt_json
 
-import agent_exec
-from llm import model_name
+from . import agent_exec
+from .models import model_name
 
 MODEL_TYPE = "agent37"
 

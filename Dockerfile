@@ -12,8 +12,10 @@ RUN yarn install --immutable && yarn build
 # ---- Stage 2: Python server (serves /run + the built dist/) ----
 FROM python:3.12-slim
 WORKDIR /app
+COPY pbt-extension-model-kinds ./pbt-extension-model-kinds
 COPY server/requirements.txt ./server/requirements.txt
-RUN pip install --no-cache-dir -r server/requirements.txt
+# requirements.txt names the model-kinds package by a path relative to server/.
+RUN cd server && pip install --no-cache-dir -r requirements.txt
 COPY server ./server
 COPY --from=web /web/dist ./dist
 WORKDIR /app/server

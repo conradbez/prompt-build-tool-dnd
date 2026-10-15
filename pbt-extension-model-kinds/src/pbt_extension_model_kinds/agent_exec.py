@@ -61,8 +61,8 @@ from typing import Any, Callable
 import pbt
 from pbt.executor.run_context import parse_json_output as pbt_json
 
-import modal_exec
-from llm import ENV_KEYS, model_name
+from . import modal_exec
+from .models import ENV_KEYS, model_name
 
 MODEL_TYPE = "agent_modal"
 
