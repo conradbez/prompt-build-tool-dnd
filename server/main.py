@@ -42,6 +42,14 @@ import agent37_exec  # registers `model_type="agent37"` with pbt on import
 import accounts
 import modal_exec  # registers `model_type="python_modal"` with pbt on import
 from llm import make_llm_call
+from pbt import model_types as _pbt_kinds
+
+# pbt registers its own `execute_python` (exec() in this process) and `agent`
+# (bash on this machine) on import. Nothing here asks for them — code runs on
+# Modal or Agent37 — so they are taken out: a `model_type` naming one is then
+# unknown, and pbt runs it as a plain LLM call instead.
+for _local in ("execute_python", "agent"):
+    _pbt_kinds._REGISTRY.pop(_local, None)
 
 # The built frontend (repo-root `dist/`), if it was shipped alongside the
 # server. When present it is served at `/`, so one deployment hosts both the
@@ -141,6 +149,32 @@ def _promptfiles_line(keys: list[str]) -> str:
 # rather than expanded, because *where it sits* is the point: it marks the place
 # in the sentence that the referenced bullet's output belongs.
 _MENTION = re.compile(r"@\[\[([A-Za-z0-9_-]+)\]\]")
+
+
+# The only Jinja a person's text may carry once the server has rewritten it:
+# the `ref()` and `promptdata()` calls `_inline` and `_as_promptdata` put in.
+# Each takes a bare word, so neither can reach anything else.
+_ALLOWED_JINJA = re.compile(r"""\{\{ (?:ref\('\w+'\)|promptdata\("\w+"\)) \}\}""")
+# A global instruction may also wrap the prompt with `{{ prompt }}`.
+_ALLOWED_GLOBAL_JINJA = re.compile(_ALLOWED_JINJA.pattern + r"|\{\{\s*prompt\s*\}\}")
+
+
+def _escape_jinja(text: str, allowed: "re.Pattern[str]" = _ALLOWED_JINJA) -> str:
+    """*text* as Jinja source that renders back to itself, but for the calls
+    *allowed* matches.
+
+    pbt renders every bullet with plain (unsandboxed) Jinja, so a `{{ … }}` a
+    person typed would run on this server, and a `{{ config(…) }}` would
+    override the config the server set — the model kind included. Every other
+    `{` becomes `{{ '{' }}`, so no tag can start.
+    """
+    out, at = [], 0
+    for match in allowed.finditer(text):
+        out.append(text[at:match.start()].replace("{", "{{ '{' }}"))
+        out.append(match.group(0))
+        at = match.end()
+    out.append(text[at:].replace("{", "{{ '{' }}"))
+    return "".join(out)
 
 
 def _inline(text: str, replace) -> tuple[str, set[str]]:
@@ -404,7 +438,7 @@ def _build_source(
         # The assertion, then the verdict it wants, then what it is about. A
         # mention only connects the test; it is not inlined, or the material
         # would land inside the assertion and leave "Material under test" empty.
-        text = _test_assertion(_as_promptdata(node.text.strip(), var_names or set()))
+        text = _escape_jinja(_test_assertion(_as_promptdata(node.text.strip(), var_names or set())))
         ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids]
         if _is_classifier(node):
             return "\n".join(
@@ -415,7 +449,7 @@ def _build_source(
         _as_promptdata(node.text.strip(), var_names or set()),
         lambda ref_id: "{{ ref('%s') }}" % id_to_slug[ref_id] if ref_id in id_to_slug else None,
     )
-    prompt = _json_body(node, text)
+    prompt = _json_body(node, _escape_jinja(text))
     # Only what has nowhere else to be: a reference already standing in the
     # sentence must not also be pasted underneath it.
     ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids if d not in inlined]
@@ -1145,7 +1179,9 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             # `ref()` is refused inside a global instruction — pbt says as much
             # and points at promptdata — but a variable is exactly what belongs
             # there, so `@name` is rewritten here too.
-            global_instruction=_as_promptdata(global_instruction, var_names) or None,
+            global_instruction=_escape_jinja(
+                _as_promptdata(global_instruction, var_names), _ALLOWED_GLOBAL_JINJA
+            ) or None,
             select=[id_to_slug[i] for i in select] or None,
             verbose=False,
             on_model_start=on_start,
