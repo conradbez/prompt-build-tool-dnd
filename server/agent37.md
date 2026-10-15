@@ -13,6 +13,8 @@ call below against a real instance and copies it as cURL.
 | pbt user (signed-in email, else browser session id) | Hermes **profile** | `u-` + `sha256(user)[:20]` |
 | Node | Hermes **session** | `session_id = sha256(node id)[:32]` |
 | Node's folder | dir on the instance's disk | `~/.hermes/profiles/<profile>/pbt/<session>/` |
+| Node's *Create public URL* | public port | `20000 + int(session[:8], 16) % 10000`, label `pbt-<session[:24]>` |
+| Node's *Create browser* | signed URL to the desktop | port 6901, `AGENT37_DESKTOP_TTL_SECONDS` |
 
 Per run: `exec` (make profile if new, write its config, make the folder) →
 `POST /v1/responses {profile, session_id, input, stream}` → collect files.
@@ -62,9 +64,9 @@ only. Wake is transparent and takes seconds; after a long sleep it may boot fres
 | Call | Endpoint | Used by the node |
 | - | - | - |
 | Exec | `POST /instances/{id}/exec` `{command}` → `{exit_code, stdout, stderr}`; output capped at 512 KB; wakes a sleeper | ✅ profile + config + folder setup, listing outputs |
-| Signed URL | `POST /instances/{id}/signed-url` `{port, ttl_seconds}` | ✅ noVNC desktop link (port 6901) in the log |
-| List public URLs | `GET /instances/{id}/public-ports` | — |
-| Create public URL | `POST /instances/{id}/public-ports` — one port, permanent, no auth (webhooks, embeds); `DELETE …/public-ports/{port}` | — |
+| Signed URL | `POST /instances/{id}/signed-url` `{port, ttl_seconds}` | ✅ *Create browser*: noVNC desktop link (port 6901) in the log, before the turn |
+| List public URLs | `GET /instances/{id}/public-ports` | ✅ find the bullet's port by label `pbt-<session>` |
+| Create public URL | `POST /instances/{id}/public-ports` `{port, label}` — one port, permanent, no auth (webhooks, embeds); `DELETE …/public-ports/{port}`; max 50 per instance | ✅ *Create public URL*: port 20000–29999 picked by session id, told to the agent |
 | SSH | your own keypair: ssh, scp, sftp, VS Code Remote | — |
 | Logs / metrics | boot + runtime logs; CPU / memory / disk history | — |
 
@@ -139,6 +141,7 @@ Compute is billed separately, per minute awake, from the workspace wallet.
 | - | - | - |
 | `AGENT37_API_KEY` | — | server's key; the shared instance. Users can set their own in Settings |
 | `AGENT37_INSTANCE_NAME` | `pbt-shared` | the shared instance's name |
+| `AGENT37_INSTANCE_ID` | `9c7c78hguk` | share this existing instance (server key only); wins over the name |
 | `AGENT37_TEMPLATE` | `hermes-vnc-desktop` | template it is created from |
 | `AGENT37_IDLE_SECONDS` | `600` | auto-sleep after this much idle |
 | `AGENT37_BUDGET_MICROS` | `1000000` | managed-services cap per instance |

@@ -38,6 +38,8 @@ export interface NodePayload {
   producesFiles: boolean;
   /** An agent bullet with a remote browser — see `Bullet.remoteBrowser`. */
   remoteBrowser: boolean;
+  /** An Agent37 agent bullet with a public URL — see `Bullet.publicUrl`. */
+  publicUrl: boolean;
   /** An agent bullet whose disk outlives the run — see `Bullet.persistDisk`. */
   persistDisk: boolean;
   /** A python bullet's extra sandbox packages, comma-separated; empty for none. */

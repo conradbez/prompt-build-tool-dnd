@@ -252,6 +252,9 @@ class Node(BaseModel):
     producesFiles: bool = False
     # An agent bullet with a Chromium a person can watch and take over — see `agent_exec`.
     remoteBrowser: bool = False
+    # An Agent37 agent bullet with a public URL to a port of its own — see
+    # `agent37_exec`. Ignored unless `persistDisk`.
+    publicUrl: bool = False
     # An agent bullet run in its own session on the shared Agent37 instance, so
     # its conversation and folder outlive the run — see `agent37_exec`. Overrides every other agent option
     # but the step limit and producing files.
@@ -422,7 +425,13 @@ def _build_source(
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
     if node.kind == "agent" and node.persistDisk:
-        return agent37_exec.config_line(node.id, node.agentSteps, node.producesFiles) + "\n" + source
+        return (
+            agent37_exec.config_line(
+                node.id, node.agentSteps, node.producesFiles, node.remoteBrowser, node.publicUrl
+            )
+            + "\n"
+            + source
+        )
     if node.kind == "agent":
         # The sandbox never sees attachments, so none are declared either.
         return (

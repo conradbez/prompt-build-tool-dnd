@@ -27,6 +27,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     agentBackoff: 0,
     producesFiles: false,
     remoteBrowser: false,
+    publicUrl: false,
     persistDisk: false,
     packages: '',
     judge: 'llm',
@@ -105,6 +106,7 @@ export function parseDoc(value: unknown): Doc | null {
         agentBackoff: typeof b.agentBackoff === 'number' && b.agentBackoff > 0 ? b.agentBackoff : 0,
         producesFiles: !!b.producesFiles,
         remoteBrowser: !!b.remoteBrowser,
+        publicUrl: !!b.publicUrl,
         persistDisk: !!b.persistDisk,
         packages: typeof b.packages === 'string' ? b.packages : '',
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
@@ -263,6 +265,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     agentBackoff: b.agentBackoff,
     producesFiles: b.producesFiles,
     remoteBrowser: b.remoteBrowser,
+    publicUrl: b.publicUrl,
     persistDisk: b.persistDisk,
     packages: b.packages,
     judge: b.judge,
@@ -503,6 +506,15 @@ export const actions = {
     if (!b || b.remoteBrowser === on) return;
     const next = clone(state);
     next.bullets[id] = { ...b, remoteBrowser: on };
+    emit(next);
+  },
+
+  /** Whether an Agent37 agent bullet gets a public URL — see `Bullet.publicUrl`. */
+  setPublicUrl(id: string, on: boolean) {
+    const b = state.bullets[id];
+    if (!b || b.publicUrl === on) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, publicUrl: on };
     emit(next);
   },
 

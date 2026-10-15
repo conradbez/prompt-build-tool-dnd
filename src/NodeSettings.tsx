@@ -209,24 +209,34 @@ export function NodeSettings({ bullet }: Props) {
       {kind === 'agent' && (
         <section className="res-col">
           <h3 className="res-col__head">
-            Disk
+            Runs on
             <Info>
-              Runs this agent on the shared Agent37 machine, in its own session and folder, both kept
-              between runs: it remembers its earlier conversation, and whatever it leaves in its
-              folder is there next time. The machine sleeps (disk-only billing) when idle and wakes
-              on the next run. Turns off the MCP server, browser and back-off below; files and the
-              step limit still apply.
+              <b>Sandbox</b> — a fresh Modal machine every run, gone when it ends. MCP server and
+              back-off are available here.
+              <br />
+              <b>Agent37 — persistent</b> — an Agent37 machine kept between runs, in this
+              bullet&rsquo;s own session and folder: it remembers its earlier conversation, and what
+              it leaves in its folder is there next time. The machine sleeps (disk-only billing) when
+              idle and wakes on the next run. It can also get a public URL.
             </Info>
           </h3>
           <div className="res-col__body">
-            <label className="ns-check">
-              <input
-                type="checkbox"
-                checked={bullet.persistDisk}
-                onChange={(e) => actions.setPersistDisk(id, e.target.checked)}
-              />
-              Preserve disk between runs
-            </label>
+            <div className="ns-kinds" role="radiogroup" aria-label="Runs on">
+              {[
+                { on: false, label: 'Sandbox' },
+                { on: true, label: 'Agent37 — persistent' },
+              ].map((r) => (
+                <button
+                  key={r.label}
+                  role="radio"
+                  aria-checked={bullet.persistDisk === r.on}
+                  className={`ns-kind ${bullet.persistDisk === r.on ? 'ns-kind--on' : ''}`}
+                  onClick={() => actions.setPersistDisk(id, r.on)}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
           </div>
           {bullet.persistDisk && !agent37Key.trim() && (
             <p className="res-col__note res-col__note--warn">
@@ -235,6 +245,30 @@ export function NodeSettings({ bullet }: Props) {
               machine of your own.
             </p>
           )}
+        </section>
+      )}
+
+      {kind === 'agent' && bullet.persistDisk && (
+        <section className="res-col">
+          <h3 className="res-col__head">
+            Public URL
+            <Info>
+              Gives this bullet a port of its own on the Agent37 machine and a permanent public HTTPS
+              link to it. The agent is told the port and the link, so a site, API or webhook it
+              serves there is reachable by anyone who has the link — no sign-in. The link shows up in
+              the live log and stays the same across runs.
+            </Info>
+          </h3>
+          <div className="res-col__body">
+            <label className="ns-check">
+              <input
+                type="checkbox"
+                checked={bullet.publicUrl}
+                onChange={(e) => actions.setPublicUrl(id, e.target.checked)}
+              />
+              Create public URL
+            </label>
+          </div>
         </section>
       )}
 
@@ -287,25 +321,34 @@ export function NodeSettings({ bullet }: Props) {
           <h3 className="res-col__head">
             Browser
             <Info>
-              Opens a Chromium in the agent&rsquo;s sandbox that you can watch and take over from
-              your own browser — the link shows up in the agent&rsquo;s live log. The agent drives
-              it over the DevTools protocol at <code>http://localhost:9222</code>; pair it with the
-              MCP server <code>npx @playwright/mcp@latest --cdp-endpoint http://localhost:9222</code>{' '}
-              to give it browser tools. It closes when the agent finishes.
+              {bullet.persistDisk ? (
+                <>
+                  Links the Agent37 machine&rsquo;s desktop in the agent&rsquo;s live log, so you can
+                  watch the browser it drives and take over — to sign in, say. The link lasts a few
+                  minutes; each run makes a new one.
+                </>
+              ) : (
+                <>
+                  Opens a Chromium in the agent&rsquo;s sandbox that you can watch and take over from
+                  your own browser — the link shows up in the agent&rsquo;s live log. The agent drives
+                  it over the DevTools protocol at <code>http://localhost:9222</code>; pair it with
+                  the MCP server{' '}
+                  <code>npx @playwright/mcp@latest --cdp-endpoint http://localhost:9222</code> to
+                  give it browser tools. It closes when the agent finishes.
+                </>
+              )}
             </Info>
           </h3>
-          <fieldset className="ns-off" disabled={bullet.persistDisk}>
-            <div className="res-col__body">
-              <label className="ns-check">
-                <input
-                  type="checkbox"
-                  checked={bullet.remoteBrowser}
-                  onChange={(e) => actions.setRemoteBrowser(id, e.target.checked)}
-                />
-                Expose remote browser
-              </label>
-            </div>
-          </fieldset>
+          <div className="res-col__body">
+            <label className="ns-check">
+              <input
+                type="checkbox"
+                checked={bullet.remoteBrowser}
+                onChange={(e) => actions.setRemoteBrowser(id, e.target.checked)}
+              />
+              Create browser
+            </label>
+          </div>
         </section>
       )}
 

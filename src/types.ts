@@ -112,15 +112,22 @@ export interface Bullet {
    */
   producesFiles: boolean;
   /**
-   * An agent bullet with a visible Chromium in its sandbox, which a person can
-   * watch and take over in their own browser (noVNC) while the agent drives it
-   * over the DevTools protocol. Ignored on every other kind.
+   * An agent bullet with a visible browser a person can watch and take over in
+   * their own (noVNC), its link in the live log: a Chromium in the Modal sandbox,
+   * or the Agent37 machine's desktop. Ignored on every other kind.
    */
   remoteBrowser: boolean;
   /**
-   * An agent bullet that runs in its own session on the shared Agent37
-   * instance, so its conversation and folder are there next time. Overrides the MCP server, browser
-   * and back-off; files and the step limit still apply.
+   * An Agent37 agent bullet with a permanent public HTTPS URL for one port of
+   * its own, so what it serves there (a site, an API, a webhook) is reachable
+   * by anyone. Ignored unless `persistDisk`.
+   */
+  publicUrl: boolean;
+  /**
+   * An agent bullet that runs on Agent37 — persistent — in its own session, so
+   * its conversation and folder are there next time; else on a fresh Modal
+   * sandbox. Overrides the MCP server and back-off; files, browser and the step
+   * limit still apply.
    */
   persistDisk: boolean;
   /**

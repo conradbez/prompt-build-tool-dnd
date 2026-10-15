@@ -75,6 +75,14 @@ SESSION_KEY = "session"
 STEPS_KEY = agent_exec.STEPS_KEY
 # The config key saying the bullet must hand on files, not only text.
 FILES_KEY = agent_exec.FILES_KEY
+# The config key asking for the machine's desktop to be linked in the log.
+BROWSER_KEY = agent_exec.BROWSER_KEY
+# The config key asking for a public URL to a port of the bullet's own.
+PUBLIC_KEY = "public_url"
+# A bullet's public port is picked from this range by its session id, so it is
+# the same every run; Agent37 allows 50 public ports per instance.
+PUBLIC_PORT_BASE = 20000
+PUBLIC_PORT_SPAN = 10000
 
 # Each node's folder inside its user's Hermes profile, then the session id. Its
 # `outputs/` is where a node asked for files saves them, emptied at the start of
@@ -95,6 +103,9 @@ BUDGET_MICROS = int(os.environ.get("AGENT37_BUDGET_MICROS", "1000000"))
 MANAGED_MODEL = os.environ.get("AGENT37_MANAGED_MODEL", "").lower() in ("1", "true", "yes")
 # The shared instance's name, found again by it on every server start.
 INSTANCE_NAME = os.environ.get("AGENT37_INSTANCE_NAME", "pbt-shared")
+# An existing instance to share instead, by id; wins over the name for the
+# server's own key. A user's own key still finds theirs by name.
+INSTANCE_ID = os.environ.get("AGENT37_INSTANCE_ID", "9c7c78hguk")
 # How long the instance may see no traffic before Agent37 puts it to sleep
 # (disk-only billing). Agent37 allows 300 to 86400.
 IDLE_SECONDS = int(os.environ.get("AGENT37_IDLE_SECONDS", "600"))
@@ -158,6 +169,14 @@ Your final message is what the person reads, so make it the answer itself —
 not a description of what you did or where you put it.
 """
 
+PUBLIC_NOTE = """
+Anything you serve on port {port} (bind 0.0.0.0) is public at {url} — no
+sign-in, for anyone with the link, and the same link every run. Use it when the
+task wants something reachable (a site, an API, a webhook); keep the server
+running in the background (e.g. `nohup … &`) so it outlives this turn, and give
+the link in your answer.
+"""
+
 FILES_NOTE = """
 This task must produce files. Save every file the person should get — images,
 documents, data — in {outputs}/ (it exists already, and is emptied before each
@@ -167,14 +186,24 @@ say what each file is rather than pasting its contents.
 """
 
 
-def config_line(session: str, steps: int = 0, produces_files: bool = False) -> str:
+def config_line(
+    session: str,
+    steps: int = 0,
+    produces_files: bool = False,
+    browser: bool = False,
+    public_url: bool = False,
+) -> str:
     """The bullet's config line, naming its session and, when set, its step
-    limit and whether it hands on files."""
+    limit, whether it hands on files, links its desktop, or gets a public URL."""
     args = ['model_type="%s"' % MODEL_TYPE, "%s=%s" % (SESSION_KEY, json.dumps(session))]
     if steps and steps > 0:
         args.append("%s=%d" % (STEPS_KEY, int(steps)))
     if produces_files:
         args.append("%s=True" % FILES_KEY)
+    if browser:
+        args.append("%s=True" % BROWSER_KEY)
+    if public_url:
+        args.append("%s=True" % PUBLIC_KEY)
     return "{{ config(%s) }}" % ", ".join(args)
 
 
@@ -390,8 +419,9 @@ def _find(client: httpx.Client, key: str) -> dict | None:
     """The workspace's shared instance, if there is one."""
     r = client.get(f"{API}/instances", headers={"Authorization": f"Bearer {key}"}, timeout=60)
     _raise_for(r)
+    pinned = INSTANCE_ID if key == os.environ.get(API_KEY_ENV) else ""
     for inst in r.json().get("data", []):
-        if inst.get("name") == INSTANCE_NAME and inst.get("status") not in ("deleted", "deleting"):
+        if (inst.get("id") == pinned if pinned else inst.get("name") == INSTANCE_NAME) and inst.get("status") not in ("deleted", "deleting"):
             return inst
     return None
 
@@ -459,6 +489,26 @@ def _bring_up(client: httpx.Client, key: str, ws: _Workspace, log: _Log) -> _Ins
         inst.wait_healthy(READY_SECONDS)
         ws.shared = {"id": inst.id, "url": inst.url}
         return inst
+
+
+def _public_url(inst: _Instance, session: str) -> tuple[int, str]:
+    """The bullet's public port and its permanent URL, made on first use.
+
+    Found again by label, so it is the same link every run. The port starts at
+    one picked by the session id and moves past ports another bullet holds.
+    """
+    label = f"pbt-{session[:24]}"
+    held = inst._api("GET", "/public-ports")
+    entries = held.get("data", held) if isinstance(held, dict) else held
+    for e in entries or []:
+        if e.get("label") == label:
+            return int(e["port"]), e["url"]
+    taken = {int(e.get("port", 0)) for e in entries or []}
+    port = PUBLIC_PORT_BASE + int(session[:8], 16) % PUBLIC_PORT_SPAN
+    while port in taken:
+        port = PUBLIC_PORT_BASE + (port - PUBLIC_PORT_BASE + 1) % PUBLIC_PORT_SPAN
+    made = inst._api("POST", "/public-ports", json={"port": port, "label": label})
+    return port, made["url"]
 
 
 def _desktop_url(inst: _Instance) -> str:
@@ -685,6 +735,8 @@ def _run_instance(
     want_files: bool = False,
     agent37_key: str | None = None,
     user: str = "",
+    want_browser: bool = False,
+    want_public: bool = False,
 ) -> dict:
     """Run the agent on *task* in the user's profile and the bullet's session.
     Blocking — call it off the loop."""
@@ -705,6 +757,16 @@ def _run_instance(
             text = task + FINISHING.format(steps=steps, workdir=workdir)
             if want_files:
                 text += FILES_NOTE.format(outputs=outputs)
+            if want_public:
+                port, url = _public_url(inst, session)
+                log.add("public", f"port {port} is public at {url}")
+                text += PUBLIC_NOTE.format(port=port, url=url)
+            if want_browser and not attempt:
+                # Before the turn, so the person can watch it from the start.
+                try:
+                    log.add("desktop", f"watch the agent's screen: {_desktop_url(inst)}")
+                except Exception as exc:  # noqa: BLE001 — the run does not need the view
+                    log.add("desktop", f"no desktop link: {exc}")
             log.add(
                 "agent",
                 f"profile {profile}, session {session}: starting (up to {steps} steps), task of {len(task)} chars",
@@ -742,10 +804,6 @@ def _run_instance(
         if done is None:
             inst = _bring_up(client, key, ws, log)
             done = turn(inst)
-        try:
-            log.add("desktop", f"watch the agent's screen: {_desktop_url(inst)}")
-        except Exception as exc:  # noqa: BLE001 — the run does not need the view
-            log.add("desktop", f"no desktop link: {exc}")
 
         if done["event"] == "response.failed":
             err = done.get("error") or {}
@@ -777,6 +835,8 @@ async def _run(
     want_files: bool = False,
     agent37_key: str | None = None,
     user: str = "",
+    want_browser: bool = False,
+    want_public: bool = False,
 ) -> dict:
     if not (agent37_key or enabled()):
         raise RuntimeError(
@@ -786,11 +846,12 @@ async def _run(
     if not task.strip():
         raise RuntimeError("An agent bullet needs a task — its text, or something from below it.")
     return await asyncio.to_thread(
-        _run_instance, task, bullet, provider, steps, json_answer, on_line, want_files, agent37_key, user
+        _run_instance, task, bullet, provider, steps, json_answer, on_line, want_files, agent37_key, user,
+        want_browser, want_public,
     )
 
 
-@pbt.model_kind(MODEL_TYPE, config_keys={SESSION_KEY, STEPS_KEY, FILES_KEY})
+@pbt.model_kind(MODEL_TYPE, config_keys={SESSION_KEY, STEPS_KEY, FILES_KEY, BROWSER_KEY, PUBLIC_KEY})
 async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     """Hand the rendered bullet to the Hermes agent, in the bullet's session on the shared instance.
 
@@ -808,10 +869,13 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     on_line = (lambda line: run.on_log(name, line)) if run.on_log else None
     json_answer = call.spec.output_format == "json"
     want_files = bool(call.spec.config.get(FILES_KEY))
+    want_browser = bool(call.spec.config.get(BROWSER_KEY))
+    want_public = bool(call.spec.config.get(PUBLIC_KEY))
     raw = await call.compute(
         rendered,
         compute=lambda: _run(
-            rendered.strip(), session, provider, steps, json_answer, on_line, want_files, run.agent37_key, run.user
+            rendered.strip(), session, provider, steps, json_answer, on_line, want_files,
+            run.agent37_key, run.user, want_browser, want_public,
         ),
     )
     return raw if isinstance(raw, dict) else json.loads(raw)
