@@ -38,6 +38,8 @@ interface Props {
   value: string;
   onChange: (v: string) => void;
   onClose: () => void;
+  /** A section to open scrolled to — the toolbar's Login button wants the account. */
+  focus?: 'account';
   /** Which provider runs the graph, and the key for it — see `Toolbar`. */
   provider: Provider;
   apiKey: string;
@@ -64,15 +66,14 @@ interface Props {
  * (pbt's `global_instruction`), and the run variables it hands to pbt as
  * `promptdata`.
  *
- * The provider and key are *also* in the toolbar on a wide screen, both views
- * of the one piece of state. On a narrow one the toolbar drops them (there is
- * no room for a select, a key field, Run and the gear at once) and this is
- * where they live — which is why they are here rather than only there.
+ * The provider and key live here. The toolbar only asks for them, in a popup,
+ * when a run is refused for want of a key.
  */
 export function SettingsModal({
   value,
   onChange,
   onClose,
+  focus,
   provider,
   apiKey,
   onProviderChange,
@@ -86,6 +87,9 @@ export function SettingsModal({
 }: Props) {
   // The server's own limits, shown so a blank field says what it means.
   const [{ defaultSteps, maxSteps }, setLimits] = useState({ defaultSteps: 30, maxSteps: 200 });
+  useEffect(() => {
+    if (focus === 'account') document.getElementById('settings-account')?.scrollIntoView({ block: 'start' });
+  }, [focus]);
   useEffect(() => {
     agentInfo().then((info) => setLimits({ defaultSteps: info.defaultSteps, maxSteps: info.maxSteps }));
   }, []);

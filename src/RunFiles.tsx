@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { fileLink } from './api';
 import type { RunFile } from './types';
 
 function size(bytes: number): string {
@@ -39,8 +41,9 @@ export function FileThumbs({ files, onOpen }: { files: RunFile[]; onOpen: () => 
 
 /**
  * The files in the bullet's window, under its answer: images shown, every
- * file downloadable. A file too large to send to the browser is listed by
- * name — it still reached the bullets downstream.
+ * file downloadable. A file too large to send with the run is fetched from the
+ * bucket on click; without a bucket it is listed by name — it still reached
+ * the bullets downstream.
  */
 export function FileGallery({ files }: { files: RunFile[] }) {
   return (
@@ -58,12 +61,43 @@ export function FileGallery({ files }: { files: RunFile[] }) {
               <a className="rf-file__dl" href={f.url} download={f.name}>
                 Download
               </a>
+            ) : f.key ? (
+              <StoredDownload name={f.name} storeKey={f.key} />
             ) : (
-              <span className="rf-file__size">too large to preview</span>
+              <span className="rf-file__size">too large to download</span>
             )}
           </figcaption>
         </figure>
       ))}
     </div>
+  );
+}
+
+/**
+ * Download for a file kept in the bucket: the link is signed on click, since
+ * it only lasts a few minutes, and the browser saves it under its own name.
+ */
+function StoredDownload({ name, storeKey }: { name: string; storeKey: string }) {
+  const [state, setState] = useState<{ busy?: boolean; error?: string }>({});
+  return (
+    <>
+      <button
+        type="button"
+        className="rf-file__dl"
+        disabled={state.busy}
+        onClick={async () => {
+          setState({ busy: true });
+          try {
+            window.location.href = await fileLink({ key: storeKey, name });
+            setState({});
+          } catch (e) {
+            setState({ error: (e as Error).message });
+          }
+        }}
+      >
+        {state.busy ? 'Preparing…' : 'Download'}
+      </button>
+      {state.error && <span className="rf-file__size">{state.error}</span>}
+    </>
   );
 }

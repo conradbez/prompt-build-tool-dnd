@@ -42,24 +42,39 @@ export function ResultModal({ bullet, prompt, result }: Props) {
   const [showSettings, setShowSettings] = useState(
     () => getState().openSettingsId === bullet.id,
   );
+  // One column blown up to fill the screen, or none. Escape shrinks it back
+  // before it closes the modal.
+  const [full, setFull] = useState<ColKey | null>(null);
+  const fullProps = (key: ColKey) => ({
+    full: full === key,
+    onFull: () => setFull((f) => (f === key ? null : key)),
+  });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
+      if (e.key !== 'Escape') return;
+      if (full) setFull(null);
+      else close();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  const { running } = useOutline();
   const titles = titleMap(getState());
   const vars = usePromptVarMap();
   const status = getState().runStatus[bullet.id];
   const failure = getState().runFailures[bullet.id];
   const files = getState().files[bullet.id];
-  const title = firstLine(bullet.text) || (bullet.kind === 'python' ? 'Python' : 'Untitled');
+  const title = toDisplay(firstLine(bullet.text), titles) || (bullet.kind === 'python' ? 'Python' : 'Untitled');
 
   return (
-    <div className="res-modal" onClick={close} role="dialog" aria-modal="true">
+    <div
+      className={`res-modal${full ? ' res-modal--full' : ''}`}
+      onClick={close}
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="res-modal__panel" onClick={(e) => e.stopPropagation()}>
         <div className="res-modal__head">
           <h2 className="res-modal__title" title={title}>
@@ -67,6 +82,14 @@ export function ResultModal({ bullet, prompt, result }: Props) {
           </h2>
           <KindChip kind={bullet.kind} mcpServer={bullet.mcpServer} test={getState().tests[bullet.id]} />
           {bullet.jsonOutput && <JsonChip />}
+          <button
+            className="res-modal__run"
+            disabled={running}
+            title="Runs this bullet and every bullet it depends on, using pbt’s select. Everything else keeps its last answer."
+            onClick={() => actions.runNode(bullet.id)}
+          >
+            {running ? 'Running…' : 'Run node'}
+          </button>
           <button className="res-modal__close" onClick={close} aria-label="Close">
             ✕
           </button>
@@ -86,9 +109,9 @@ export function ResultModal({ bullet, prompt, result }: Props) {
           {showSettings && <NodeSettings bullet={bullet} />}
         </div>
 
-        <div className="res-modal__cols">
-          <section className="res-col">
-            <h3 className="res-col__head">Your text</h3>
+        <div className={`res-modal__cols${full ? ' res-modal__cols--solo' : ''}`}>
+          <section className={`res-col${full === 'text' ? ' res-col--full' : ''}`}>
+            <ColHead {...fullProps('text')}>Your prompt</ColHead>
             {bullet.kind === 'python' ? (
               // A python bullet has no text of its own, and typing on one is
               // refused everywhere else — so it is not an editor here either.
@@ -99,6 +122,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
           </section>
 
           <Column
+            {...fullProps('input')}
             heading="Model input"
             body={prompt}
             titles={titles}
@@ -106,14 +130,15 @@ export function ResultModal({ bullet, prompt, result }: Props) {
             empty="Not recorded — run this bullet again to capture it."
           />
           {bullet.kind === 'agent' && (status === 'running' || status === 'queued') ? (
-            <LiveLog id={bullet.id} waiting={status === 'queued'} />
+            <LiveLog id={bullet.id} waiting={status === 'queued'} {...fullProps('output')} />
           ) : status === 'error' || status === 'skipped' ? (
-            <section className="res-col">
-              <h3 className="res-col__head">{status === 'error' ? 'Error' : 'Skipped'}</h3>
+            <section className={`res-col${full === 'output' ? ' res-col--full' : ''}`}>
+              <ColHead {...fullProps('output')}>{status === 'error' ? 'Error' : 'Skipped'}</ColHead>
               <pre className="res-col__error">{failure || 'No message was given.'}</pre>
             </section>
           ) : (
             <Column
+              {...fullProps('output')}
               heading="Model response"
               body={status === 'running' || status === 'queued' ? undefined : result}
               titles={titles}
@@ -142,7 +167,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
  * A running agent's log as it arrives, in the answer's place until there is
  * one. Follows the tail, the way the run log does.
  */
-function LiveLog({ id, waiting }: { id: string; waiting: boolean }) {
+function LiveLog({ id, waiting, full, onFull }: { id: string; waiting: boolean } & FullProps) {
   const lines = useOutline().runLog.filter((l) => l.kind === 'log' && l.id === id);
   const ref = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
@@ -152,9 +177,9 @@ function LiveLog({ id, waiting }: { id: string; waiting: boolean }) {
   // Posted by `agent_exec._start_browser` once the sandbox's browser is up.
   const browser = lines.map((l) => l.title.match(/watch live at (\S+)/)?.[1]).find(Boolean);
   return (
-    <section className="res-col">
-      <h3 className="res-col__head">
-        Agent log — live
+    <section className={`res-col${full ? ' res-col--full' : ''}`}>
+      <ColHead full={full} onFull={onFull}>
+        Agent log
         {browser && (
           <>
             {' · '}
@@ -163,7 +188,7 @@ function LiveLog({ id, waiting }: { id: string; waiting: boolean }) {
             </a>
           </>
         )}
-      </h3>
+      </ColHead>
       {lines.length ? (
         <pre className="res-col__log" ref={ref}>
           {lines.map((l) => l.title).join('\n')}
@@ -217,7 +242,9 @@ function Column({
   vars,
   empty = 'Empty',
   extra,
-}: {
+  full,
+  onFull,
+}: FullProps & {
   heading: string;
   body: string | undefined;
   titles: Record<string, string>;
@@ -228,8 +255,10 @@ function Column({
 }) {
   const text = (body ?? '').trim();
   return (
-    <section className="res-col">
-      <h3 className="res-col__head">{heading}</h3>
+    <section className={`res-col${full ? ' res-col--full' : ''}`}>
+      <ColHead full={full} onFull={onFull}>
+        {heading}
+      </ColHead>
       {text || extra ? (
         <div className="res-col__body">
           {text && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(text, titles, vars) }} />}
@@ -239,5 +268,31 @@ function Column({
         <p className="res-col__empty">{empty}</p>
       )}
     </section>
+  );
+}
+
+type ColKey = 'text' | 'input' | 'output';
+
+interface FullProps {
+  /** This column fills the screen. */
+  full: boolean;
+  onFull: () => void;
+}
+
+/** A column's heading, with the button top right that blows it up to full screen. */
+function ColHead({ full, onFull, children }: FullProps & { children: ReactNode }) {
+  return (
+    <h3 className="res-col__head res-col__head--tools">
+      <span className="res-col__title">{children}</span>
+      <button
+        className="res-col__full"
+        onClick={onFull}
+        title={full ? 'Back to three columns (Esc)' : 'Full screen'}
+        aria-label={full ? 'Exit full screen' : 'Full screen'}
+        aria-pressed={full}
+      >
+        {full ? '⤡' : '⤢'}
+      </button>
+    </h3>
   );
 }

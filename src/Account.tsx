@@ -45,7 +45,7 @@ export function AccountSection() {
     });
 
   return (
-    <section className="res-col">
+    <section className="res-col" id="settings-account">
       <h3 className="res-col__head">
         Account
         <Info>

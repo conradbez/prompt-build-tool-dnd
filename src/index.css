@@ -613,28 +613,144 @@ body,
   transform: rotate(90deg);
 }
 
-/* Settings sections side by side, wrapping as the modal narrows. Nothing in
-   here scrolls on its own, so the MCP picker's list is not clipped. */
+/* A node's settings: the kind picker across the top, then one label/control
+   row per setting in a single column. Scrolls on its own past a cap so it can
+   never push the three columns below off screen. */
 .res-settings {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  max-height: 40vh;
+  max-height: 45vh;
   overflow-y: auto;
   border-top: 1px solid var(--border);
 }
 
-.res-settings .res-col__body {
-  overflow: visible;
+.ns-type {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
 }
 
-.res-settings .res-col__head {
-  border-bottom: none;
-  background: transparent;
-  padding-bottom: 0;
+.ns-type__desc {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #52606d;
 }
 
-.res-settings .res-col:first-child {
+/* One of five, as one joined control that spans the panel. */
+.ns-seg {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ns-seg__opt {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 7px 4px;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ns-seg__opt:first-child {
   border-left: none;
+}
+
+.ns-seg__opt:hover {
+  background: var(--panel);
+}
+
+.ns-seg__opt--on,
+.ns-seg__opt--on:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ns-rows {
+  padding: 4px 14px;
+}
+
+.ns-row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 16px;
+  padding: 8px 0;
+  border-top: 1px solid #f1f2f4;
+  font-size: 13px;
+}
+
+.ns-row:first-child {
+  border-top: none;
+}
+
+.ns-row__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #52606d;
+  font-weight: 500;
+}
+
+.ns-row__control {
+  max-width: 420px;
+}
+
+.ns-row__warn {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
+.ns-warn {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.ns-num {
+  width: 6em;
+}
+
+.res-modal__run {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.res-modal__run:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (max-width: 620px) {
+  .ns-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 6px;
+  }
+  .ns-row__control {
+    max-width: none;
+  }
+  .ns-seg__opt {
+    font-size: 12px;
+  }
 }
 
 /* Your text | Model input | Model response. Equal thirds, each scrolling on
@@ -670,6 +786,71 @@ body,
   letter-spacing: 0.4px;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+/* A column heading with tools on the right — the full-screen toggle. */
+.res-col__head--tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.res-col__title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.res-col__full {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.res-col__full:hover,
+.res-col__full[aria-pressed='true'] {
+  border-color: var(--border);
+  background: #fff;
+  color: var(--text);
+}
+
+/* One column filling the screen: the panel goes edge to edge, the settings
+   fold away and the other two columns hide. */
+.res-modal--full {
+  padding: 0;
+}
+
+.res-modal--full .res-modal__panel {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  border-radius: 0;
+}
+
+.res-modal--full .res-expander {
+  display: none;
+}
+
+.res-modal__cols--solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.res-modal__cols--solo > .res-col:not(.res-col--full) {
+  display: none;
+}
+
+.res-col--full .res-col__body,
+.res-col--full .res-col__edit,
+.res-col--full .res-col__log {
+  font-size: 14px;
 }
 
 .res-col__body {
@@ -1747,38 +1928,6 @@ body,
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
-.tb__select {
-  /* The row never wraps, so everything but the key field is unshrinkable —
-     otherwise a narrow (phone) window squeezes the gear down to a sliver. */
-  flex: 0 0 auto;
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-  font-size: 13px;
-  padding: 0 6px;
-  cursor: pointer;
-}
-
-.tb__key {
-  /* The one elastic item in the row: it gives up width so the buttons keep
-     theirs. `min-width: 0` lets it shrink past its intrinsic size. */
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 30px;
-  width: 190px;
-  max-width: 40vw;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 0 10px;
-  font-size: 13px;
-  outline: none;
-}
-
-.tb__key:focus {
-  border-color: var(--accent);
-}
-
 .tb__run {
   flex: 0 0 auto;
   height: 30px;
@@ -1795,42 +1944,6 @@ body,
 .tb__run:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-/* "You need a key" — shown above the row, pointing down at the gear it wants
-   you to open. It pulses rather than sits there: a run was refused, which is a
-   moment, not a condition, and it clears itself. */
-.tb__flash {
-  margin-bottom: 6px;
-  padding: 7px 11px;
-  border: 1px solid #fca5a5;
-  border-radius: 8px;
-  background: #fef2f2;
-  color: #b91c1c;
-  font-size: 12px;
-  font-weight: 600;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  animation: tb-flash 2s ease-in-out 3;
-}
-
-/* A slow breath rather than a blink: three of these fill the six seconds the
-   message is up, and each one is legible on its way past. */
-@keyframes tb-flash {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
-
-/* A person who has asked not to be moved gets the colour without the pulse. */
-@media (prefers-reduced-motion: reduce) {
-  .tb__flash,
-  .tb__gear--wants {
-    animation: none;
-  }
 }
 
 .tb__gear {
@@ -1858,28 +1971,42 @@ body,
   color: #fff;
 }
 
-/* A run was refused for want of a key. The gear goes red and *stays* red for
-   as long as the message beside it is up — the colour is the state, and it has
-   to beat `--set`, which is already accent-filled whenever settings hold
-   anything. The pulse is a halo rather than the button's own opacity, so the
-   colour never fades out from under the thing it is saying. */
-.tb__gear--wants {
-  background: #dc2626;
-  border-color: #dc2626;
-  color: #fff;
-  animation: tb-ring 2s ease-in-out 3;
+/* Only while signed out: the way into the account, beside Run. */
+.tb__login {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
 }
 
-@keyframes tb-ring {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5);
-  }
-  50% {
-    box-shadow: 0 0 0 7px rgba(220, 38, 38, 0);
-  }
+.tb__login:hover {
+  border-color: var(--accent);
 }
 
+/* The popup a key-less run opens: provider, key, Run. */
+.key-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px 18px;
+}
+
+.key-modal__note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #52606d;
+}
+
+.key-modal__run {
+  align-self: flex-end;
+}
 
 /* -------------------------------------------------------------- touch tweaks */
 
@@ -1965,8 +2092,7 @@ body,
   .ol-row {
     --ol-gutter-w: 96px;
   }
-  .tb__select,
-  .tb__key,
+  .tb__login,
   .tb__run,
   .tb__gear {
     height: 40px;
@@ -2109,15 +2235,6 @@ body,
    character per line. Wrap the answer onto its own line under the bullet
    instead, indented to line up with the text it belongs to. */
 @media (max-width: 720px) {
-  /* The toolbar keeps only what a run needs *now* — the button, and the gear
-     that leads to everything else. A select and a key field beside them leave
-     Run a sliver wide, and neither is touched between runs, so both move into
-     the settings panel, where they are anyway. */
-  .tb__select,
-  .tb__key {
-    display: none;
-  }
-
   .ol-row {
     flex-wrap: wrap;
     /* Rows that have no answer yet still render an empty `.ol-result`; without
@@ -2818,20 +2935,34 @@ body,
   color: var(--accent);
 }
 
+/* The bucket-stored file's Download is a button (it fetches a link first);
+   it reads as the same link as the data-URL one. */
+button.rf-file__dl {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+button.rf-file__dl:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
 /* ------------------------------------------------------------------- iOS */
 
 /* `ios` is set on <html> by index.html. No keyboard, so no shortcut hints and
-   no shortcut help; the provider and key live in Settings only, at any width
-   (an iPad is wider than the narrow breakpoint that hides them elsewhere). */
+   no shortcut help. */
 .ios .ol-menu__key,
-.ios .help__fab,
-.ios .tb__select,
-.ios .tb__key {
+.ios .help__fab {
   display: none;
 }
 
 /* Safari gives buttons its own padding and draws ⚙ as a colour emoji, which
    pushed the icon off-centre in the bottom-left row. */
+.ios .tb__login,
 .ios .tb__run,
 .ios .tb__log,
 .ios .tb__gear {
@@ -2844,16 +2975,4 @@ body,
 .ios .tb__log,
 .ios .tb__gear {
   padding: 0;
-}
-
-/* Agent options a preserved-disk agent does not use: shown, but off. */
-.ns-off {
-  border: 0;
-  padding: 0;
-  margin: 0;
-  min-width: 0;
-}
-.ns-off:disabled {
-  opacity: 0.4;
-  pointer-events: none;
 }

@@ -202,6 +202,9 @@ export interface RunFile {
   size: number;
   /** A data URL of its bytes, or empty when it was too large to send. */
   url: string;
+  /** When too large to send: its key in the attachments bucket, to ask
+   *  `/files/link` for a download link. Empty without a bucket. */
+  key?: string;
 }
 
 /** One line of the progress modal — see `runLog`. */

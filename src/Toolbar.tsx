@@ -6,6 +6,7 @@ import { actions, buildNodePayloads, getState, useOutline } from './store';
 import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';
 import { SETTINGS_HINT } from './lib/shortcuts';
 import { setAgent37Key, useAgent37Key } from './lib/agent37Key';
+import { useAccount } from './lib/account';
 
 const PROVIDER_STORAGE = 'wm.provider';
 const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
@@ -28,9 +29,11 @@ function loadProvider(): Provider {
 }
 
 /**
- * Top-left controls: pick a provider, paste an API key, and Run the graph
- * through the pbt server. The key is remembered per provider in localStorage
- * (this browser only). The server is the page's own origin (see api.ts).
+ * Bottom-left controls: Run the graph through the pbt server, and the gear to
+ * everything else. The provider and key live in Settings; a run the server
+ * refuses for want of a key asks for one in a popup instead, then runs. The
+ * key is remembered per provider in localStorage (this browser only). The
+ * server is the page's own origin (see api.ts).
  */
 export function Toolbar() {
   const state = useOutline();
@@ -39,10 +42,12 @@ export function Toolbar() {
   // Settings: one instruction the server prepends to every LLM call in a run.
   // Remembered here, sent with each run — the server keeps no state.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Set when a run stopped for want of a key. It flashes the gear — the way to
-  // the key on any screen, and the *only* way on a narrow one, where the field
-  // is not in the toolbar at all.
-  const [needsKey, setNeedsKey] = useState(false);
+  // Where Settings opens scrolled to: the Login button wants the account.
+  const [settingsFocus, setSettingsFocus] = useState<'account' | undefined>();
+  // Set when a run stopped for want of a key: the bullets it was asked to run
+  // (`null` for the whole graph), so the key popup can run them once it has one.
+  const [needsKey, setNeedsKey] = useState<{ select?: string[] } | null>(null);
+  const account = useAccount();
   const [globalInstruction, setGlobalInstruction] = useState<string>(
     () => localStorage.getItem(GLOBAL_INSTRUCTION_STORAGE) || '',
   );
@@ -103,15 +108,12 @@ export function Toolbar() {
   const onKeyChange = (v: string) => {
     setApiKey(v);
     localStorage.setItem(keyStorage(provider), v);
-    if (v.trim()) setNeedsKey(false); // asked and answered
   };
 
-  // The prompt is a nudge, not a state to dismiss: it says its piece and goes.
-  useEffect(() => {
-    if (!needsKey) return;
-    const t = setTimeout(() => setNeedsKey(false), 6000);
-    return () => clearTimeout(t);
-  }, [needsKey]);
+  const openSettings = (focus?: 'account') => {
+    setSettingsFocus(focus);
+    setSettingsOpen(true);
+  };
 
   // Lets a bullet's settings run just that bullet (see `actions.runNode`).
   useEffect(() => actions.setRunner((id) => run([id])));
@@ -125,14 +127,14 @@ export function Toolbar() {
 
   // `select` runs those bullets and what feeds them, keeping every other
   // bullet's last answer; without it the whole graph runs.
-  const run = async (select?: string[]) => {
+  const run = async (select?: string[], key = apiKey) => {
     actions.setRunning(true);
     try {
       const nodes = buildNodePayloads(getState());
       const res = await runGraph(
         nodes,
         provider,
-        apiKey,
+        key,
         globalInstruction,
         vars,
         classifier,
@@ -142,8 +144,8 @@ export function Toolbar() {
         select,
       );
       if (res.needsKey) {
-        // Nothing ran, so the last run's answers stand; the flash says why.
-        setNeedsKey(true);
+        // Nothing ran, so the last run's answers stand; the popup asks for a key.
+        setNeedsKey({ select });
         const s = getState();
         actions.setRunResult(s.results, [], s.prompts, s.tests, s.files);
         return;
@@ -171,33 +173,12 @@ export function Toolbar() {
 
   return (
     <div className="tb">
-      {needsKey && (
-        <div className="tb__flash" role="status">
-          Enter an API key to run models
-        </div>
-      )}
-
       <div className="tb__row">
-        <select
-          className="tb__select"
-          value={provider}
-          onChange={(e) => onProviderChange(e.target.value as Provider)}
-        >
-          {PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <input
-          className="tb__key"
-          type="password"
-          placeholder={`${provider} API key`}
-          value={apiKey}
-          onChange={(e) => onKeyChange(e.target.value)}
-          spellCheck={false}
-          autoComplete="off"
-        />
+        {!account && (
+          <button className="tb__login" onClick={() => openSettings('account')}>
+            Log in
+          </button>
+        )}
         <button className="tb__run" onClick={() => run()} disabled={state.running}>
           {state.running ? `Running ${progress.done}/${progress.total}…` : 'Run'}
         </button>
@@ -214,8 +195,8 @@ export function Toolbar() {
         <button
           className={`tb__gear${settingsOpen ? ' tb__gear--on' : ''}${
             globalInstruction.trim() || written ? ' tb__gear--set' : ''
-          }${needsKey ? ' tb__gear--wants' : ''}`}
-          onClick={() => setSettingsOpen((v) => !v)}
+          }`}
+          onClick={() => (settingsOpen ? setSettingsOpen(false) : openSettings())}
           title={`Settings (${SETTINGS_HINT})`}
           aria-label="Settings"
           aria-expanded={settingsOpen}
@@ -230,6 +211,7 @@ export function Toolbar() {
           value={globalInstruction}
           onChange={onInstructionChange}
           onClose={() => setSettingsOpen(false)}
+          focus={settingsFocus}
           provider={provider}
           apiKey={apiKey}
           onProviderChange={onProviderChange}
@@ -243,7 +225,101 @@ export function Toolbar() {
         />
       )}
 
+      {needsKey && (
+        <KeyModal
+          provider={provider}
+          apiKey={apiKey}
+          onProviderChange={onProviderChange}
+          onKeyChange={onKeyChange}
+          onClose={() => setNeedsKey(null)}
+          onRun={() => {
+            const { select } = needsKey;
+            setNeedsKey(null);
+            run(select, apiKey);
+          }}
+        />
+      )}
+
       {state.progressOpen && <RunProgress />}
+    </div>
+  );
+}
+
+/**
+ * Asked for when a run is refused for want of a key: the provider and its key,
+ * then Run. The same state Settings edits, so a key entered here is there next
+ * time, and changing it later is the gear's job, not this popup's.
+ */
+function KeyModal({
+  provider,
+  apiKey,
+  onProviderChange,
+  onKeyChange,
+  onClose,
+  onRun,
+}: {
+  provider: Provider;
+  apiKey: string;
+  onProviderChange: (p: Provider) => void;
+  onKeyChange: (v: string) => void;
+  onClose: () => void;
+  onRun: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  return (
+    <div className="res-modal" onClick={onClose} role="dialog" aria-modal="true">
+      <form
+        className="res-modal__panel res-modal__panel--narrow"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (apiKey.trim()) onRun();
+        }}
+      >
+        <div className="res-modal__head">
+          <h2 className="res-modal__title">Add an API key to run</h2>
+          <button type="button" className="res-modal__close" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <div className="key-modal">
+          <p className="key-modal__note">
+            This server has no key of its own for this provider. Yours stays in this browser; change
+            it any time in Settings.
+          </p>
+          <select
+            className="pd-select"
+            value={provider}
+            onChange={(e) => onProviderChange(e.target.value as Provider)}
+          >
+            {PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <input
+            className="pd-input"
+            type="password"
+            placeholder={`${provider} API key`}
+            value={apiKey}
+            spellCheck={false}
+            autoComplete="off"
+            autoFocus
+            onChange={(e) => onKeyChange(e.target.value)}
+          />
+          <button className="tb__run key-modal__run" type="submit" disabled={!apiKey.trim()}>
+            Run
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

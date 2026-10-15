@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Info } from './Info';
 import { agentEnabled, pythonInfo } from './api';
 import { useAgent37Key } from './lib/agent37Key';
 import { matchMcpServers } from './lib/mcpServers';
-import { actions, useOutline } from './store';
+import { actions } from './store';
 import type { Bullet, BulletKind } from './types';
 
 interface Props {
@@ -43,6 +43,10 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
  * that kind — JSON enforcement, a python bullet's sandbox packages, an agent's
  * MCP server. Shown in the node modal's expander above its text, input and
  * response. Saves as you type and has no buttons.
+ *
+ * The kind picker spans the top; below it every setting is one label/control
+ * row in a single column, so changing a setting only ever moves the rows
+ * beneath it — never the control you just clicked.
  */
 export function NodeSettings({ bullet }: Props) {
   // Blank means preserve-disk runs land on the shared machine — warned below.
@@ -53,7 +57,6 @@ export function NodeSettings({ bullet }: Props) {
   });
   const [agent, setAgent] = useState(true);
   const { id, kind } = bullet;
-  const { running } = useOutline();
 
   useEffect(() => {
     let live = true;
@@ -67,64 +70,45 @@ export function NodeSettings({ bullet }: Props) {
   const current = KINDS.find((k) => k.kind === kind)!;
   const notReady =
     (kind === 'python' && !python.enabled) || (kind === 'agent' && !agent && !bullet.persistDisk)
-      ? ' This server has not reported Modal as configured — running it will say what is missing.'
+      ? 'This server has not reported Modal as configured — running it will say what is missing.'
       : '';
 
   return (
     <div className="res-settings">
-      <section className="res-col">
-        <h3 className="res-col__head">
-          Node type
-          <Info>{current.desc}</Info>
-        </h3>
-        <div className="res-col__body">
-          <div className="ns-kinds" role="radiogroup" aria-label="Node type">
-            {KINDS.map((k) => (
-              <button
-                key={k.kind}
-                role="radio"
-                aria-checked={kind === k.kind}
-                className={`ns-kind ${kind === k.kind ? 'ns-kind--on' : ''}`}
-                title={
-                  k.kind === 'python' && bullet.text.trim()
-                    ? `${k.desc} Its current text will be cleared.`
-                    : k.desc
-                }
-                onClick={() => actions.setKind(id, k.kind)}
-              >
-                {k.label}
-              </button>
-            ))}
-          </div>
+      <div className="ns-type">
+        <div className="ns-seg" role="radiogroup" aria-label="Node type">
+          {KINDS.map((k) => (
+            <button
+              key={k.kind}
+              role="radio"
+              aria-checked={kind === k.kind}
+              className={`ns-seg__opt ${kind === k.kind ? 'ns-seg__opt--on' : ''}`}
+              title={
+                k.kind === 'python' && bullet.text.trim()
+                  ? `${k.desc} Its current text will be cleared.`
+                  : k.desc
+              }
+              onClick={() => actions.setKind(id, k.kind)}
+            >
+              {k.label}
+            </button>
+          ))}
         </div>
-        {notReady && <p className="res-col__note res-col__note--warn">{notReady.trim()}</p>}
-      </section>
+        <p className="ns-type__desc">{current.desc}</p>
+        {notReady && <p className="ns-warn">{notReady}</p>}
+      </div>
 
-      <section className="res-col">
-        <h3 className="res-col__head">
-          Run
-          <Info>
-            Runs this bullet and every bullet it depends on, using pbt&rsquo;s{' '}
-            <code>select</code>. Everything else keeps its last answer.
-          </Info>
-        </h3>
-        <div className="res-col__body">
-          <button className="ns-kind" disabled={running} onClick={() => actions.runNode(id)}>
-            {running ? 'Running…' : 'Run this node'}
-          </button>
-        </div>
-      </section>
-
-      {kind !== 'test' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Output
-            <Info>
-              The answer is parsed and validated (pbt&rsquo;s <code>output_format="json"</code>);
-              one that is not JSON fails this bullet instead of flowing on as prose.
-            </Info>
-          </h3>
-          <div className="res-col__body">
+      <div className="ns-rows">
+        {kind !== 'test' && (
+          <Row
+            label="Output"
+            info={
+              <>
+                The answer is parsed and validated (pbt&rsquo;s <code>output_format="json"</code>);
+                one that is not JSON fails this bullet instead of flowing on as prose.
+              </>
+            }
+          >
             <label className="ns-check">
               <input
                 type="checkbox"
@@ -133,21 +117,18 @@ export function NodeSettings({ bullet }: Props) {
               />
               Enforce JSON output
             </label>
-          </div>
-        </section>
-      )}
+          </Row>
+        )}
 
-      {kind === 'test' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Judge
-            <Info>
-              {bullet.judge === 'llm'
+        {kind === 'test' && (
+          <Row
+            label="Judge"
+            info={
+              bullet.judge === 'llm'
                 ? 'The run’s model reads the assertion and what is connected, and answers pass or fail.'
-                : 'No LLM: the assertion is asked as a yes/no question about what is connected, and the classifier set in Settings answers with a probability.'}
-            </Info>
-          </h3>
-          <div className="res-col__body">
+                : 'No LLM: the assertion is asked as a yes/no question about what is connected, and the classifier set in Settings answers with a probability.'
+            }
+          >
             <div className="ns-kinds" role="radiogroup" aria-label="Judge">
               {(['llm', 'classifier'] as const).map((j) => (
                 <button
@@ -161,66 +142,67 @@ export function NodeSettings({ bullet }: Props) {
                 </button>
               ))}
             </div>
-            {bullet.judge === 'classifier' && (
-              <label className="ns-check">
-                Pass when P(yes) ≥
-                <input
-                  className="pd-input"
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={bullet.threshold}
-                  style={{ width: '6em' }}
-                  onChange={(e) => actions.setThreshold(id, e.target.valueAsNumber)}
-                />
-              </label>
-            )}
-          </div>
-        </section>
-      )}
+          </Row>
+        )}
 
-      {kind === 'python' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Sandbox packages
-            <Info>
-              Comma-separated, installed before this bullet runs
-              {python.packages.length
-                ? ` on top of what the sandbox has: ${python.packages.join(', ')}.`
-                : '.'}{' '}
-              A script can also ask for its own with a PEP 723 header.
-            </Info>
-          </h3>
-          <div className="res-col__body">
+        {kind === 'test' && bullet.judge === 'classifier' && (
+          <Row label="Pass when P(yes) ≥">
+            <input
+              className="pd-input ns-num"
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={bullet.threshold}
+              onChange={(e) => actions.setThreshold(id, e.target.valueAsNumber)}
+            />
+          </Row>
+        )}
+
+        {kind === 'python' && (
+          <Row
+            label="Sandbox packages"
+            info={
+              <>
+                Comma-separated, installed before this bullet runs
+                {python.packages.length
+                  ? ` on top of what the sandbox has: ${python.packages.join(', ')}.`
+                  : '.'}{' '}
+                A script can also ask for its own with a PEP 723 header.
+              </>
+            }
+          >
             <input
               className="pd-input"
               value={bullet.packages}
               placeholder="beautifulsoup4, lxml, scipy==1.*"
               spellCheck={false}
               autoComplete="off"
-              autoFocus
               onChange={(e) => actions.setPackages(id, e.target.value)}
             />
-          </div>
-        </section>
-      )}
+          </Row>
+        )}
 
-      {kind === 'agent' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Runs on
-            <Info>
-              <b>Sandbox</b> — a fresh Modal machine every run, gone when it ends. MCP server and
-              back-off are available here.
-              <br />
-              <b>Agent37 — persistent</b> — an Agent37 machine kept between runs, in this
-              bullet&rsquo;s own session and folder: it remembers its earlier conversation, and what
-              it leaves in its folder is there next time. The machine sleeps (disk-only billing) when
-              idle and wakes on the next run. It can also get a public URL.
-            </Info>
-          </h3>
-          <div className="res-col__body">
+        {kind === 'agent' && (
+          <Row
+            label="Runs on"
+            info={
+              <>
+                <b>Sandbox</b> — a fresh Modal machine every run, gone when it ends. MCP server and
+                back-off are set here.
+                <br />
+                <b>Agent37 — persistent</b> — an Agent37 machine kept between runs, in this
+                bullet&rsquo;s own session and folder: it remembers its earlier conversation, and
+                what it leaves in its folder is there next time. The machine sleeps (disk-only
+                billing) when idle and wakes on the next run. It can also get a public URL.
+              </>
+            }
+            warn={
+              bullet.persistDisk && !agent37Key.trim()
+                ? 'Not private: this runs on a machine shared with everyone on this server, and their agents could read this one’s files. Add your own Agent37 key in Settings for a machine of your own.'
+                : ''
+            }
+          >
             <div className="ns-kinds" role="radiogroup" aria-label="Runs on">
               {[
                 { on: false, label: 'Sandbox' },
@@ -237,29 +219,14 @@ export function NodeSettings({ bullet }: Props) {
                 </button>
               ))}
             </div>
-          </div>
-          {bullet.persistDisk && !agent37Key.trim() && (
-            <p className="res-col__note res-col__note--warn">
-              Not private: this runs on a machine shared with everyone on this server, and their
-              agents could read this one&rsquo;s files. Add your own Agent37 key in Settings for a
-              machine of your own.
-            </p>
-          )}
-        </section>
-      )}
+          </Row>
+        )}
 
-      {kind === 'agent' && bullet.persistDisk && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Public URL
-            <Info>
-              Gives this bullet a port of its own on the Agent37 machine and a permanent public HTTPS
-              link to it. The agent is told the port and the link, so a site, API or webhook it
-              serves there is reachable by anyone who has the link — no sign-in. The link shows up in
-              the live log and stays the same across runs.
-            </Info>
-          </h3>
-          <div className="res-col__body">
+        {kind === 'agent' && bullet.persistDisk && (
+          <Row
+            label="Public URL"
+            info="Gives this bullet a port of its own on the Agent37 machine and a permanent public HTTPS link to it. The agent is told the port and the link, so a site, API or webhook it serves there is reachable by anyone who has the link — no sign-in. The link shows up in the live log and stays the same across runs."
+          >
             <label className="ns-check">
               <input
                 type="checkbox"
@@ -268,42 +235,24 @@ export function NodeSettings({ bullet }: Props) {
               />
               Create public URL
             </label>
-          </div>
-        </section>
-      )}
+          </Row>
+        )}
 
-      {kind === 'agent' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            MCP server
-            <Info>
-              The command that starts a stdio MCP server in the agent&rsquo;s sandbox, e.g.{' '}
-              <code>uvx some-mcp-server</code> or <code>npx -y @scope/server</code>. Empty means
-              none — the agent works with bash alone.
-            </Info>
-          </h3>
-          <fieldset className="ns-off" disabled={bullet.persistDisk}>
-            <div className="res-col__body">
-              <McpServerInput id={id} value={bullet.mcpServer} />
-            </div>
-          </fieldset>
-        </section>
-      )}
-
-      {kind === 'agent' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Files
-            <Info>
-              The agent is told to save the files it makes — images, documents, data — in{' '}
-              <code>{bullet.persistDisk ? 'outputs/' : '/root/outputs/'}</code>
-              {bullet.persistDisk && ' in its own folder, emptied at the start of each run (the rest of the folder is kept)'}.
-              They are handed to the prompt bullets this one feeds as attachments, and shown with its
-              answer. An agent that saves none fails, since the
-              bullets after it are waiting for them.
-            </Info>
-          </h3>
-          <div className="res-col__body">
+        {kind === 'agent' && (
+          <Row
+            label="Files"
+            info={
+              <>
+                The agent is told to save the files it makes — images, documents, data — in{' '}
+                <code>{bullet.persistDisk ? 'outputs/' : '/root/outputs/'}</code>
+                {bullet.persistDisk &&
+                  ' in its own folder, emptied at the start of each run (the rest of the folder is kept)'}
+                . They are handed to the prompt bullets this one feeds as attachments, and shown
+                with its answer. An agent that saves none fails, since the bullets after it are
+                waiting for them.
+              </>
+            }
+          >
             <label className="ns-check">
               <input
                 type="checkbox"
@@ -312,34 +261,31 @@ export function NodeSettings({ bullet }: Props) {
               />
               Produces files
             </label>
-          </div>
-        </section>
-      )}
+          </Row>
+        )}
 
-      {kind === 'agent' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Browser
-            <Info>
-              {bullet.persistDisk ? (
+        {kind === 'agent' && (
+          <Row
+            label="Browser"
+            info={
+              bullet.persistDisk ? (
                 <>
-                  Links the Agent37 machine&rsquo;s desktop in the agent&rsquo;s live log, so you can
-                  watch the browser it drives and take over — to sign in, say. The link lasts a few
-                  minutes; each run makes a new one.
+                  Links the Agent37 machine&rsquo;s desktop in the agent&rsquo;s live log, so you
+                  can watch the browser it drives and take over — to sign in, say. The link lasts a
+                  few minutes; each run makes a new one.
                 </>
               ) : (
                 <>
-                  Opens a Chromium in the agent&rsquo;s sandbox that you can watch and take over from
-                  your own browser — the link shows up in the agent&rsquo;s live log. The agent drives
-                  it over the DevTools protocol at <code>http://localhost:9222</code>; pair it with
-                  the MCP server{' '}
+                  Opens a Chromium in the agent&rsquo;s sandbox that you can watch and take over
+                  from your own browser — the link shows up in the agent&rsquo;s live log. The
+                  agent drives it over the DevTools protocol at <code>http://localhost:9222</code>;
+                  pair it with the MCP server{' '}
                   <code>npx @playwright/mcp@latest --cdp-endpoint http://localhost:9222</code> to
                   give it browser tools. It closes when the agent finishes.
                 </>
-              )}
-            </Info>
-          </h3>
-          <div className="res-col__body">
+              )
+            }
+          >
             <label className="ns-check">
               <input
                 type="checkbox"
@@ -348,20 +294,14 @@ export function NodeSettings({ bullet }: Props) {
               />
               Create browser
             </label>
-          </div>
-        </section>
-      )}
+          </Row>
+        )}
 
-      {kind === 'agent' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Max steps
-            <Info>
-              How many steps this agent may take — one per reply — before it is told to stop using
-              tools and answer. Blank uses the run&rsquo;s default from Settings.
-            </Info>
-          </h3>
-          <div className="res-col__body">
+        {kind === 'agent' && (
+          <Row
+            label="Max steps"
+            info="How many steps this agent may take — one per reply — before it is told to stop using tools and answer. Blank uses the run’s default from Settings."
+          >
             <input
               className="pd-input"
               type="number"
@@ -370,36 +310,69 @@ export function NodeSettings({ bullet }: Props) {
               placeholder="Default (Settings → agent steps)"
               onChange={(e) => actions.setAgentSteps(id, Number(e.target.value))}
             />
-          </div>
-        </section>
-      )}
+          </Row>
+        )}
 
-      {kind === 'agent' && (
-        <section className="res-col">
-          <h3 className="res-col__head">
-            Back-off
-            <Info>
-              Seconds the agent waits after each model reply before its next call, to stay under a
-              provider&rsquo;s rate limit. The wait counts against the sandbox&rsquo;s time limit
-              (15 min), so keep it × steps well under that. Blank or 0 means no wait.
-            </Info>
-          </h3>
-          <fieldset className="ns-off" disabled={bullet.persistDisk}>
-            <div className="res-col__body">
-              <input
-                className="pd-input"
-                type="number"
-                min={0}
-                max={300}
-                step={1}
-                value={bullet.agentBackoff || ''}
-                placeholder="0 — no wait (seconds)"
-                onChange={(e) => actions.setAgentBackoff(id, Number(e.target.value))}
-              />
-            </div>
-          </fieldset>
-        </section>
-      )}
+        {kind === 'agent' && !bullet.persistDisk && (
+          <Row
+            label="MCP server"
+            info={
+              <>
+                The command that starts a stdio MCP server in the agent&rsquo;s sandbox, e.g.{' '}
+                <code>uvx some-mcp-server</code> or <code>npx -y @scope/server</code>. Empty means
+                none — the agent works with bash alone.
+              </>
+            }
+          >
+            <McpServerInput id={id} value={bullet.mcpServer} />
+          </Row>
+        )}
+
+        {kind === 'agent' && !bullet.persistDisk && (
+          <Row
+            label="Back-off"
+            info="Seconds the agent waits after each model reply before its next call, to stay under a provider’s rate limit. The wait counts against the sandbox’s time limit (15 min), so keep it × steps well under that. Blank or 0 means no wait."
+          >
+            <input
+              className="pd-input"
+              type="number"
+              min={0}
+              max={300}
+              step={1}
+              value={bullet.agentBackoff || ''}
+              placeholder="0 — no wait (seconds)"
+              onChange={(e) => actions.setAgentBackoff(id, Number(e.target.value))}
+            />
+          </Row>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One setting: its label (with the why behind an "i") on the left, the control
+ * on the right — stacked on a phone. A warning spans the full row beneath it.
+ */
+function Row({
+  label,
+  info,
+  warn,
+  children,
+}: {
+  label: string;
+  info?: ReactNode;
+  warn?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="ns-row">
+      <div className="ns-row__label">
+        {label}
+        {info && <Info>{info}</Info>}
+      </div>
+      <div className="ns-row__control">{children}</div>
+      {warn && <p className="ns-warn ns-row__warn">{warn}</p>}
     </div>
   );
 }
@@ -426,7 +399,6 @@ function McpServerInput({ id, value }: { id: string; value: string }) {
         placeholder="uvx some-mcp-server — type to search known servers"
         spellCheck={false}
         autoComplete="off"
-        autoFocus
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onChange={(e) => {

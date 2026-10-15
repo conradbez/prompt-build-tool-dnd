@@ -776,8 +776,10 @@ def _title(node: Node, others: dict[str, Node] | None = None) -> str:
 
 
 # A file is previewed in the browser from a data URL, which keeps the server
-# stateless — nothing is stored to be fetched later. Past this size a file is
-# listed by name alone.
+# stateless — nothing is stored to be fetched later. Past this size it goes to
+# the attachments bucket instead, under the bullet that made it, and the
+# browser asks for a short-lived link when it is downloaded (`/files/link`).
+# Without a bucket it is listed by name alone.
 PREVIEW_BYTES = 5 * 1024 * 1024
 
 
@@ -800,13 +802,24 @@ def _text(value: Any) -> str:
     return json.dumps(to_jsonable(value), ensure_ascii=False)
 
 
-def _file_info(f: pbt.File) -> dict:
-    """What the browser is told about a file: enough to list it, and its bytes
-    as a data URL when it is small enough to preview."""
-    url = ""
+def _file_info(f: pbt.File, session_id: str, bullet_id: str, stored: dict) -> dict:
+    """What the browser is told about a file: enough to list it, and either its
+    bytes as a data URL when it is small enough to preview, or the bucket key
+    to fetch a download link for. `stored` holds the keys already uploaded this
+    run, so a file reported twice (live, then in the final result) is stored
+    once."""
+    info = {"name": f.name, "mime": f.mime, "size": f.size, "url": "", "key": ""}
     if f.size <= PREVIEW_BYTES:
-        url = f"data:{f.mime};base64," + base64.b64encode(f.read_bytes()).decode()
-    return {"name": f.name, "mime": f.mime, "size": f.size, "url": url}
+        info["url"] = f"data:{f.mime};base64," + base64.b64encode(f.read_bytes()).decode()
+    elif session_id and attachments.enabled():
+        cache = (bullet_id, f.name, f.size)
+        if cache not in stored:
+            try:
+                stored[cache] = attachments.put(session_id, bullet_id, f.name, f.read_bytes())["key"]
+            except Exception:  # noqa: BLE001 — listed by name alone, as without a bucket
+                stored[cache] = ""
+        info["key"] = stored[cache]
+    return info
 
 
 def _serialise(
@@ -1108,6 +1121,9 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
     def on_start(name: str) -> None:
         emit({"type": "start", "id": slug_to_id.get(name, name)})
 
+    # Bucket keys of the large files this run produced — see `_file_info`.
+    stored: dict = {}
+
     def on_done(result: pbt.ModelRunResult) -> None:
         node_id = slug_to_id.get(result.model_name, result.model_name)
         event: dict[str, Any] = {
@@ -1134,7 +1150,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
                 # What pbt put in a downstream prompt: the whole value, each
                 # file as its one-line handle.
                 rendered = str(value)
-                event["files"] = [_file_info(f) for f in made]
+                event["files"] = [_file_info(f, req.sessionId, node_id, stored) for f in made]
             live_rendered[node_id] = rendered
             deps = _deps(node, children[node_id], feeds)
             event["output"] = shown
@@ -1203,7 +1219,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
     files = {}
     for slug, found in made.items():
         node_id = slug_to_id.get(slug, slug)
-        files[node_id] = [_file_info(f) for f in found]
+        files[node_id] = [_file_info(f, req.sessionId, node_id, stored) for f in found]
         rendered[node_id] = str(outputs[slug])  # see `on_done`
 
     prompts = {}

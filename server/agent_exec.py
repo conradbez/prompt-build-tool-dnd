@@ -87,10 +87,12 @@ VNC_PORT = 6080
 
 # Where an agent asked for files saves them — see `run_agent.FILES_NOTE`.
 OUTPUTS_DIR = "/root/outputs"
-# What is collected from it. Files travel to every bullet downstream and back
-# to the browser, so a run that saves more keeps the first ones and says so.
+# What is collected from it. Files travel to every bullet downstream, so a run
+# that saves more keeps the first ones and says so. Large ones reach the browser
+# through the bucket, not the run response (see `main._file_info`), so the byte
+# cap is about the server's memory, not the page's.
 MAX_FILES = int(os.environ.get("AGENT_MAX_FILES", "10"))
-MAX_FILES_BYTES = int(os.environ.get("AGENT_MAX_FILES_BYTES", str(20 * 1024 * 1024)))
+MAX_FILES_BYTES = int(os.environ.get("AGENT_MAX_FILES_BYTES", str(100 * 1024 * 1024)))
 
 APP_NAME = os.environ.get("AGENT_APP_NAME", "mindmap-agent")
 
