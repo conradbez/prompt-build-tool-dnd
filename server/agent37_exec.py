@@ -37,6 +37,9 @@ run's files are handed on.
 The run's provider, key, steps and log sink come from `agent_exec`'s run
 context, which `main.run` binds for every agent bullet alike.
 
+What Agent37 offers, which calls this uses, and the errors it branches on:
+server/agent37.md.
+
 The template is built once per Agent37 workspace (see server/README.md):
 
     git clone https://github.com/agent37-platform/examples

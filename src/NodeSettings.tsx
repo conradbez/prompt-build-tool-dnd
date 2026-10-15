@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Info } from './Info';
 import { agentEnabled, pythonInfo } from './api';
+import { useAgent37Key } from './lib/agent37Key';
 import { matchMcpServers } from './lib/mcpServers';
 import { actions, useOutline } from './store';
 import type { Bullet, BulletKind } from './types';
@@ -44,6 +45,8 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
  * response. Saves as you type and has no buttons.
  */
 export function NodeSettings({ bullet }: Props) {
+  // Blank means preserve-disk runs land on the shared machine — warned below.
+  const agent37Key = useAgent37Key();
   const [python, setPython] = useState({
     enabled: true,
     packages: [] as string[],
@@ -225,6 +228,13 @@ export function NodeSettings({ bullet }: Props) {
               Preserve disk between runs
             </label>
           </div>
+          {bullet.persistDisk && !agent37Key.trim() && (
+            <p className="res-col__note res-col__note--warn">
+              Not private: this runs on a machine shared with everyone on this server, and their
+              agents could read this one&rsquo;s files. Add your own Agent37 key in Settings for a
+              machine of your own.
+            </p>
+          )}
         </section>
       )}
 

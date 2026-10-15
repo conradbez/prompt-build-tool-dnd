@@ -63,8 +63,8 @@ only. Wake is transparent and takes seconds; after a long sleep it may boot fres
 | - | - | - |
 | Exec | `POST /instances/{id}/exec` `{command}` → `{exit_code, stdout, stderr}`; output capped at 512 KB; wakes a sleeper | ✅ profile + config + folder setup, listing outputs |
 | Signed URL | `POST /instances/{id}/signed-url` `{port, ttl_seconds}` | ✅ noVNC desktop link (port 6901) in the log |
-| List public URLs | `GET /instances/{id}/public-urls` | — |
-| Create public URL | `POST /instances/{id}/public-urls` — one port, permanent, no auth (webhooks, embeds) | — |
+| List public URLs | `GET /instances/{id}/public-ports` | — |
+| Create public URL | `POST /instances/{id}/public-ports` — one port, permanent, no auth (webhooks, embeds); `DELETE …/public-ports/{port}` | — |
 | SSH | your own keypair: ssh, scp, sftp, VS Code Remote | — |
 | Logs / metrics | boot + runtime logs; CPU / memory / disk history | — |
 
@@ -83,8 +83,8 @@ Compute is billed separately, per minute awake, from the workspace wallet.
 
 | Area | What it gives | Used by the node |
 | - | - | - |
-| Templates | `GET /templates`; build from a Dockerfile in the cloud | ✅ `hermes-vnc-desktop` (see server/README.md) |
-| Backups | list / create / restore restore points | — |
+| Templates | `GET /templates[/{name}]`; build from a Dockerfile in the cloud | ✅ `hermes-vnc-desktop` (see server/README.md) |
+| Backups | `GET/POST /instances/{id}/backups`, `POST /instances/{id}/restore` | — |
 | Crons | `/instances/{id}/crons` — a prompt on a schedule, per `profile`, fresh session per firing, wakes the instance; max 50 | — |
 | Integrations | Composio: Gmail, Slack, Notion, 250+ apps, OAuth handled | — |
 | Messaging | Telegram, WhatsApp, Slack, Discord… to the agent | — |
