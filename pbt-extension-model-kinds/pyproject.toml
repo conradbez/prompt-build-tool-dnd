@@ -5,7 +5,7 @@ description = "Extra pbt model kinds: python_modal, agent_modal and agent37."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "prompt-build-tool>=0.5.8",
+    "prompt-build-tool>=0.5.9",
     "modal>=1.0",
     "httpx>=0.27",
 ]
