@@ -23,10 +23,15 @@ The server to launch is a per-bullet setting — ``{{ config(model_type=
 model source like a python bullet's packages do (see `modal_exec.config_line`).
 
 The model's key does *not*: a key written into the source would end up in the
-cache key and in every export. It is carried per run in a context variable set
-by ``main.run`` (``use_run``), along with the run's step limit and where its
-live log lines go,, which every task pbt spawns inherits, and
-reaches the sandbox as a Modal secret built on the spot.
+cache key and in every export. It comes from the run's secrets —
+``pbt.run(secrets={"GEMINI_API_KEY": ...})`` or ``pbt run --secret
+GEMINI_API_KEY`` — as ``call.secrets``, and reaches the sandbox as a Modal
+secret built on the spot.
+
+What a host such as the mind map adds on top — the provider and model the person
+picked, their step limit, where live log lines go — is not secret, and travels
+in a context variable set with ``use_run``. Without one, the first provider
+whose key was passed answers, with the server's default model.
 
 The bullet's output is a JSON object, not bare text:
 
@@ -62,7 +67,7 @@ import pbt
 from pbt.executor.run_context import parse_json_output as pbt_json
 
 from . import modal_exec
-from .models import ENV_KEYS, model_name
+from .models import ENV_KEYS, model_name, provider_key
 
 MODEL_TYPE = "agent_modal"
 
@@ -152,19 +157,17 @@ LogSink = Callable[[str, str], None]
 
 @dataclass(frozen=True)
 class RunSettings:
-    """What an agent bullet takes from the run it is part of."""
+    """What an agent bullet takes from the host running it — never a key:
+    those are the run's secrets (`call.secrets`)."""
 
-    provider: str = "gemini"
-    api_key: str | None = None
+    # The provider the person picked; None takes the first one with a key.
+    provider: str | None = None
     # Settings → `llm_model`; None means the server's default for the provider.
     model: str | None = None
     # Settings → agent steps; clamped by `steps_for`.
     steps: int = STEP_LIMIT
     # Where each log line goes the moment it happens, for the live run log.
     on_log: LogSink | None = None
-    # Settings → the user's own Agent37 key, for preserve-disk bullets on their
-    # own workspace; None runs them on the server's shared instance.
-    agent37_key: str | None = None
     # Who is running: the signed-in email, else the browser's session id. An
     # Agent37 bullet runs in this user's own Hermes profile.
     user: str = ""
@@ -179,7 +182,7 @@ _settings: contextvars.ContextVar[RunSettings] = contextvars.ContextVar(
 
 
 def use_run(settings: RunSettings) -> contextvars.Token:
-    """Bind this run's provider, key, step limit and log sink for any agent bullet in it."""
+    """Bind this run's provider, model, step limit and log sink for any agent bullet in it."""
     return _settings.set(settings)
 
 
@@ -291,7 +294,7 @@ def _lookup(browser: bool = False):
 
 
 def _secret_env(
-    provider: str, api_key: str | None, steps: int = STEP_LIMIT, model: str | None = None
+    provider: str, key: str, steps: int = STEP_LIMIT, model: str | None = None
 ) -> dict[str, str]:
     """What the sandbox needs to call the model: its name and the key.
 
@@ -302,9 +305,6 @@ def _secret_env(
     not always this server's: Google's is `GOOGLE_GENERATIVE_AI_API_KEY`, and
     `GEMINI_API_KEY` alone fails with "API key is missing".
     """
-    key = api_key or ""
-    if not key:
-        raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
     if model:
         model = f"{_OPENCODE_PROVIDER[provider]}/{model}"
     else:
@@ -623,9 +623,8 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
         own = int(call.spec.config.get(STEPS_KEY) or 0)
     except (TypeError, ValueError):
         own = 0
-    env = _secret_env(
-        run.provider, run.api_key, steps_for(own) if own > 0 else run.steps, run.model
-    )
+    provider, key = provider_key(call.secrets, run.provider)
+    env = _secret_env(provider, key, steps_for(own) if own > 0 else run.steps, run.model)
     name = call.spec.name
     want_files = bool(call.spec.config.get(FILES_KEY))
     if want_files:

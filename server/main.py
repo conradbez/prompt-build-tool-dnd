@@ -39,6 +39,7 @@ import export as exporter
 import files as attachments
 # pbt finds these kinds by entry point; imported here for their helpers.
 from pbt_extension_model_kinds import agent37_exec, agent_exec, modal_exec
+from pbt_extension_model_kinds.models import ENV_KEYS
 import accounts
 from llm import make_llm_call
 from pbt import model_types as _pbt_kinds
@@ -1170,16 +1171,20 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
         except Exception:  # noqa: BLE001 — a progress event is never worth failing the run
             pass
 
-    # Agent bullets call the model from inside their sandbox, so they need this
-    # run's provider and key too — bound for the tasks pbt spawns, not globally —
-    # along with its step limit and where to send their log lines live.
+    # The keys go to pbt as the run's secrets: handed to `llm_call` and to the
+    # agent kinds as `call.secrets`, and never rendered, cached or stored.
+    secrets = {ENV_KEYS[req.provider]: req.apiKey or ""} if req.provider in ENV_KEYS else {}
+    if req.agent37Key.strip():
+        secrets[agent37_exec.API_KEY_ENV] = req.agent37Key.strip()
+
+    # What else agent bullets take from this run — the provider and model the
+    # person picked, the step limit, where to send log lines live — is not
+    # secret, and is bound for the tasks pbt spawns rather than globally.
     run_token = agent_exec.use_run(
         agent_exec.RunSettings(
             provider=req.provider,
-            api_key=req.apiKey,
             model=llm_model,
             steps=agent_exec.steps_for(req.agentSteps),
-            agent37_key=req.agent37Key.strip() or None,
             user=user,
             on_log=lambda name, line: emit(
                 {"type": "log", "id": slug_to_id.get(name, name), "line": line}
@@ -1188,7 +1193,6 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
     )
     try:
         llm = make_llm_call(
-            api_key=req.apiKey,
             provider=req.provider,
             classifier=req.classifier.model_dump(),
             model=llm_model,
@@ -1208,6 +1212,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             verbose=False,
             on_model_start=on_start,
             on_model_done=on_done,
+            secrets=secrets,
         )
     finally:
         agent_exec.reset_run(run_token)

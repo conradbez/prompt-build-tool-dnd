@@ -1,9 +1,10 @@
 """
 Minimal LLM client for the mind-map runner.
 
-One function, ``make_llm_call``, returns a callable bound to a provider and an
-optional API key. pbt hands it the files a bullet declared (see `files.py`), so
-an attachment on a bullet goes to the model along with that bullet's prompt.
+One function, ``make_llm_call``, returns a callable bound to a provider. pbt
+hands it the run's secrets, where the API key is, and the files a bullet
+declared (see `files.py`), so an attachment on a bullet goes to the model along
+with that bullet's prompt.
 """
 
 from __future__ import annotations
@@ -117,22 +118,23 @@ def _classify(prompt: str, config: dict, settings: dict) -> str:
 
 
 def make_llm_call(
-    api_key: Optional[str] = None,
     provider: str = "gemini",
     classifier: Optional[dict] = None,
     model: Optional[str] = None,
 ) -> Callable[..., str]:
-    """Return an ``llm_call(prompt, files=None, config=None)`` bound to a provider.
+    """Return an ``llm_call(prompt, files=None, config=None, secrets=None)`` bound to a provider.
 
-    The key is only ever ``api_key`` (sent from the UI) — the server's own
-    environment keys are never used, so a public deploy can't spend them.
+    The key is the run's secret named for the provider (``GEMINI_API_KEY`` and
+    so on) — what the UI sent, passed as ``pbt.async_run(secrets=...)``. The
+    server's own environment keys are never used, so a public deploy can't
+    spend them.
     ``classifier`` holds the settings for classifier-judged tests. ``model`` is
     the person's own choice from Settings; without one the server's default
     for the provider (`model_name`) answers.
     """
     chosen = model or (model_name(provider) if provider in MODEL_ENV else "")
 
-    def llm_call(prompt: str, files: Any = None, config: Any = None) -> str:
+    def llm_call(prompt: str, files: Any = None, config: Any = None, secrets: Any = None) -> str:
         if config and config.get("judge") == "classifier":
             return _classify(prompt, config, classifier or {})
         if _is_template(config):
@@ -141,7 +143,7 @@ def make_llm_call(
             # {{ config(...) }} line renders to an empty first line.
             return prompt.strip()
 
-        key = api_key
+        key = (secrets or {}).get(ENV_KEYS.get(provider, ""))
         if not key:
             raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
 

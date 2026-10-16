@@ -77,9 +77,9 @@ def warnings(nodes: list["Node"]) -> list[str]:
     if any(n.kind == "agent" for n in nodes):
         out.append(
             "Agent bullets need the `agent_modal` model kind from the "
-            "`pbt-extension-model-kinds` package, not pbt. Install it, and call "
-            "`pbt_extension_model_kinds.agent_exec.use_run` "
-            "before running, or those bullets will fail."
+            "`pbt-extension-model-kinds` package, not pbt, and Modal credentials. "
+            "They read the API key from the run's secrets, which this export "
+            "passes from the same environment variable."
         )
     return out
 
@@ -232,6 +232,8 @@ def script(
         "        llm_call=llm_call,\n"
         "        promptdata=PROMPTDATA or None,\n"
         "        global_instruction=GLOBAL_INSTRUCTION,\n"
+        "        # For model kinds that call the model themselves (agent bullets).\n"
+        f'        secrets={{"{_ENV_KEY.get(provider, 'GEMINI_API_KEY')}": KEY}},\n'
         "    )\n"
         "    for model, value in outputs.items():\n"
         '        print(f"\\n=== {model} ===\\n{value}")\n\n\n'
@@ -263,7 +265,7 @@ def project(
             "  pip install prompt-build-tool uvicorn",
             f"  export {_ENV_KEY.get(provider, 'GEMINI_API_KEY')}=...",
             "  python " + filename(name, "project") + "   # writes ./models and ./client.py",
-            "  pbt serve --models-dir models",
+            f"  pbt serve --models-dir models --secret {_ENV_KEY.get(provider, 'GEMINI_API_KEY')}",
             "",
             "`pbt serve` then answers POST /run with",
             '  {"promptdata": {...}, "select": ["model_name"]}',

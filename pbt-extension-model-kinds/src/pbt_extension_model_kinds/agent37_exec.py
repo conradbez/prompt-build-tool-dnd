@@ -34,8 +34,11 @@ offered here; the step limit and ``produces_files=True`` are. Files are saved in
 the bullet's ``outputs/`` folder, emptied at the start of each run so only that
 run's files are handed on.
 
-The run's provider, key, steps and log sink come from `agent_exec`'s run
-context, which `main.run` binds for every agent bullet alike.
+The model's key comes from the run's secrets (``call.secrets``), as for
+`agent_exec`; so does ``AGENT37_API_KEY``, the person's own Agent37 key, which
+falls back to the server's environment variable of the same name. The provider,
+model, steps and log sink come from `agent_exec`'s run context, which
+`main.run` binds for every agent bullet alike.
 
 What Agent37 offers, which calls this uses, and the errors it branches on:
 server/agent37.md.
@@ -57,7 +60,7 @@ import threading
 import shlex
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -65,7 +68,7 @@ import pbt
 from pbt.executor.run_context import parse_json_output as pbt_json
 
 from . import agent_exec
-from .models import model_name
+from .models import model_name, provider_key
 
 MODEL_TYPE = "agent37"
 
@@ -224,12 +227,13 @@ class _Provider:
     key_env: str | None = None
 
 
-def _provider(provider: str, api_key: str | None, model: str | None) -> _Provider | None:
+def _provider(
+    secrets: Mapping[str, str], provider: str | None, model: str | None
+) -> _Provider | None:
     """The run's provider and key for Hermes, or None for Agent37's managed model."""
     if MANAGED_MODEL:
         return None
-    if not api_key:
-        raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
+    provider, api_key = provider_key(secrets, provider)
     if provider not in _PROVIDER_URL:
         raise RuntimeError(f"Agent bullets cannot run on '{provider}'.")
     return _Provider(
@@ -864,7 +868,11 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
     except (TypeError, ValueError):
         own = 0
     steps = agent_exec.steps_for(own) if own > 0 else run.steps
-    provider = _provider(run.provider, run.api_key, run.model)
+    provider = _provider(call.secrets, run.provider, run.model)
+    # The person's own key runs on their workspace; without one, the server's.
+    agent37_key = call.secrets.get(API_KEY_ENV) or None
+    if agent37_key == os.environ.get(API_KEY_ENV):
+        agent37_key = None  # the server's own key, passed back in: the shared instance
     name = call.spec.name
     on_line = (lambda line: run.on_log(name, line)) if run.on_log else None
     json_answer = call.spec.output_format == "json"
@@ -875,7 +883,7 @@ async def execute(rendered: str, call: pbt.ModelCall) -> dict:
         rendered,
         compute=lambda: _run(
             rendered.strip(), session, provider, steps, json_answer, on_line, want_files,
-            run.agent37_key, run.user, want_browser, want_public,
+            agent37_key, run.user, want_browser, want_public,
         ),
     )
     return raw if isinstance(raw, dict) else json.loads(raw)

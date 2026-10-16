@@ -12,4 +12,21 @@ Installing the package is enough: pbt >= 0.5.8 finds the kinds through the
 `pbt.model_kinds` entry point group and loads them on first use. Nothing has
 to import it.
 
-Configuration is read from the environment — see each module's docstring.
+Deployment configuration (Modal credentials, image packages, timeouts) is read
+from the environment — see each module's docstring.
+
+API keys are the run's secrets, never config or environment. The agent kinds
+read the provider key from `call.secrets`, named as in `models.ENV_KEYS`, and
+`agent37` also reads `AGENT37_API_KEY`:
+
+```python
+pbt.run(..., secrets={"GEMINI_API_KEY": key})
+```
+
+```sh
+pbt run --secret GEMINI_API_KEY        # reads the env var of that name
+```
+
+A host can also pick the provider, model, step limit and log sink for a run with
+`agent_exec.use_run(RunSettings(...))`. Without it, the first provider whose
+key was passed answers, using that provider's default model.
