@@ -8,7 +8,7 @@ Extra model kinds for [pbt](https://pypi.org/project/prompt-build-tool/):
 | `agent_modal`  | `agent_exec`    | an OpenCode agent (plus optional MCP server) on Modal  |
 | `agent37`      | `agent37_exec`  | a Hermes agent on an Agent37 workspace (`agent37.md`)  |
 
-Installing the package is enough: pbt >= 0.5.8 finds the kinds through the
+Installing the package is enough: pbt >= 0.5.10 finds the kinds through the
 `pbt.model_kinds` entry point group and loads them on first use. Nothing has
 to import it.
 
