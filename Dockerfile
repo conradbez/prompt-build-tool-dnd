@@ -12,12 +12,12 @@ RUN yarn install --immutable && yarn build
 # ---- Stage 2: Python server (serves /run + the built dist/) ----
 FROM python:3.12-slim
 WORKDIR /app
-COPY pbt-extension-model-kinds ./pbt-extension-model-kinds
-COPY server/requirements.txt ./server/requirements.txt
-# requirements.txt names the model-kinds package by a path relative to server/.
-RUN cd server && pip install --no-cache-dir -r requirements.txt
+COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
+COPY server/pyproject.toml server/uv.lock ./server/
+RUN cd server && uv sync --frozen --no-dev --no-install-project
 COPY server ./server
 COPY --from=web /web/dist ./dist
 WORKDIR /app/server
+ENV PATH="/app/server/.venv/bin:$PATH"
 # Railway provides $PORT; default to 8000 for local `docker run`.
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]

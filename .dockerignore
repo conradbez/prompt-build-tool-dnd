@@ -6,4 +6,3 @@ server/.venv
 server/.pbt
 **/__pycache__
 *.log
-pbt-extension-model-kinds/.venv

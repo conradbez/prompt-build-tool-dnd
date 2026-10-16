@@ -71,14 +71,14 @@ def warnings(nodes: list["Node"]) -> list[str]:
     if any(n.kind == "python" for n in nodes):
         out.append(
             "Python bullets need the `python_modal` model kind from the "
-            "`pbt-extension-model-kinds` package, not pbt. Install it alongside "
+            "`pbt-extra-model-kinds` package, not pbt. Install it alongside "
             "pbt, or those bullets will fail as an unknown model type."
         )
     if any(n.kind == "agent" for n in nodes):
         out.append(
             "Agent bullets need the `agent_modal` model kind from the "
-            "`pbt-extension-model-kinds` package, not pbt. Install it, and call "
-            "`pbt_extension_model_kinds.agent_exec.use_run` "
+            "`pbt-extra-model-kinds` package, not pbt. Install it, and call "
+            "`pbt_extra_model_kinds.agent_exec.use_run` "
             "before running, or those bullets will fail."
         )
     return out

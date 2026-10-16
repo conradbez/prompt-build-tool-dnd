@@ -440,8 +440,8 @@ the server is API-only.
 
 ```bash
 cd server
-pip install -r requirements.txt
-uvicorn main:app --port 8000 --reload
+uv sync
+uv run uvicorn main:app --port 8000 --reload
 ```
 
 Keys are read from the **repo-root `.env`** (loaded by `main.py` at import), or
@@ -485,7 +485,7 @@ so the deployed URL is the whole thing, no separate frontend host and no
 > redeploy; Railway prefers the Dockerfile.
 
 **API-only** (no bundled frontend): set Root Directory to `server`; Railway then
-installs `requirements.txt` and runs the `Procfile`. Point a separately-hosted
+installs `pyproject.toml` and runs the `Procfile`. Point a separately-hosted
 frontend at it with `VITE_SERVER_URL=…` or a `?server=…` link.
 
 No state is stored between requests, so a single instance scales trivially.

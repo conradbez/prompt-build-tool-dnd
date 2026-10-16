@@ -1,0 +1,17 @@
+[project]
+name = "pbt-dnd-server"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.39",
+    "boto3>=1.34",
+    "fastapi>=0.115",
+    "google-genai>=1.0",
+    "httpx>=0.27",
+    "openai>=1.40",
+    "prompt-build-tool[extras]>=0.5.10",
+    "pydantic>=2",
+    "python-dotenv>=1.0",
+    "python-multipart>=0.0.9",
+    "uvicorn[standard]>=0.30",
+]

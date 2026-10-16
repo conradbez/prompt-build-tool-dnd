@@ -38,7 +38,7 @@ from pbt.files import contains_files, iter_files, to_jsonable
 import export as exporter
 import files as attachments
 # pbt finds these kinds by entry point; imported here for their helpers.
-from pbt_extension_model_kinds import agent37_exec, agent_exec, modal_exec
+from pbt_extra_model_kinds import agent37_exec, agent_exec, modal_exec
 import accounts
 from llm import make_llm_call
 from pbt import model_types as _pbt_kinds

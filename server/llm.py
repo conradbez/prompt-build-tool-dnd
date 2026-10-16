@@ -14,7 +14,7 @@ import mimetypes
 import os
 from typing import Any, Callable, Optional
 
-from pbt_extension_model_kinds.models import ENV_KEYS, MODEL_ENV, model_name
+from pbt_extra_model_kinds.models import ENV_KEYS, MODEL_ENV, model_name
 
 
 def _read_files(files: Any) -> list[tuple[bytes, str]]:
