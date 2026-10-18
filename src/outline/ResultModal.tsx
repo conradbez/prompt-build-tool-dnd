@@ -7,6 +7,7 @@ import { actions, firstLine, getState, titleMap, useOutline } from '../store';
 import { PYTHON_CAPTION, type Bullet } from '../types';
 import { NodeSettings } from '../NodeSettings';
 import { JsonChip, KindChip } from '../mindmap/BulletNode';
+import { AgentLinks, agentLinks } from '../AgentLinks';
 
 interface Props {
   bullet: Bullet;
@@ -17,18 +18,18 @@ interface Props {
 }
 
 /**
- * One bullet's run, in three columns: what you wrote, what the model was
- * actually sent, and what came back. It is also how a bullet is opened at all
- * — clicking a node on the map or a bullet's dot in the outline opens this,
- * run or not, so the two right-hand columns are empty until there is a run.
+ * One bullet's run, in two columns split by a bar you can drag: what you wrote
+ * on the left, what came back on the right. It is also how a bullet is opened
+ * at all — clicking a node on the map or a bullet's dot in the outline opens
+ * this, run or not, so the right-hand column is empty until there is a run.
  *
- * The middle column is the point of the thing. A bullet's prompt is not what
- * you typed — its children's answers are appended below it before it goes out —
- * so when a result is surprising, the question is almost always "what did it
- * actually see?", and until now that was unanswerable from the screen.
+ * Under your prompt, folded away, is what the model was actually sent. A
+ * bullet's prompt is not what you typed — its children's answers are appended
+ * below it before it goes out — so when a result is surprising, the question is
+ * almost always "what did it actually see?".
  *
- * The first column is the live bullet, not a copy of it: reading the three side
- * by side is exactly when you work out what the prompt should have said, and
+ * The left column is the live bullet, not a copy of it: reading it beside the
+ * answer is exactly when you work out what the prompt should have said, and
  * having to close the modal to act on that is the wrong shape.
  *
  * Above the columns sits the bullet's settings, folded away behind an
@@ -60,13 +61,23 @@ export function ResultModal({ bullet, prompt, result }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  const { running } = useOutline();
+  const [split, startDrag, resetSplit] = useSplit();
+  const cols = useRef<HTMLDivElement | null>(null);
+  const [showInput, setShowInput] = useState(false);
+
+  const { running, runLog } = useOutline();
+  // An agent's log lines, for the links it posted — see `AgentLinks`.
+  const logLines = runLog.filter((l) => l.kind === 'log' && l.id === bullet.id).map((l) => l.title);
   const titles = titleMap(getState());
   const vars = usePromptVarMap();
   const status = getState().runStatus[bullet.id];
   const failure = getState().runFailures[bullet.id];
   const files = getState().files[bullet.id];
   const title = toDisplay(firstLine(bullet.text), titles) || (bullet.kind === 'python' ? 'Python' : 'Untitled');
+  // Under the answer column's heading, where the live browser and the app an
+  // agent served are looked for — see `AgentLinks`.
+  const links =
+    bullet.kind === 'agent' ? <AgentLinks className="rp__pins--col" links={agentLinks(logLines, result)} /> : undefined;
 
   return (
     <div
@@ -109,37 +120,59 @@ export function ResultModal({ bullet, prompt, result }: Props) {
           {showSettings && <NodeSettings bullet={bullet} />}
         </div>
 
-        <div className={`res-modal__cols${full ? ' res-modal__cols--solo' : ''}`}>
-          <section className={`res-col${full === 'text' ? ' res-col--full' : ''}`}>
-            <ColHead {...fullProps('text')}>Your prompt</ColHead>
-            {bullet.kind === 'python' ? (
-              // A python bullet has no text of its own, and typing on one is
-              // refused everywhere else — so it is not an editor here either.
-              <p className="res-col__empty">{PYTHON_CAPTION}</p>
-            ) : (
-              <Editor bullet={bullet} titles={titles} />
+        <div
+          ref={cols}
+          className={`res-modal__cols res-split${full ? ' res-modal__cols--solo' : ''}`}
+          style={{ '--split': `${split}%` } as React.CSSProperties}
+        >
+          <section className={`res-col res-left${full === 'text' || full === 'input' ? ' res-col--full' : ''}`}>
+            {full !== 'input' && (
+              <>
+                <ColHead {...fullProps('text')}>Your prompt</ColHead>
+                {bullet.kind === 'python' ? (
+                  // A python bullet has no text of its own, and typing on one is
+                  // refused everywhere else — so it is not an editor here either.
+                  <p className="res-col__empty">{PYTHON_CAPTION}</p>
+                ) : (
+                  <Editor bullet={bullet} titles={titles} />
+                )}
+              </>
+            )}
+            {full !== 'text' && (
+              <ModelInput
+                open={showInput || full === 'input'}
+                onToggle={() => setShowInput((v) => !v)}
+                body={prompt}
+                titles={titles}
+                vars={vars}
+                {...fullProps('input')}
+              />
             )}
           </section>
 
-          <Column
-            {...fullProps('input')}
-            heading="Model input"
-            body={prompt}
-            titles={titles}
-            vars={vars}
-            empty="Not recorded — run this bullet again to capture it."
+          <div
+            className="res-split__bar"
+            role="separator"
+            aria-orientation="vertical"
+            aria-valuenow={Math.round(split)}
+            title="Drag to resize · double-click for half and half"
+            onPointerDown={(e) => cols.current && startDrag(e, cols.current)}
+            onDoubleClick={resetSplit}
           />
+
           {bullet.kind === 'agent' && (status === 'running' || status === 'queued') ? (
-            <LiveLog id={bullet.id} waiting={status === 'queued'} {...fullProps('output')} />
+            <LiveLog id={bullet.id} waiting={status === 'queued'} links={links} {...fullProps('output')} />
           ) : status === 'error' || status === 'skipped' ? (
             <section className={`res-col${full === 'output' ? ' res-col--full' : ''}`}>
               <ColHead {...fullProps('output')}>{status === 'error' ? 'Error' : 'Skipped'}</ColHead>
+              {links}
               <pre className="res-col__error">{failure || 'No message was given.'}</pre>
             </section>
           ) : (
             <Column
               {...fullProps('output')}
               heading="Model response"
+              top={links}
               body={status === 'running' || status === 'queued' ? undefined : result}
               titles={titles}
               vars={vars}
@@ -167,28 +200,25 @@ export function ResultModal({ bullet, prompt, result }: Props) {
  * A running agent's log as it arrives, in the answer's place until there is
  * one. Follows the tail, the way the run log does.
  */
-function LiveLog({ id, waiting, full, onFull }: { id: string; waiting: boolean } & FullProps) {
+function LiveLog({
+  id,
+  waiting,
+  links,
+  full,
+  onFull,
+}: { id: string; waiting: boolean; links?: ReactNode } & FullProps) {
   const lines = useOutline().runLog.filter((l) => l.kind === 'log' && l.id === id);
   const ref = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
     const el = ref.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [lines.length]);
-  // Posted by `agent_exec._start_browser` once the sandbox's browser is up.
-  const browser = lines.map((l) => l.title.match(/watch live at (\S+)/)?.[1]).find(Boolean);
   return (
     <section className={`res-col${full ? ' res-col--full' : ''}`}>
       <ColHead full={full} onFull={onFull}>
         Agent log
-        {browser && (
-          <>
-            {' · '}
-            <a href={browser} target="_blank" rel="noreferrer">
-              Open remote browser
-            </a>
-          </>
-        )}
       </ColHead>
+      {links}
       {lines.length ? (
         <pre className="res-col__log" ref={ref}>
           {lines.map((l) => l.title).join('\n')}
@@ -241,11 +271,14 @@ function Column({
   titles,
   vars,
   empty = 'Empty',
+  top,
   extra,
   full,
   onFull,
 }: FullProps & {
   heading: string;
+  /** Under the heading, above the text — an agent's links. */
+  top?: ReactNode;
   body: string | undefined;
   titles: Record<string, string>;
   vars: PromptVarMap;
@@ -259,6 +292,7 @@ function Column({
       <ColHead full={full} onFull={onFull}>
         {heading}
       </ColHead>
+      {top}
       {text || extra ? (
         <div className="res-col__body">
           {text && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(text, titles, vars) }} />}
@@ -269,6 +303,119 @@ function Column({
       )}
     </section>
   );
+}
+
+/**
+ * What the model was actually sent, folded under your prompt. Opened, it takes
+ * the lower part of the column and scrolls on its own.
+ */
+function ModelInput({
+  open,
+  onToggle,
+  body,
+  titles,
+  vars,
+  full,
+  onFull,
+}: FullProps & {
+  open: boolean;
+  onToggle: () => void;
+  body: string | undefined;
+  titles: Record<string, string>;
+  vars: PromptVarMap;
+}) {
+  const text = (body ?? '').trim();
+  return (
+    <div className={`res-input${open ? ' res-input--open' : ''}${full ? ' res-input--full' : ''}`}>
+      <h3 className="res-col__head res-col__head--tools res-input__head">
+        <button className="res-input__toggle" aria-expanded={open} onClick={onToggle} disabled={full}>
+          <span className="res-expander__caret" aria-hidden="true">
+            ▸
+          </span>
+          Model input
+        </button>
+        {open && (
+          <button
+            className="res-col__full"
+            onClick={onFull}
+            title={full ? 'Back (Esc)' : 'Full screen'}
+            aria-label={full ? 'Exit full screen' : 'Full screen'}
+            aria-pressed={full}
+          >
+            {full ? '⤡' : '⤢'}
+          </button>
+        )}
+      </h3>
+      {open &&
+        (text ? (
+          <div
+            className="res-col__body"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(text, titles, vars) }}
+          />
+        ) : (
+          <p className="res-col__empty">Not recorded — run this bullet again to capture it.</p>
+        ))}
+    </div>
+  );
+}
+
+/** Where the bar between the columns sits, as a percentage — the same for every bullet. */
+const SPLIT_KEY = 'wm.modal.split';
+const SPLIT_MIN = 20;
+const SPLIT_MAX = 80;
+
+function readSplit(): number {
+  try {
+    const v = Number(localStorage.getItem(SPLIT_KEY));
+    return v >= SPLIT_MIN && v <= SPLIT_MAX ? v : 50;
+  } catch {
+    return 50;
+  }
+}
+
+function writeSplit(v: number) {
+  try {
+    localStorage.setItem(SPLIT_KEY, String(Math.round(v * 10) / 10));
+  } catch {
+    /* kept for this page load */
+  }
+}
+
+/**
+ * The split between the columns: its percentage, a pointer-down handler that
+ * drags it, and a reset to half and half. Saved when a drag ends, so the next
+ * bullet opened — or this one, opened again — starts where it was left.
+ */
+function useSplit(): [number, (e: React.PointerEvent, box: HTMLElement) => void, () => void] {
+  const [split, setSplit] = useState(readSplit);
+  const start = (e: React.PointerEvent, box: HTMLElement) => {
+    e.preventDefault();
+    const bar = e.currentTarget as HTMLElement;
+    bar.setPointerCapture(e.pointerId);
+    const rect = box.getBoundingClientRect();
+    let last = split;
+    const move = (ev: PointerEvent) => {
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      last = Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, pct));
+      setSplit(last);
+    };
+    const up = () => {
+      bar.removeEventListener('pointermove', move);
+      bar.removeEventListener('pointerup', up);
+      bar.removeEventListener('pointercancel', up);
+      document.body.classList.remove('res-split--dragging');
+      writeSplit(last);
+    };
+    document.body.classList.add('res-split--dragging');
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up);
+    bar.addEventListener('pointercancel', up);
+  };
+  const reset = () => {
+    setSplit(50);
+    writeSplit(50);
+  };
+  return [split, start, reset];
 }
 
 type ColKey = 'text' | 'input' | 'output';
@@ -287,7 +434,7 @@ function ColHead({ full, onFull, children }: FullProps & { children: ReactNode }
       <button
         className="res-col__full"
         onClick={onFull}
-        title={full ? 'Back to three columns (Esc)' : 'Full screen'}
+        title={full ? 'Back to both columns (Esc)' : 'Full screen'}
         aria-label={full ? 'Exit full screen' : 'Full screen'}
         aria-pressed={full}
       >

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { actions, getState, useOutline } from './store';
 import type { RunLogLine } from './types';
+import { AgentLinks, agentLinks } from './AgentLinks';
 
 /** How each log line is tagged — the same words promptmap's own CLI log uses. */
 const TAG: Record<RunLogLine['kind'], string> = {
@@ -12,37 +13,6 @@ const TAG: Record<RunLogLine['kind'], string> = {
   skipped: 'SKIP',
   end: 'DONE',
 };
-
-/**
- * Log lines carrying a link a person will want to open — an agent's live
- * browser, its Agent37 desktop, a public port — and what to call each.
- */
-const PINNED: [RegExp, string][] = [
-  [/^browser: watch live at (https?:\/\/\S+)/, 'Watch the browser'],
-  [/^desktop: watch the agent's screen: (https?:\/\/\S+)/, 'Watch the desktop'],
-  [/^public: port (\d+) is public at (https?:\/\/\S+)/, 'Public port'],
-];
-
-interface PinnedLink {
-  id: string;
-  label: string;
-  url: string;
-}
-
-/** The links in one agent's log lines, in the order they were posted. */
-function pinnedLinks(id: string, lines: string[]): PinnedLink[] {
-  const out: PinnedLink[] = [];
-  for (const raw of lines) {
-    const line = raw.replace(/^\[\s*[\d.]+s\]\s*/, '');
-    for (const [re, label] of PINNED) {
-      const m = line.match(re);
-      if (!m) continue;
-      const url = m[m.length - 1];
-      if (!out.some((l) => l.url === url)) out.push({ id, label: m.length > 2 ? `${label} ${m[1]}` : label, url });
-    }
-  }
-  return out;
-}
 
 function clock(ms: number): string {
   const s = ms / 1000;
@@ -165,30 +135,13 @@ export function RunProgress() {
                   <AgentLog lines={logs[line.id]} live={state.runStatus[line.id] === 'running'} />
                 )}
                 {line.kind === 'start' && line.id && logs[line.id] && (
-                  <PinnedLinks links={pinnedLinks(line.id, logs[line.id])} />
+                  <AgentLinks className="rp__pins--indent" links={agentLinks(logs[line.id], state.results[line.id])} />
                 )}
               </li>
             ),
           )}
         </ol>
       </div>
-    </div>
-  );
-}
-
-/**
- * The links in an agent's log, each a bar of its own right under the folded
- * log — where they would otherwise be lost among the lines around them.
- */
-function PinnedLinks({ links }: { links: PinnedLink[] }) {
-  if (!links.length) return null;
-  return (
-    <div className="rp__pins">
-      {links.map((p) => (
-        <a key={p.url} className="rp__pin" href={p.url} target="_blank" rel="noreferrer" title={p.url}>
-          {p.label} ↗
-        </a>
-      ))}
     </div>
   );
 }

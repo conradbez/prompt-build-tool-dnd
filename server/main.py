@@ -132,6 +132,19 @@ from promptmap.executor import run_context as _run_context
 
 _run_context._NON_KEY_CONFIG = _run_context._NON_KEY_CONFIG | {LLM_MODEL_VAR}
 
+# An agent bullet with a public URL ends its answer with the URL in this block,
+# which the editor pulls out and shows as a link of its own (`src/AgentLinks.tsx`)
+# rather than leaving it to be found somewhere in the prose.
+PUBLIC_URL_INSTRUCTION = """
+
+When you have served something on your public URL, end your answer with that
+URL alone in this block, exactly:
+
+[public url]
+https://…
+[/public url]
+"""
+
 # A bullet with caching off: promptmap skips the cache lookup and always runs it.
 NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"
 
@@ -523,6 +536,8 @@ def _build_source(
     if not node.cache and node.kind in ("prompt", "agent"):
         source = NO_CACHE_CONFIG_LINE + "\n" + source
     if node.kind == "agent" and node.persistDisk:
+        if node.publicUrl:
+            source += PUBLIC_URL_INSTRUCTION
         return (
             agent37_exec.config_line(
                 node.id, node.agentSteps, node.producesFiles, node.remoteBrowser, node.publicUrl
