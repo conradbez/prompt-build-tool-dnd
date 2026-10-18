@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SETTINGS_HINT, SWITCH_HINT } from './lib/shortcuts';
+import { SETTINGS_HINT, SWITCH_HINT, UNDO_HINT } from './lib/shortcuts';
 
 interface Row {
   keys: string;
@@ -9,6 +9,7 @@ interface Row {
 const VIEW: Row[] = [
   { keys: SWITCH_HINT, desc: 'Switch between the mind map and the outline' },
   { keys: 'Click the thumbnail', desc: 'Same thing' },
+  { keys: UNDO_HINT, desc: 'Undo / redo the last change to the map' },
   { keys: SETTINGS_HINT, desc: 'Settings — the current bullet\u2019s if one is focused, otherwise the run\u2019s (⚙). Again to close' },
 ];
 

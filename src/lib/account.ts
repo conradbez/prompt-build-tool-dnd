@@ -18,8 +18,19 @@ export interface Account {
 }
 
 export interface MapList {
-  maps: { name: string; updated: number }[];
-  current: { name: string; doc: unknown; updated: number } | null;
+  maps: { name: string; updated: number; rev: number }[];
+  current: { name: string; doc: unknown; updated: number; rev: number } | null;
+}
+
+/** A save refused because the map was saved elsewhere since — see `putMap`. */
+export class MapConflict extends Error {
+  constructor(
+    message: string,
+    /** The map's revision on the server now. */
+    readonly rev: number,
+  ) {
+    super(message);
+  }
 }
 
 let account: Account | null = read();
@@ -109,6 +120,33 @@ export function fetchMaps(name?: string): Promise<MapList> {
   return call('GET', name === undefined ? '/maps' : `/maps?name=${encodeURIComponent(name)}`);
 }
 
-export async function putMap(name: string, doc: Doc): Promise<void> {
-  await call('PUT', '/maps', { name, doc });
+/**
+ * Store *doc* as *name*, based on revision *rev* — the server refuses it with a
+ * `MapConflict` when the map has been saved since. Without *rev* it overwrites.
+ * Resolves to the map's new revision.
+ *
+ * *keepalive* lets the request outlive the page, for the save made as it
+ * closes; browsers cap such a body at 64 KB, past which it is simply not sent.
+ */
+export async function putMap(
+  name: string,
+  doc: Doc,
+  rev?: number,
+  keepalive = false,
+): Promise<number> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (account) headers.Authorization = `Bearer ${account.token}`;
+  const res = await fetch(`${getServerUrl()}/maps`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ name, doc, rev }),
+    keepalive,
+  });
+  if (res.status === 409) {
+    const detail = (await res.json().catch(() => ({})))?.detail ?? {};
+    throw new MapConflict(String(detail.message ?? 'Saved somewhere else since.'), Number(detail.rev) || 0);
+  }
+  if (res.status === 401 && account) set(null);
+  if (!res.ok) return fail(res);
+  return (await res.json()).rev;
 }

@@ -8,11 +8,16 @@ page load opens the map last edited.
     POST /auth/code    {email}        → emails a 6-digit code, good for 10 minutes
     POST /auth/verify  {email, code}  → {token, email}; the token is a bearer token
     POST /auth/logout                 → forgets the token
-    GET  /maps[?name=]                → {email, maps: [{name, updated}], current}
-    PUT  /maps         {name, doc}    → stores the map's JSON under that name
+    GET  /maps[?name=]                → {email, maps: [{name, updated, rev}], current}
+    PUT  /maps         {name, doc, rev} → stores the map's JSON under that name
 
 `current` is the map named, or else the one saved last — `{name, doc,
-updated}` — or null when there are none.
+updated, rev}` — or null when there are none.
+
+`rev` counts a map's saves. A PUT names the `rev` it last saw, and is refused
+with 409 (and the map's current `rev`) when the map has been saved since — by
+another tab, or another device — so neither quietly overwrites the other. A PUT
+without one overwrites whatever is there.
 
 Everything lives in one SQLite file: `DB_PATH`, else `app.db` in Railway's
 volume (`RAILWAY_VOLUME_MOUNT_PATH`, set when a volume is attached), else
@@ -110,10 +115,14 @@ def _init() -> None:
                 name TEXT NOT NULL,
                 doc TEXT NOT NULL,
                 updated REAL NOT NULL,
+                rev INTEGER NOT NULL DEFAULT 1,
                 PRIMARY KEY (email, name)
             );
             """
         )
+        # A database from before `rev` existed.
+        if "rev" not in {r["name"] for r in db.execute("PRAGMA table_info(maps)")}:
+            db.execute("ALTER TABLE maps ADD COLUMN rev INTEGER NOT NULL DEFAULT 1")
 
 
 _init()
@@ -222,6 +231,8 @@ class VerifyRequest(BaseModel):
 class SaveRequest(BaseModel):
     name: str
     doc: dict[str, Any]
+    # The map's `rev` this save is based on; None overwrites whatever is there.
+    rev: Optional[int] = None
 
 
 @router.get("/auth/enabled")
@@ -315,22 +326,24 @@ def get_maps(name: Optional[str] = None, authorization: Optional[str] = Header(N
     email = _user(authorization)
     with _lock, _db() as db:
         rows = db.execute(
-            "SELECT name, updated FROM maps WHERE email = ? ORDER BY updated DESC", (email,)
+            "SELECT name, updated, rev FROM maps WHERE email = ? ORDER BY updated DESC", (email,)
         ).fetchall()
         if name is not None:
             cur = db.execute(
-                "SELECT name, doc, updated FROM maps WHERE email = ? AND name = ?", (email, name)
+                "SELECT name, doc, updated, rev FROM maps WHERE email = ? AND name = ?", (email, name)
             ).fetchone()
         else:
             cur = db.execute(
-                "SELECT name, doc, updated FROM maps WHERE email = ? ORDER BY updated DESC LIMIT 1",
+                "SELECT name, doc, updated, rev FROM maps WHERE email = ? ORDER BY updated DESC LIMIT 1",
                 (email,),
             ).fetchone()
     return {
         "email": email,
-        "maps": [{"name": r["name"], "updated": r["updated"]} for r in rows],
+        "maps": [{"name": r["name"], "updated": r["updated"], "rev": r["rev"]} for r in rows],
         "current": (
-            {"name": cur["name"], "doc": json.loads(cur["doc"]), "updated": cur["updated"]} if cur else None
+            {"name": cur["name"], "doc": json.loads(cur["doc"]), "updated": cur["updated"], "rev": cur["rev"]}
+            if cur
+            else None
         ),
     }
 
@@ -346,8 +359,17 @@ def save_map(req: SaveRequest, authorization: Optional[str] = Header(None)) -> d
         raise HTTPException(413, "This map is too large to save.")
     now = time.time()
     with _lock, _db() as db:
+        row = db.execute(
+            "SELECT rev FROM maps WHERE email = ? AND name = ?", (email, name)
+        ).fetchone()
+        if row and req.rev is not None and row["rev"] != req.rev:
+            raise HTTPException(
+                409,
+                {"message": f"“{name}” was saved somewhere else since this copy was opened.", "rev": row["rev"]},
+            )
+        rev = (row["rev"] if row else 0) + 1
         db.execute(
-            "INSERT OR REPLACE INTO maps (email, name, doc, updated) VALUES (?, ?, ?, ?)",
-            (email, name, doc, now),
+            "INSERT OR REPLACE INTO maps (email, name, doc, updated, rev) VALUES (?, ?, ?, ?, ?)",
+            (email, name, doc, now, rev),
         )
-    return {"ok": True, "updated": now}
+    return {"ok": True, "updated": now, "rev": rev}

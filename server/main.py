@@ -118,11 +118,19 @@ promptmap.register_config_keys("judge", "threshold")
 # The run variable a person sets in Settings to pick the model they run with.
 # promptmap reads `config()` before any promptdata exists, so the server resolves it
 # itself: it goes straight to the LLM client and the agent sandbox, and into
-# the config of every bullet that calls a model — only so promptmap's prompt cache,
-# keyed on config, never hands back an answer from a different model.
+# the config of every bullet that calls a model, where `llm.py` and the agent
+# kinds read a bullet's own choice.
 LLM_MODEL_VAR = "llm_model"
 _MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@-]+$")
 promptmap.register_config_keys(LLM_MODEL_VAR)
+
+# The model is left out of promptmap's cache key: switching models keeps the
+# answers already run rather than paying for them again. A bullet's kind still
+# counts — it is `model_type` in the same config — so changing that reruns it.
+# Turn a bullet's cache off for a fresh answer from the new model.
+from promptmap.executor import run_context as _run_context
+
+_run_context._NON_KEY_CONFIG = _run_context._NON_KEY_CONFIG | {LLM_MODEL_VAR}
 
 # A bullet with caching off: promptmap skips the cache lookup and always runs it.
 NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"

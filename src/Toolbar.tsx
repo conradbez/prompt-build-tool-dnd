@@ -7,6 +7,7 @@ import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';
 import { SETTINGS_HINT } from './lib/shortcuts';
 import { setAgent37Key, useAgent37Key } from './lib/agent37Key';
 import { useAccount } from './lib/account';
+import { keepMine, takeTheirs, useSaveStatus } from './lib/saves';
 
 const PROVIDER_STORAGE = 'wm.provider';
 const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
@@ -174,6 +175,7 @@ export function Toolbar() {
   return (
     <div className="tb">
       <div className="tb__row">
+        <SaveIndicator />
         {!account && (
           <button className="tb__login" onClick={() => openSettings('account')}>
             Log in
@@ -321,5 +323,45 @@ function KeyModal({
         </div>
       </form>
     </div>
+  );
+}
+
+/**
+ * How the open map's saving is going. Quiet when it is fine — a grey word — and
+ * loud only when a save failed or was refused, which before this was a line in
+ * the console nobody reads.
+ */
+function SaveIndicator() {
+  const s = useSaveStatus();
+  const [busy, setBusy] = useState(false);
+  if (!s.name || s.state === 'idle') return null;
+  if (s.state === 'conflict') {
+    const settle = async (fn: () => void | Promise<void>) => {
+      setBusy(true);
+      try {
+        await fn();
+      } catch (e) {
+        console.warn(e);
+      } finally {
+        setBusy(false);
+      }
+    };
+    return (
+      <span className="tb__save tb__save--conflict" title={s.message}>
+        Changed elsewhere
+        <button className="tb__savebtn" disabled={busy} onClick={() => settle(keepMine)} title="Save this map over the other copy">
+          Keep mine
+        </button>
+        <button className="tb__savebtn" disabled={busy} onClick={() => settle(takeTheirs)} title="Replace this map with the other copy">
+          Load theirs
+        </button>
+      </span>
+    );
+  }
+  const label = { saving: 'Saving…', saved: 'Saved', error: 'Not saved' }[s.state];
+  return (
+    <span className={`tb__save tb__save--${s.state}`} title={s.message || `“${s.name}”`}>
+      {label}
+    </span>
   );
 }

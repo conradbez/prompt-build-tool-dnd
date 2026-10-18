@@ -211,10 +211,88 @@ let runTitles: Record<string, string> = {};
 let runner: ((id: string) => void) | null = null;
 const listeners = new Set<() => void>();
 
-function emit(next: OutlineState) {
+function emit(next: OutlineState, record = true) {
+  if (record) recordHistory(state, next);
   state = next;
   saveDoc(next);
   listeners.forEach((l) => l());
+}
+
+// ---------------------------------------------------------------------------
+// Undo / redo
+// ---------------------------------------------------------------------------
+
+/**
+ * The document as it was before each step, and the steps undone since. Only
+ * the document — bullets and their order — is history: a run's results, the
+ * selection and which modal is open are not edits, and undoing one would be a
+ * surprise. Each entry is the old objects themselves: every action replaces
+ * what it changes rather than mutating it, so a snapshot costs nothing.
+ */
+const HISTORY_LIMIT = 100;
+let past: Doc[] = [];
+let future: Doc[] = [];
+
+/**
+ * Typing is one keystroke per change, and undoing a word a letter at a time is
+ * not undoing. Changes to the same single bullet, each within this long of the
+ * last, are one step; anything else starts a new one.
+ */
+const MERGE_MS = 1000;
+let lastEdit: { id: string | null; at: number } = { id: null, at: 0 };
+
+/** The bullets `next` changed, added or removed relative to `prev`. */
+function changedIds(prev: OutlineState, next: OutlineState): string[] {
+  if (prev.bullets === next.bullets) return [];
+  const out: string[] = [];
+  for (const id in next.bullets) if (next.bullets[id] !== prev.bullets[id]) out.push(id);
+  for (const id in prev.bullets) if (!(id in next.bullets)) out.push(id);
+  return out;
+}
+
+function sameOrder(a: string[], b: string[]): boolean {
+  return a === b || (a.length === b.length && a.every((id, i) => id === b[i]));
+}
+
+function recordHistory(prev: OutlineState, next: OutlineState) {
+  const changed = changedIds(prev, next);
+  const reordered = !sameOrder(prev.rootIds, next.rootIds);
+  if (!changed.length && !reordered) return;
+  const now = Date.now();
+  const one = changed.length === 1 && !reordered ? changed[0] : null;
+  const merge = one !== null && one === lastEdit.id && now - lastEdit.at < MERGE_MS;
+  lastEdit = { id: one, at: now };
+  if (merge) return;
+  past.push({ bullets: prev.bullets, rootIds: prev.rootIds });
+  if (past.length > HISTORY_LIMIT) past.shift();
+  future = [];
+}
+
+/** Forget every step — a different document is on screen now. */
+function clearHistory() {
+  past = [];
+  future = [];
+  lastEdit = { id: null, at: 0 };
+}
+
+/** Put `doc` on screen as a step through history, with the caret where it changed. */
+function restore(doc: Doc) {
+  const probe = { ...state, bullets: doc.bullets, rootIds: doc.rootIds };
+  const touched = changedIds(state, probe).find((id) => doc.bullets[id]);
+  const keep = (id: string | null | undefined) => (id && doc.bullets[id] ? id : null);
+  const focusId = touched ?? keep(state.focus?.id) ?? doc.rootIds[0];
+  lastEdit = { id: null, at: 0 };
+  emit(
+    {
+      ...probe,
+      focus: { id: focusId, caret: 'end' },
+      selectedId: focusId,
+      blockSel: null,
+      openResultId: keep(state.openResultId),
+      openSettingsId: keep(state.openSettingsId),
+    },
+    false,
+  );
 }
 
 /** Be told when anything in the document changes. Returns the unsubscribe. */
@@ -446,6 +524,7 @@ export const actions = {
    */
   replaceDoc(doc: Doc) {
     const firstId = doc.rootIds[0];
+    clearHistory();
     emit({
       ...state,
       bullets: doc.bullets,
@@ -463,7 +542,31 @@ export const actions = {
       runLog: [],
       openResultId: null,
       openSettingsId: null,
-    });
+    }, false);
+  },
+
+  /** A blank document: one empty bullet, no history, nothing from a run. */
+  newDoc() {
+    const b = makeBullet({ id: nanoid() });
+    actions.replaceDoc({ bullets: { [b.id]: b }, rootIds: [b.id] });
+  },
+
+  /** Step back one edit. False when there is nothing to undo. */
+  undo(): boolean {
+    const prev = past.pop();
+    if (!prev) return false;
+    future.push({ bullets: state.bullets, rootIds: state.rootIds });
+    restore(prev);
+    return true;
+  },
+
+  /** Redo the last undone edit. False when there is nothing to redo. */
+  redo(): boolean {
+    const next = future.pop();
+    if (!next) return false;
+    past.push({ bullets: state.bullets, rootIds: state.rootIds });
+    restore(next);
+    return true;
   },
 
   /** Set the MCP server an agent bullet starts — see `Bullet.mcpServer`. */

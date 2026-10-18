@@ -14,10 +14,12 @@ import {
 import {
   BEFORE_LOAD,
   cleanName,
+  flushAutoSave,
   hasSave,
   listSaves,
   loadSave,
   setOpenSave,
+  startNewMap,
   useOpenSave,
   writeSave,
 } from './lib/saves';
@@ -103,7 +105,8 @@ export function SettingsModal({
   });
 
   return (
-    <div className="res-modal" onClick={onClose} role="dialog" aria-modal="true">
+    // Its fields are settings, not the document: their undo is the browser's own.
+    <div className="res-modal" onClick={onClose} role="dialog" aria-modal="true" data-native-undo>
       <div
         className="res-modal__panel res-modal__panel--narrow"
         onClick={(e) => e.stopPropagation()}
@@ -570,11 +573,22 @@ function Documents({
       );
     }
     reset();
+    flushAutoSave();
     writeSave(BEFORE_LOAD, currentDoc(getState()));
     actions.replaceDoc(doc);
     setOpenSave(chosen);
     setNames(listSaves());
     say(`Loaded “${chosen}”. The map it replaced is saved as “${BEFORE_LOAD}”.`);
+  }
+
+  function onNew() {
+    reset();
+    const kept = open ? `“${open}” is saved as it was` : `The map it replaced is saved as “${BEFORE_LOAD}”`;
+    const name = startNewMap();
+    setNames(listSaves());
+    setChosen(name);
+    setTyped('');
+    say(`Started “${name}” — a blank map, saved as you go. ${kept}.`);
   }
 
   async function onExport(target: ExportTarget) {
@@ -617,6 +631,7 @@ function Documents({
   async function onPaste() {
     if (pending === 'paste' && pasted) {
       reset();
+      flushAutoSave();
       writeSave(BEFORE_LOAD, currentDoc(getState()));
       actions.replaceDoc(pasted);
       // A pasted map is not any of the saves, so nothing is open: it is saved
@@ -770,6 +785,7 @@ function Documents({
             </button>
             {menu === 'load' && (
               <ul className="pd-pop" role="menu">
+
                 <li>
                   <button
                     role="menuitem"
@@ -782,6 +798,14 @@ function Documents({
               </ul>
             )}
           </div>
+
+          <button
+            className="pd-btn"
+            title="Start a blank map as a new save of its own. This one is kept as it is."
+            onClick={() => act(onNew)}
+          >
+            New
+          </button>
         </div>
 
         {pasteBox !== null && (

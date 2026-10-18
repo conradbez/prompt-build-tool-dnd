@@ -4,7 +4,7 @@ import { Outline } from './outline/Outline';
 import { Toolbar } from './Toolbar';
 import { Help } from './Help';
 import { ResultModal } from './outline/ResultModal';
-import { useOutline } from './store';
+import { actions, useOutline } from './store';
 import { SWITCH_HINT } from './lib/shortcuts';
 
 type View = 'map' | 'outline';
@@ -57,6 +57,24 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [toggle]);
+
+  // Mod+Z / Mod+Shift+Z (and Ctrl+Y) step through the document's history —
+  // in a bullet's text too, whose edits are the store's, not the textarea's.
+  // A field outside the document (Settings) keeps the browser's own undo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      const redo = (key === 'z' && e.shiftKey) || (key === 'y' && !e.shiftKey);
+      if (!redo && !(key === 'z' && !e.shiftKey)) return;
+      if ((e.target as Element | null)?.closest?.('[data-native-undo]')) return;
+      e.preventDefault();
+      if (redo) actions.redo();
+      else actions.undo();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const other: View = full === 'map' ? 'outline' : 'map';
   const swapLabel = `Switch to the ${NAMES[other]} (${SWITCH_HINT})`;

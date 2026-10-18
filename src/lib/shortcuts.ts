@@ -8,6 +8,9 @@ const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(naviga
 /** Swaps the mind map and the outline. */
 export const SWITCH_HINT = IS_MAC ? '⌘\\' : 'Ctrl+\\';
 
+/** Steps back / forward through the document's history. */
+export const UNDO_HINT = IS_MAC ? '⌘Z / ⇧⌘Z' : 'Ctrl+Z / Ctrl+Shift+Z';
+
 /** Opens / closes Settings — the key VS Code and most desktop apps use. */
 export const SETTINGS_HINT = IS_MAC ? '⌘,' : 'Ctrl+,';
 
