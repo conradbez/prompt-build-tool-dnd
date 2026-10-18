@@ -10,7 +10,7 @@ export interface LaidOutNode {
 export const NODE_WIDTH = 190;
 export const NODE_HEIGHT = 56;
 const H_GAP = 28; // horizontal gap between sibling subtrees
-const V_GAP = 44; // vertical gap between depth levels
+const V_GAP = 64; // vertical gap between depth levels — room for the links between rows
 
 /** One column of the auto-layout: a node plus the gap after it. */
 export const SLOT_X = NODE_WIDTH + H_GAP;
@@ -34,49 +34,42 @@ export function snapToGrid(pos: { x: number; y: number }): { x: number; y: numbe
     y: Math.round(pos.y / SNAP_GRID[1]) * SNAP_GRID[1],
   };
 }
-const RESULT_HEIGHT = 168; // extra room a node needs when it shows a run result
-
 /**
- * Simple right-to-left tidy tree: leaves are stacked top-to-bottom, each parent
- * is centred beside its children, and depth maps to the horizontal axis — roots
- * in the rightmost column, the deepest children on the left. That is the
- * direction data runs: a child runs first and its output feeds its parent, so
- * every link reads left-to-right as input → output.
- * Multiple roots are stacked one under another. Collapsed bullets render as leaves.
- *
- * A node that shows a run result is taller, so its leaf slot is given extra
- * vertical room and its output card doesn't overlap the node below.
+ * Simple bottom-up tidy tree: leaves are laid out left-to-right, each parent
+ * is centred above its children, and depth maps to the vertical axis — roots
+ * on the top row, the deepest children at the bottom. That is the direction
+ * data runs: a child runs first and its output feeds its parent, so every
+ * link reads bottom-to-top as input → output. You still build top-down —
+ * start from the answer you want and add the inputs it needs underneath.
+ * Multiple roots sit side by side. Collapsed bullets render as leaves.
  */
 export function layout(state: OutlineState): LaidOutNode[] {
-  const placed: { id: string; y: number; depth: number }[] = [];
-  let cursor = 0; // next free y
+  const placed: { id: string; x: number; depth: number }[] = [];
+  let cursor = 0; // next free x
 
   const place = (id: string, depth: number): number => {
     const b = state.bullets[id];
     if (!b) return cursor;
     const kids = b.collapsed ? [] : b.children.filter((c) => state.bullets[c]);
-    const height = NODE_HEIGHT + (state.results[id] ? RESULT_HEIGHT : 0);
 
-    let y: number;
+    let x: number;
     if (kids.length === 0) {
-      y = cursor;
-      cursor += height + V_GAP;
+      x = cursor;
+      cursor += SLOT_X;
     } else {
-      const childYs = kids.map((c) => place(c, depth + 1));
-      y = (childYs[0] + childYs[childYs.length - 1]) / 2;
-      // A parent taller than its stack of children still needs its room.
-      cursor = Math.max(cursor, y + height + V_GAP);
+      const childXs = kids.map((c) => place(c, depth + 1));
+      x = (childXs[0] + childXs[childXs.length - 1]) / 2;
     }
-    placed.push({ id, y, depth });
-    return y;
+    placed.push({ id, x, depth });
+    return x;
   };
 
   for (const rootId of state.rootIds) place(rootId, 0);
 
-  // Roots at x = 0, each level one column further left. Anchored on the root
+  // Roots at y = 0, each level one row further down. Anchored on the root
   // rather than the deepest level, so adding a grandchild grows the tree
-  // leftwards instead of shoving every existing column to the right.
-  const auto = new Map(placed.map((p) => [p.id, { x: -p.depth * SLOT_X, y: p.y }]));
+  // downwards instead of shoving every existing row up.
+  const auto = new Map(placed.map((p) => [p.id, { x: p.x, y: p.depth * SLOT_Y }]));
 
   // A dragged node keeps its spot (`bullet.pos`), and whatever hangs off it
   // comes along: an unpinned node sits where the auto-layout puts it *relative

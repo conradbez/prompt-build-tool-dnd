@@ -44,12 +44,12 @@ export function BulletNode({ id, data, selected }: NodeProps) {
         — the `+` button covering the connection handle — so a drag aimed at the
         handle hit the button instead. The `+` now lives *inside* the handle.
 
-        It is the node's *input*, on the left: children sit left of their parent
-        and feed their output across into it, so adding a child means adding an input.
+        It is the node's *input*, on the bottom: children sit below their parent
+        and feed their output up into it, so adding a child means adding an input.
       */}
       <Handle
         type="target"
-        position={Position.Left}
+        position={Position.Bottom}
         className="mm-handle mm-handle--start"
         title={
           d.canAddChild
@@ -104,9 +104,9 @@ export function BulletNode({ id, data, selected }: NodeProps) {
         </button>
       )}
       {d.hasChildren && d.collapsed && <div className="mm-node__badge">▸</div>}
-      {/* The output: it links across into this node's parent. A test has
+      {/* The output, on top: it links up into this node's parent. A test has
           none — its verdict never feeds anything. */}
-      {d.kind !== 'test' && <Handle type="source" position={Position.Right} className="mm-handle" />}
+      {d.kind !== 'test' && <Handle type="source" position={Position.Top} className="mm-handle" />}
     </div>
   );
 }
