@@ -21,9 +21,9 @@ can post to it.
 
 ## 1. Jinja injection
 
-**Risk.** A bullet's text goes into its pbt prompt as Jinja source, unescaped
-(`_build_source`). pbt renders it with a plain `jinja2.Environment`, not a
-`SandboxedEnvironment` (`pbt/executor/parser_model.py:_make_env`,
+**Risk.** A bullet's text goes into its promptmap prompt as Jinja source, unescaped
+(`_build_source`). promptmap renders it with a plain `jinja2.Environment`, not a
+`SandboxedEnvironment` (`promptmap/executor/parser_model.py:_make_env`,
 `parser_initial.py:extract_jinja_config`). Plain Jinja reaches Python's
 globals, so a bullet reading
 
@@ -46,19 +46,19 @@ which looks hard to break out of but should be validated as package names.)
   `{%`, `{#` with Jinja literals (`{{ '{{' }}` …) or wrap it in
   `{% raw %}…{% endraw %}` (also escaping `{% endraw %}` inside it). The
   server's own `ref()`, `promptdata()` and `config()` lines go outside it.
-- And/or render with `jinja2.sandbox.ImmutableSandboxedEnvironment` in pbt.
+- And/or render with `jinja2.sandbox.ImmutableSandboxedEnvironment` in promptmap.
   A sandbox alone is not enough: it still lets the text call `config()` (risk 2).
 
 **Status.** Fixed. `_escape_jinja` (`server/main.py`) runs on every bullet's
 text and on the global instruction after the server's own rewrites. It keeps
 only the exact `{{ ref('word') }}` / `{{ promptdata("word") }}` calls the
 server inserts (and `{{ prompt }}` in the global instruction); every other `{`
-becomes `{{ '{' }}`, so no tag can start. Checked through `pbt.async_run`: the
+becomes `{{ '{' }}`, so no tag can start. Checked through `promptmap.async_run`: the
 payload above comes back as literal text.
 
 ## 2. Built-in local kinds run on the master server
 
-**Risk.** pbt registers its own kinds on import (`pbt/executor/builtin_kinds.py`):
+**Risk.** promptmap registers its own kinds on import (`promptmap/executor/builtin_kinds.py`):
 
 - `execute_python`: `exec()` of the rendered bullet, in the server process;
 - `agent`: mini-swe-agent with a `LocalEnvironment`, i.e. bash on the server.
@@ -80,12 +80,12 @@ another session's file keys, bypassing `_node_file_keys`), `output_format`.
 - Belt and braces: after building each source, parse it with
   `extract_jinja_config` and reject the run if `model_type` is not one the
   server set (`""`, `template`, `python_modal`, `agent_modal`, `agent37`).
-- Unregister `execute_python` and `agent` at server start, if pbt allows it,
+- Unregister `execute_python` and `agent` at server start, if promptmap allows it,
   so nothing can reach them.
 
 **Status.** Fixed. Escaping (risk 1) stops text calling `config()`, and
-`server/main.py` removes `execute_python` and `agent` from pbt's kind registry
-at import. A `model_type` naming either is now unknown, which pbt runs as a
+`server/main.py` removes `execute_python` and `agent` from promptmap's kind registry
+at import. A `model_type` naming either is now unknown, which promptmap runs as a
 plain LLM call. Registered kinds: `agent37`, `agent_modal`, `python_modal`,
 `template`.
 

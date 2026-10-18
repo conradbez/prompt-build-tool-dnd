@@ -1,12 +1,12 @@
 """
-Turn a bullet graph into a pbt project you can run without this app.
+Turn a bullet graph into a promptmap project you can run without this app.
 
 Two shapes, both plain Python files:
 
 * ``script``  — one file: the models as a dict, a small ``llm_call``, and
-  ``pbt.async_run``. Run it and it prints every bullet's answer.
-* ``project`` — one file that *writes* a pbt project: ``models/<name>.prompt``
-  per bullet plus a ``client.py``, which is the layout ``pbt serve`` expects.
+  ``promptmap.async_run``. Run it and it prints every bullet's answer.
+* ``project`` — one file that *writes* a promptmap project: ``map/<name>.prompt``
+  per bullet plus a ``client.py``, which is the layout ``promptmap serve`` expects.
 
 The sources come from `main._build_source`, the same function the runner uses,
 so an export is the graph as it actually runs rather than a second rendering of
@@ -71,14 +71,14 @@ def warnings(nodes: list["Node"]) -> list[str]:
     if any(n.kind == "python" for n in nodes):
         out.append(
             "Python bullets need the `python_modal` model kind from the "
-            "`pbt-extra-model-kinds` package, not pbt. Install it alongside "
-            "pbt, or those bullets will fail as an unknown model type."
+            "`promptmap-extra-model-kinds` package, not promptmap. Install it alongside "
+            "promptmap, or those bullets will fail as an unknown model type."
         )
     if any(n.kind == "agent" for n in nodes):
         out.append(
             "Agent bullets need the `agent_modal` model kind from the "
-            "`pbt-extra-model-kinds` package, not pbt. Install it, and call "
-            "`pbt_extra_model_kinds.agent_exec.use_run` "
+            "`promptmap-extra-model-kinds` package, not promptmap. Install it, and call "
+            "`promptmap_extra_model_kinds.agent_exec.use_run` "
             "before running, or those bullets will fail."
         )
     return out
@@ -113,7 +113,7 @@ def _header(lines: list[str]) -> str:
 def _llm_call(provider: str) -> str:
     """A small `llm_call`, one provider deep — the same shape as `llm.py`.
 
-    The template passthrough is not optional: pbt parses `model_type` into
+    The template passthrough is not optional: promptmap parses `model_type` into
     `model.config` and otherwise runs a template node like any other prompt, so
     without this the node's text would be answered instead of passed on.
     """
@@ -176,10 +176,10 @@ def _llm_call(provider: str) -> str:
         '    if cfg.get("judge") == "classifier":\n'
         "        # A classifier-judged test: P(yes) for the question above `---`.\n"
         "        # Reads TYPESAFE_API_KEY / TYPESAFE_BASE_URL / TYPESAFE_DEFAULT_MODEL.\n"
-        "        import json\n\n        import pbt\n"
-        "        from pbt.classifier import split_question\n\n"
+        "        import json\n\n        import promptmap\n"
+        "        from promptmap.classifier import split_question\n\n"
         "        question, state = split_question(prompt)\n"
-        "        p = pbt.systemone_classifier()(state, question)\n"
+        "        p = promptmap.systemone_classifier()(state, question)\n"
         '        return json.dumps({"pass": p >= float(cfg.get("threshold", 0.5)), "p_yes": p})\n'
         "    if not KEY:\n"
         f'        raise RuntimeError("Set {key_env} before running this.")\n'
@@ -196,19 +196,19 @@ def script(
     promptdata: dict[str, str],
     notes: list[str],
 ) -> str:
-    """One runnable file: the whole pipeline, and `pbt.async_run` over it."""
+    """One runnable file: the whole pipeline, and `promptmap.async_run` over it."""
     head = _header(
         [
-            f"{name} — exported from the mind map, as a pbt pipeline.",
+            f"{name} — exported from the mind map, as a promptmap pipeline.",
             "",
             "Run it:",
             "",
-            "  pip install prompt-build-tool",
+            "  pip install promptmap",
             f"  export {_ENV_KEY.get(provider, 'GEMINI_API_KEY')}=...",
             "  python " + filename(name, "script"),
             "",
-            "Each bullet is one pbt model. A bullet's children and its @ references",
-            "became {{ ref('...') }} dependencies, so pbt works out the order and runs",
+            "Each bullet is one promptmap model. A bullet's children and its @ references",
+            "became {{ ref('...') }} dependencies, so promptmap works out the order and runs",
             "independent branches in parallel — the graph is in MODELS, not in the",
             "order the dict happens to be written in.",
             *(["", *notes] if notes else []),
@@ -219,7 +219,7 @@ def script(
         f"{head}\n\n"
         "import asyncio\n"
         "import os\n\n"
-        "import pbt\n\n"
+        "import promptmap\n\n"
         "MODELS = {\n"
         f"{entries}"
         "}\n\n"
@@ -227,7 +227,7 @@ def script(
         f"GLOBAL_INSTRUCTION = {_lit(global_instruction) if global_instruction else 'None'}\n\n\n"
         f"{_llm_call(provider)}\n\n"
         "async def main():\n"
-        "    outputs = await pbt.async_run(\n"
+        "    outputs = await promptmap.async_run(\n"
         "        models_from_dict=MODELS,\n"
         "        llm_call=llm_call,\n"
         "        promptdata=PROMPTDATA or None,\n"
@@ -248,26 +248,26 @@ def project(
     promptdata: dict[str, str],
     notes: list[str],
 ) -> str:
-    """A file that writes the project `pbt serve` expects, then gets out of the way.
+    """A file that writes the project `promptmap serve` expects, then gets out of the way.
 
-    `pbt serve` reads a directory of `.prompt` files and a `client.py` beside
+    `promptmap serve` reads a directory of `.prompt` files and a `client.py` beside
     it, so the export cannot be the project — it has to be the thing that lays
     the project out. Running it twice is safe: it rewrites what it wrote.
     """
     head = _header(
         [
-            f"{name} — exported from the mind map, as a pbt project to serve.",
+            f"{name} — exported from the mind map, as a promptmap project to serve.",
             "",
             "Run it:",
             "",
-            "  pip install prompt-build-tool uvicorn",
+            "  pip install promptmap uvicorn",
             f"  export {_ENV_KEY.get(provider, 'GEMINI_API_KEY')}=...",
             "  python " + filename(name, "project") + "   # writes ./models and ./client.py",
-            "  pbt serve --models-dir models",
+            "  promptmap serve --map-dir map",
             "",
-            "`pbt serve` then answers POST /run with",
+            "`promptmap serve` then answers POST /run with",
             '  {"promptdata": {...}, "select": ["model_name"]}',
-            "and returns every model's output. `pbt run` works on the same folder.",
+            "and returns every model's output. `promptmap run` works on the same folder.",
             "",
             "The prompts are ordinary files after this — edit them there, not here;",
             "this script overwrites them each time it runs.",
@@ -285,11 +285,11 @@ def project(
         "import os\n"
         "from pathlib import Path\n\n"
         "ROOT = Path(__file__).resolve().parent\n"
-        'MODELS_DIR = ROOT / "models"\n\n'
+        'MODELS_DIR = ROOT / "map"\n\n'
         "MODELS = {\n"
         f"{entries}"
         "}\n\n"
-        f"PROMPTDATA = {promptdata!r}  # pbt run --promptdata key=value, or POST /run\n\n"
+        f"PROMPTDATA = {promptdata!r}  # promptmap run --promptdata key=value, or POST /run\n\n"
         f"GLOBAL_INSTRUCTION = {_lit(global_instruction) if global_instruction else '\"\"'}\n\n"
         f"CLIENT_PY = {_lit(_llm_call(provider))}\n\n\n"
         "def main():\n"
@@ -300,7 +300,7 @@ def project(
         "    if GLOBAL_INSTRUCTION:\n"
         f"        {global_block}"
         '    print(f"Wrote {len(MODELS)} prompts to {MODELS_DIR} and client.py beside them.")\n'
-        '    print("Now run:  pbt serve --models-dir models")\n\n\n'
+        '    print("Now run:  promptmap serve --map-dir map")\n\n\n'
         'if __name__ == "__main__":\n'
         "    main()\n"
     )

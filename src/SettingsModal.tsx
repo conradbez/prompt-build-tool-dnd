@@ -63,7 +63,7 @@ interface Props {
  *
  * Everything a run needs that is not the graph itself: the provider and its
  * key, the global instruction the server renders into every prompt bullet
- * (pbt's `global_instruction`), and the run variables it hands to pbt as
+ * (promptmap's `global_instruction`), and the run variables it hands to promptmap as
  * `promptdata`.
  *
  * The provider and key live here. The toolbar only asks for them, in a popup,
@@ -339,7 +339,7 @@ function VarTable() {
       <h3 className="res-col__head">
         Variables — write <code>@name</code> in a bullet
         <Info>
-          Sent to pbt as <code>promptdata</code>: each <code>@name</code> in a bullet becomes{' '}
+          Sent to promptmap as <code>promptdata</code>: each <code>@name</code> in a bullet becomes{' '}
           <code>{'{{ promptdata("name") }}'}</code>. Renaming one here does not rewrite the bullets
           that used the old name.
           <br />
@@ -464,7 +464,7 @@ function Documents({
   /**
    * Which menu is open. There are two verbs here — putting this map somewhere,
    * and bringing one back — and everything else is a choice of *where*: a named
-   * save, a pbt project, the clipboard. Four buttons in a row made those look
+   * save, a promptmap project, the clipboard. Four buttons in a row made those look
    * like four unrelated things.
    */
   const [menu, setMenu] = useState<null | 'save' | 'load'>(null);
@@ -721,17 +721,17 @@ function Documents({
                   <button
                     role="menuitem"
                     disabled={busy}
-                    title="A single Python file: the models as a dict and pbt.async_run over them."
+                    title="A single Python file: the models as a dict and promptmap.async_run over them."
                     onClick={() => pick(() => onExport('script'))}
                   >
-                    Export to pbt…
+                    Export to promptmap…
                   </button>
                 </li>
                 <li>
                   <button
                     role="menuitem"
                     disabled={busy}
-                    title="A Python file that writes models/*.prompt and client.py — the layout `pbt serve` expects."
+                    title="A Python file that writes map/*.prompt and client.py — the layout `promptmap serve` expects."
                     onClick={() => pick(() => onExport('project'))}
                   >
                     Export to server…

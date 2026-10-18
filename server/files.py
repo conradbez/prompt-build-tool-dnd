@@ -9,7 +9,7 @@ levels of scope:
   ever read, signed, deleted or attached to a prompt. The id is a bearer
   secret, not an account: it stands in for auth this prototype doesn't have.
 * **Bullet.** Within a session, a run only hands a bullet the files under its
-  own bullet prefix. pbt's ``promptfiles`` are global by name, so that check is
+  own bullet prefix. promptmap's ``promptfiles`` are global by name, so that check is
   what keeps one bullet's attachments out of another's prompt.
 
 Downloads are served as **presigned URLs** with a short expiry, so the bytes go
@@ -86,7 +86,7 @@ def put(session_id: str, bullet_id: str, filename: str, data: bytes) -> dict:
 
 
 def get(key: str) -> io.BytesIO:
-    """Fetch an attachment as a file object, which is what pbt passes along."""
+    """Fetch an attachment as a file object, which is what promptmap passes along."""
     obj = _client().get_object(Bucket=bucket(), Key=key)
     buf = io.BytesIO(obj["Body"].read())
     buf.name = key.rsplit("/", 1)[-1]  # some LLM clients look for a name

@@ -2,7 +2,7 @@
 Minimal LLM client for the mind-map runner.
 
 One function, ``make_llm_call``, returns a callable bound to a provider and an
-optional API key. pbt hands it the files a bullet declared (see `files.py`), so
+optional API key. promptmap hands it the files a bullet declared (see `files.py`), so
 an attachment on a bullet goes to the model along with that bullet's prompt.
 """
 
@@ -14,16 +14,16 @@ import mimetypes
 import os
 from typing import Any, Callable, Optional
 
-from pbt_extra_model_kinds.models import ENV_KEYS, MODEL_ENV, model_name
+from promptmap_extra_model_kinds.models import ENV_KEYS, MODEL_ENV, model_name
 
 
 def _read_files(files: Any) -> list[tuple[bytes, str]]:
-    """Read pbt's file objects into (bytes, mime type) pairs."""
+    """Read promptmap's file objects into (bytes, mime type) pairs."""
     return [(data, mime) for data, mime, _ in _read_named_files(files)]
 
 
 def _read_named_files(files: Any) -> list[tuple[bytes, str, str]]:
-    """Read pbt's file objects into (bytes, mime type, file name) triples."""
+    """Read promptmap's file objects into (bytes, mime type, file name) triples."""
     out: list[tuple[bytes, str, str]] = []
     for f in files or []:
         data = f.read() if hasattr(f, "read") else bytes(f)
@@ -74,7 +74,7 @@ def _detect_mime(data: bytes, name: str = "") -> str:
 def _wants_json(config: Any) -> bool:
     """True when the bullet declared ``config(output_format="json")``.
 
-    pbt validates the answer either way — it parses the response and fails the
+    promptmap validates the answer either way — it parses the response and fails the
     model if it will not parse. This is the other half: where a provider has a
     JSON mode of its own, turn it on, so the model is *made* to comply rather
     than only checked afterwards. Anthropic has no such mode; there the
@@ -86,7 +86,7 @@ def _wants_json(config: Any) -> bool:
 def _is_template(config: Any) -> bool:
     """True for nodes the editor marked as ``model_type="template"``.
 
-    pbt has no model_type semantics of its own — it parses the directive into
+    promptmap has no model_type semantics of its own — it parses the directive into
     ``model.config`` and otherwise runs the node like any other prompt — so
     each runner honours it in its own ``llm_call``. Without this a template
     node would be sent to the LLM and answer the text instead of passing it on.
@@ -98,15 +98,15 @@ def _classify(prompt: str, config: dict, settings: dict) -> str:
     """A classifier-judged test: P(yes) for the question above ``---`` about the
     material below it, returned as the verdict JSON every test bullet gives.
 
-    The key, like the LLM's, is only ever what the UI sent: pbt would otherwise
+    The key, like the LLM's, is only ever what the UI sent: promptmap would otherwise
     fall back to the server's ``TYPESAFE_API_KEY``. An empty key is still a
     valid call — a local Ollaya needs none.
     """
-    import pbt
-    from pbt.classifier import parse_threshold, split_question
+    import promptmap
+    from promptmap.classifier import parse_threshold, split_question
 
     question, state = split_question(prompt)
-    classify_call = pbt.systemone_classifier(
+    classify_call = promptmap.systemone_classifier(
         model=settings.get("model") or None,
         base_url=settings.get("baseUrl") or None,
         api_key=settings.get("apiKey") or "",

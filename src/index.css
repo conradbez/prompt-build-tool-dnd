@@ -2507,7 +2507,7 @@ body,
   opacity: 0.7;
 }
 
-/* A failure in the answer modal: the message as pbt gave it, whitespace kept. */
+/* A failure in the answer modal: the message as promptmap gave it, whitespace kept. */
 .res-col__error {
   margin: 0;
   padding: 14px;

@@ -85,7 +85,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
           <button
             className="res-modal__run"
             disabled={running}
-            title="Runs this bullet and every bullet it depends on, using pbt’s select. Everything else keeps its last answer."
+            title="Runs this bullet and every bullet it depends on, using promptmap’s select. Everything else keeps its last answer."
             onClick={() => actions.runNode(bullet.id)}
           >
             {running ? 'Running…' : 'Run node'}

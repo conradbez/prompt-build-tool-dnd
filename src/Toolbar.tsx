@@ -29,7 +29,7 @@ function loadProvider(): Provider {
 }
 
 /**
- * Bottom-left controls: Run the graph through the pbt server, and the gear to
+ * Bottom-left controls: Run the graph through the promptmap server, and the gear to
  * everything else. The provider and key live in Settings; a run the server
  * refuses for want of a key asks for one in a popup instead, then runs. The
  * key is remembered per provider in localStorage (this browser only). The

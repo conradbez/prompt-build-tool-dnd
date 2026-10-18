@@ -2119,6 +2119,27 @@ __metadata:
   languageName: node
   linkType: hard
 
+"visual-prompt-map@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "visual-prompt-map@workspace:."
+  dependencies:
+    "@types/node": "npm:^20.0.0"
+    "@types/react": "npm:^18.3.3"
+    "@types/react-dom": "npm:^18.3.0"
+    "@vitejs/plugin-react": "npm:^4.3.1"
+    "@xyflow/react": "npm:^12.3.2"
+    autoprefixer: "npm:^10.4.19"
+    clsx: "npm:^2.1.1"
+    nanoid: "npm:^5.0.7"
+    postcss: "npm:^8.4.40"
+    react: "npm:^18.3.1"
+    react-dom: "npm:^18.3.1"
+    tailwindcss: "npm:^3.4.7"
+    typescript: "npm:^5.5.3"
+    vite: "npm:^5.3.5"
+  languageName: unknown
+  linkType: soft
+
 "vite@npm:^5.3.5":
   version: 5.4.21
   resolution: "vite@npm:5.4.21"
@@ -2172,27 +2193,6 @@ __metadata:
   checksum: 10c0/ca0b54f198f78bbc4b7c02e34bda8d335cb352e0adb4cbca1c37b1a957af3a879a82c4c27ca6525bc942f548d8b64f816ef6528360af9f3de55ffb9b979b620d
   languageName: node
   linkType: hard
-
-"workflowy-mindmap@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "workflowy-mindmap@workspace:."
-  dependencies:
-    "@types/node": "npm:^20.0.0"
-    "@types/react": "npm:^18.3.3"
-    "@types/react-dom": "npm:^18.3.0"
-    "@vitejs/plugin-react": "npm:^4.3.1"
-    "@xyflow/react": "npm:^12.3.2"
-    autoprefixer: "npm:^10.4.19"
-    clsx: "npm:^2.1.1"
-    nanoid: "npm:^5.0.7"
-    postcss: "npm:^8.4.40"
-    react: "npm:^18.3.1"
-    react-dom: "npm:^18.3.1"
-    tailwindcss: "npm:^3.4.7"
-    typescript: "npm:^5.5.3"
-    vite: "npm:^5.3.5"
-  languageName: unknown
-  linkType: soft
 
 "yallist@npm:^3.0.2":
   version: 3.1.1

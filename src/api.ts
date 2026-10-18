@@ -1,6 +1,6 @@
 /**
  * Thin client for the mind-map runner (see `server/`). One call: send the
- * bullet graph, get each bullet's result back after flowing through pbt.
+ * bullet graph, get each bullet's result back after flowing through promptmap.
  */
 
 export type Provider = 'gemini' | 'openai' | 'anthropic' | 'openrouter';
@@ -44,9 +44,9 @@ export interface NodePayload {
   persistDisk: boolean;
   /** A python bullet's extra sandbox packages, comma-separated; empty for none. */
   packages: string;
-  /** Validate this bullet's answer as JSON (pbt's `output_format="json"`). */
+  /** Validate this bullet's answer as JSON (promptmap's `output_format="json"`). */
   jsonOutput: boolean;
-  /** Reuse pbt's cached answer — see `Bullet.cache`. */
+  /** Reuse promptmap's cached answer — see `Bullet.cache`. */
   cache: boolean;
   /** A test bullet's judge, and the P(yes) a classifier-judged one needs. */
   judge: TestJudge;
@@ -218,7 +218,7 @@ export interface ExportResult {
 }
 
 /**
- * Ask the server for this graph as a pbt project you can run without the app.
+ * Ask the server for this graph as a promptmap project you can run without the app.
  *
  * The server builds it from the same function a run uses, so an export is the
  * graph as it actually runs rather than a second rendering that can drift —
@@ -262,7 +262,7 @@ export async function exportGraph(
 
 /**
  * Settings → classifier, for classifier-judged tests: any `/v1/systemone`
- * endpoint. Empty fields take pbt's defaults — TypeSafe's hosted Jev.
+ * endpoint. Empty fields take promptmap's defaults — TypeSafe's hosted Jev.
  */
 export interface ClassifierSettings {
   apiKey: string;

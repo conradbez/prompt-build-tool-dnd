@@ -32,12 +32,12 @@ const MAP: Row[] = [
 ];
 
 const KEEPING: Row[] = [
-  { keys: '⚙ → Save', desc: 'Keeps this map in this browser under the name beside it, and opens it — edits then go into it as you make them. The ▴ next to it is where else it can go: a pbt pipeline (.py), a `pbt serve` project (.py), or the clipboard as JSON' },
+  { keys: '⚙ → Save', desc: 'Keeps this map in this browser under the name beside it, and opens it — edits then go into it as you make them. The ▴ next to it is where else it can go: a promptmap pipeline (.py), a `promptmap serve` project (.py), or the clipboard as JSON' },
   { keys: '⚙ → Load', desc: 'Puts the named save back on screen; the ▴ loads JSON from the clipboard instead. Either replaces what is on screen — the button asks first, and the map it replaces is kept as “Before last load”' },
 ];
 
 const RUNNING: Row[] = [
-  { keys: 'Provider + key + Run', desc: 'Runs the graph through prompt-build-tool and shows each result under its node. Both live in Settings (⚙) as well as the toolbar — and only in Settings on a narrow screen' },
+  { keys: 'Provider + key + Run', desc: 'Runs the graph through promptmap and shows each result under its node. Both live in Settings (⚙) as well as the toolbar — and only in Settings on a narrow screen' },
   { keys: '@Bullet', desc: 'Reference another (non-child) node — its answer is rendered exactly where you wrote the @, so the mention is the placeholder for the content (a dashed link appears)' },
   { keys: '@variable', desc: 'A run variable from Settings (⚙), shown in teal — its value is substituted into the prompt. Same @ menu as bullets; add or edit the values in the settings table' },
   { keys: 'Children', desc: "A node auto-includes its children's outputs — they feed up into the parent, no @ needed. A child has no @ marking where it belongs, so its output goes below the bullet's text" },
@@ -46,7 +46,7 @@ const RUNNING: Row[] = [
   { keys: '@coding_instructions', desc: 'Drop into a prompt that asks for a script: the server fills in that the answer is executed, which packages the sandbox has, and how to ask for more (a PEP 723 header). Its row is filled in for you unless you type your own' },
   { keys: '••• → Settings… → Python', desc: 'PY — takes no text of its own: it runs the code its one child produced, in a sandbox, and whatever that prints is its output. Extra packages for its sandbox are set in the same modal' },
   { keys: '••• → Settings… → Agent', desc: 'AGENT — the text, with its inputs filled in, is a task for a coding agent in a sandbox: it works with bash until it submits an answer. Its output is JSON: output (the answer), logs (the run end to end on Modal) and run_time (seconds). its MCP server field gives it a stdio MCP server\u2019s tools too (e.g. uvx some-mcp-server)' },
-  { keys: '••• → Settings… → Enforce JSON', desc: 'JSON — the answer is parsed and validated (pbt\u2019s output_format="json"); one that is not JSON fails the bullet instead of flowing on as prose. Works on any kind of bullet' },
+  { keys: '••• → Settings… → Enforce JSON', desc: 'JSON — the answer is parsed and validated (promptmap\u2019s output_format="json"); one that is not JSON fails the bullet instead of flowing on as prose. Works on any kind of bullet' },
 ];
 
 function Section({ title, rows }: { title: string; rows: Row[] }) {

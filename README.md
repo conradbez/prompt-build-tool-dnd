@@ -1,4 +1,4 @@
-# Workflowy Mind Map
+# Visual Prompt Map
 
 A React app that pairs a **Workflowy-style outliner** with a **live mind map** of
 the same tree. Work in whichever one suits the moment and switch with a key;
@@ -87,17 +87,17 @@ reference instead (a dashed link), leaving its existing parent alone.
 top-level node**; deleting a dashed reference link just removes the `@`
 reference from the source bullet's text.
 
-## Running the graph (prompt-build-tool)
+## Running the graph (promptmap)
 
 Top-left there's a small toolbar: pick a **provider** (Gemini / OpenAI /
 Anthropic), paste an **API key**, and hit **Run**. The bullet graph is sent to a
 tiny stateless FastAPI server (`server/`) that flows it through
-[prompt-build-tool](https://github.com/conradbez/prompt-build-tool) and returns
+[promptmap](https://github.com/conradbez/promptmap) and returns
 each bullet's result, which is shown under its node on the mind map.
 
-Each bullet becomes one pbt model. A node **auto-includes its children's
+Each bullet becomes one promptmap model. A node **auto-includes its children's
 outputs** — children run first and feed up into the parent — and any `@`
-references you add. These become `{{ ref('…') }}` dependencies that pbt resolves
+references you add. These become `{{ ref('…') }}` dependencies that promptmap resolves
 (running independent branches in parallel). So `@` is only needed to reference a
 *non-child* node.
 
@@ -183,7 +183,7 @@ Two verbs, and everything else is a choice of *where*:
 | | |
 |---|---|
 | **Save** | keeps this map in this browser under the name in the dropdown — and **opens** it: from then on your edits go into it as you make them |
-| **Save ▴** | **Export to pbt** (a `.py` running `pbt.async_run` over every bullet) · **Export to server** (a `.py` that writes `models/*.prompt` + `client.py`, the layout `pbt serve` expects) · **Copy to clipboard** as JSON |
+| **Save ▴** | **Export to promptmap** (a `.py` running `promptmap.async_run` over every bullet) · **Export to server** (a `.py` that writes `map/*.prompt` + `client.py`, the layout `promptmap serve` expects) · **Copy to clipboard** as JSON |
 | **Load** | puts the named save back on screen |
 | **Load ▴** | JSON on the clipboard |
 
@@ -223,7 +223,7 @@ server can configure.
 
 ## Enforcing JSON
 
-`•••` → **Settings…** → **Enforce JSON output** marks a bullet `JSON`. The server emits pbt's
+`•••` → **Settings…** → **Enforce JSON output** marks a bullet `JSON`. The server emits promptmap's
 `{{ config(output_format="json") }}` for it, so the answer is **parsed and
 validated**: one that is not JSON fails that bullet with its parse error instead
 of flowing downstream as prose. A prompt bullet also gets a line asking for JSON
@@ -242,11 +242,11 @@ is uploaded to an S3-compatible bucket and sent to the model along with *that
 bullet's* prompt — attachments are scoped to the bullet, not the document.
 
 Every object is written under `bullets/<bulletId>/…`, and a run only hands a
-bullet the objects sitting under its own prefix. pbt's `promptfiles` are a flat
+bullet the objects sitting under its own prefix. promptmap's `promptfiles` are a flat
 namespace, so that prefix check is what stops one bullet's files leaking into
 another's prompt: the server emits
 `{{ config(promptfiles='["…"]') }}` for the keys a bullet actually owns, and
-pbt routes the matching files to that model's `llm_call(files=…)`.
+promptmap routes the matching files to that model's `llm_call(files=…)`.
 
 Configure the bucket with the standard AWS environment variables — Railway's
 bucket variables map straight onto them:

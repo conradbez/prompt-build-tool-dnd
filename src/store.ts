@@ -129,7 +129,7 @@ export function parseDoc(value: unknown): Doc | null {
   }
 }
 
-/** A classifier pass mark, kept to what pbt accepts. */
+/** A classifier pass mark, kept to what promptmap accepts. */
 export function clampThreshold(v: number): number {
   return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5;
 }
@@ -558,7 +558,7 @@ export const actions = {
     emit(next);
   },
 
-  /** Let one bullet reuse pbt's cached answer, or not — see `Bullet.cache`. */
+  /** Let one bullet reuse promptmap's cached answer, or not — see `Bullet.cache`. */
   setCache(id: string, on: boolean) {
     const b = state.bullets[id];
     if (!b || b.cache === on) return;
@@ -924,7 +924,7 @@ export const actions = {
     runner = fn;
   },
 
-  /** Run one bullet and everything that feeds it (pbt's `select`). */
+  /** Run one bullet and everything that feeds it (promptmap's `select`). */
   runNode(id: string) {
     if (!state.running) runner?.(id);
   },

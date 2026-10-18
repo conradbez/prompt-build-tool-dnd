@@ -1,14 +1,14 @@
 """
-Simple, stateless FastAPI server for the Workflowy mind map.
+Simple, stateless FastAPI server for Visual Prompt Map.
 
 One meaningful endpoint — ``POST /run`` — receives the bullet graph as JSON and
 streams each bullet's progress and result as it flows through
-prompt-build-tool (pbt).
+promptmap (formerly prompt-build-tool).
 No sessions, no file storage, no database: every request is self-contained.
 
-Each bullet becomes a pbt model. A bullet's `@` references become pbt
+Each bullet becomes a promptmap model. A bullet's `@` references become promptmap
 `{{ ref('...') }}` dependencies, so an upstream bullet's output flows into the
-bullets that reference it — pbt resolves the order and runs independent
+bullets that reference it — promptmap resolves the order and runs independent
 branches in parallel.
 """
 
@@ -32,23 +32,23 @@ from pydantic import BaseModel
 # before anything reads os.environ, and before `modal_exec` checks for tokens.
 load_dotenv(pathlib.Path(__file__).resolve().parent.parent / ".env")
 
-import pbt
-from pbt.files import contains_files, iter_files, to_jsonable
+import promptmap
+from promptmap.files import contains_files, iter_files, to_jsonable
 
 import export as exporter
 import files as attachments
-# pbt finds these kinds by entry point; imported here for their helpers.
-from pbt_extra_model_kinds import agent37_exec, agent_exec, modal_exec
+# promptmap finds these kinds by entry point; imported here for their helpers.
+from promptmap_extra_model_kinds import agent37_exec, agent_exec, modal_exec
 import accounts
 from llm import make_llm_call
-from pbt import model_types as _pbt_kinds
+from promptmap import model_types as _promptmap_kinds
 
-# pbt registers its own `execute_python` (exec() in this process) and `agent`
+# promptmap registers its own `execute_python` (exec() in this process) and `agent`
 # (bash on this machine) on import. Nothing here asks for them — code runs on
 # Modal or Agent37 — so they are taken out: a `model_type` naming one is then
-# unknown, and pbt runs it as a plain LLM call instead.
+# unknown, and promptmap runs it as a plain LLM call instead.
 for _local in ("execute_python", "agent"):
-    _pbt_kinds._REGISTRY.pop(_local, None)
+    _promptmap_kinds._REGISTRY.pop(_local, None)
 
 # The built frontend (repo-root `dist/`), if it was shipped alongside the
 # server. When present it is served at `/`, so one deployment hosts both the
@@ -60,7 +60,7 @@ PROVIDERS = {"gemini", "openai", "anthropic", "openrouter"}
 # Attachments are held in memory on the way through, so keep them modest.
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
-# pbt has no model_type semantics of its own: it parses this directive into
+# promptmap has no model_type semantics of its own: it parses this directive into
 # `model.config` and passes it to `llm_call(config=...)`, which is where the
 # passthrough happens (see `llm.py`). Prepended to a template node's source.
 # `global_instruction=False` because a template bullet is a passthrough: its
@@ -68,7 +68,7 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 # text in the result instead of steering a model.
 TEMPLATE_CONFIG_LINE = '{{ config(model_type="template", global_instruction=False) }}'
 
-# JSON enforcement, also pbt's own: it parses the answer (stripping ```json
+# JSON enforcement, also promptmap's own: it parses the answer (stripping ```json
 # fences), fails the model if it will not parse, and hands the *parsed* value
 # downstream. Several `config()` calls in one source merge, so this sits on its
 # own line alongside whichever others a bullet needs.
@@ -94,25 +94,25 @@ TEST_INSTRUCTION = (
 TEST_MATERIAL = "Material under test:"
 
 # A classifier-judged test skips the LLM: a classifier (TypeSafe's Jev, or a
-# local Ollaya) answers the assertion as a yes/no question with P(yes). pbt's
+# local Ollaya) answers the assertion as a yes/no question with P(yes). promptmap's
 # own classifier-test shape — question above a `---` line, material below — is
 # used here too, and `llm.py` routes `judge="classifier"` to the classifier.
 CLASSIFIER_SEPARATOR = "---"
 
 
-# Both keys are read by `llm.py`, not pbt — registered so pbt does not warn.
-pbt.register_config_keys("judge", "threshold")
+# Both keys are read by `llm.py`, not promptmap — registered so promptmap does not warn.
+promptmap.register_config_keys("judge", "threshold")
 
 # The run variable a person sets in Settings to pick the model they run with.
-# pbt reads `config()` before any promptdata exists, so the server resolves it
+# promptmap reads `config()` before any promptdata exists, so the server resolves it
 # itself: it goes straight to the LLM client and the agent sandbox, and into
-# the config of every bullet that calls a model — only so pbt's prompt cache,
+# the config of every bullet that calls a model — only so promptmap's prompt cache,
 # keyed on config, never hands back an answer from a different model.
 LLM_MODEL_VAR = "llm_model"
 _MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@-]+$")
-pbt.register_config_keys(LLM_MODEL_VAR)
+promptmap.register_config_keys(LLM_MODEL_VAR)
 
-# A bullet with caching off: pbt skips the cache lookup and always runs it.
+# A bullet with caching off: promptmap skips the cache lookup and always runs it.
 NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"
 
 
@@ -136,12 +136,12 @@ def _classifier_config_line(threshold: float) -> str:
 
 # What the "Model input" column says for a bullet that never ran.
 SKIPPED_NOTE = (
-    "[Not sent. Something this bullet depends on failed, so pbt skipped it — "
+    "[Not sent. Something this bullet depends on failed, so promptmap skipped it — "
     "which is why the inputs below are missing: they were never produced.]"
 )
 
 
-# Attachments reach the model the same way: pbt parses the declared names out
+# Attachments reach the model the same way: promptmap parses the declared names out
 # of the config block and hands the matching files to `llm_call(files=...)`.
 def _promptfiles_line(keys: list[str]) -> str:
     return "{{ config(promptfiles='%s') }}" % json.dumps(keys)
@@ -165,7 +165,7 @@ def _escape_jinja(text: str, allowed: "re.Pattern[str]" = _ALLOWED_JINJA) -> str
     """*text* as Jinja source that renders back to itself, but for the calls
     *allowed* matches.
 
-    pbt renders every bullet with plain (unsandboxed) Jinja, so a `{{ … }}` a
+    promptmap renders every bullet with plain (unsandboxed) Jinja, so a `{{ … }}` a
     person typed would run on this server, and a `{{ config(…) }}` would
     override the config the server set — the model kind included. Every other
     `{` becomes `{{ '{' }}`, so no tag can start.
@@ -228,7 +228,7 @@ def _clean_promptdata(promptdata: dict[str, str]) -> dict[str, str]:
 
 
 def _as_promptdata(text: str, names: set[str]) -> str:
-    """Rewrite each `@name` that names a known variable into pbt's own call.
+    """Rewrite each `@name` that names a known variable into promptmap's own call.
 
     Only known names are rewritten: an `@word` matching no variable is text the
     person wrote, and it goes to the model as they wrote it.
@@ -298,9 +298,9 @@ class Node(BaseModel):
     # A python bullet's extra sandbox packages, comma-separated — see
     # `modal_exec.config_line`. Ignored on every other kind.
     packages: str = ""
-    # Hold this bullet's answer to JSON — pbt's `output_format="json"`.
+    # Hold this bullet's answer to JSON — promptmap's `output_format="json"`.
     jsonOutput: bool = False
-    # Reuse pbt's cached answer. Off, it gets pbt's `config(cache=False)`.
+    # Reuse promptmap's cached answer. Off, it gets promptmap's `config(cache=False)`.
     cache: bool = True
     # A test bullet's judge: "llm" asks the run's model for a verdict,
     # "classifier" asks the classifier for P(yes) and passes at `threshold`.
@@ -310,7 +310,7 @@ class Node(BaseModel):
 
 class ClassifierSettings(BaseModel):
     """Settings → classifier: any `/v1/systemone` endpoint (see
-    `pbt.systemone_classifier`). Empty fields take pbt's defaults — hosted Jev."""
+    `promptmap.systemone_classifier`). Empty fields take promptmap's defaults — hosted Jev."""
 
     apiKey: str = ""
     baseUrl: str = ""
@@ -323,10 +323,10 @@ class RunRequest(BaseModel):
     apiKey: Optional[str] = None
     # Files are namespaced per browser session; see `files.py`.
     sessionId: str = ""
-    # Settings → "global instruction": prompt text pbt renders into every
+    # Settings → "global instruction": prompt text promptmap renders into every
     # bullet's prompt (templates and python bullets opt out). Empty means none.
     globalInstruction: str = ""
-    # Settings → run variables, name → value. A bullet writes `@name`; pbt is
+    # Settings → run variables, name → value. A bullet writes `@name`; promptmap is
     # handed the map and renders `{{ promptdata("name") }}` from it.
     promptdata: dict[str, str] = {}
     classifier: ClassifierSettings = ClassifierSettings()
@@ -336,16 +336,16 @@ class RunRequest(BaseModel):
     # Settings → the user's own Agent37 key. Empty runs preserve-disk agents on
     # the server's shared instance; set, on an instance in the user's workspace.
     agent37Key: str = ""
-    # Run just these bullets and what feeds them (pbt's `select`). Empty runs
+    # Run just these bullets and what feeds them (promptmap's `select`). Empty runs
     # the whole graph.
     select: list[str] = []
 
 
 class ExportRequest(BaseModel):
-    """A graph on its way *out* of the app, as a pbt project you can run."""
+    """A graph on its way *out* of the app, as a promptmap project you can run."""
 
     # "script" — one file that runs the pipeline; "project" — one file that
-    # writes the models/ + client.py layout `pbt serve` expects.
+    # writes the map/ + client.py layout `promptmap serve` expects.
     target: str = "script"
     name: str = "mindmap"
     nodes: list[Node] = []
@@ -392,7 +392,7 @@ def _has_key(provider: str, api_key: Optional[str]) -> bool:
 
 
 def _slug(node_id: str) -> str:
-    """A pbt-safe model name derived from a bullet id (used in ref() too)."""
+    """A promptmap-safe model name derived from a bullet id (used in ref() too)."""
     return "n_" + re.sub(r"[^0-9a-zA-Z]", "_", node_id)
 
 
@@ -404,7 +404,7 @@ def _build_source(
     var_names: set[str] | None = None,
     file_sources: set[str] | None = None,
 ) -> str:
-    """Compose a bullet's pbt prompt.
+    """Compose a bullet's promptmap prompt.
 
     An `@` reference is substituted **where it stands**: the mention marks the
     place in the sentence that the referenced bullet's answer belongs, so it
@@ -419,7 +419,7 @@ def _build_source(
     "summarise what follows" means what it says.
 
     A template node additionally gets a `{{ config(model_type="template") }}`
-    line, which pbt parses into `model.config` and hands to `llm_call`, where
+    line, which promptmap parses into `model.config` and hands to `llm_call`, where
     it short-circuits into a passthrough instead of an LLM call.
 
     A python node gets the `python_modal` config line instead, and its refs go
@@ -428,7 +428,7 @@ def _build_source(
     any (see `agent_exec.py`).
 
     A prompt bullet fed by one in *file_sources* — an agent set to produce
-    files — declares it in `promptfiles`, so pbt hands it those files too.
+    files — declares it in `promptfiles`, so promptmap hands it those files too.
 
     Any `@name` naming a run variable becomes `{{ promptdata("name") }}` on the
     way through, which is how the values reach the prompt (see `_as_promptdata`).
@@ -488,7 +488,7 @@ def _build_source(
     keys = _node_file_keys(node, session_id)
     if node.kind == "prompt":
         # Only a prompt reaches a model that can look at them; a template
-        # passes text through, and pbt fails a bullet that asks for files from
+        # passes text through, and promptmap fails a bullet that asks for files from
         # one that produced none — hence only those set to produce them.
         keys += [id_to_slug[d] for d in dep_ids if d in (file_sources or set())]
     if keys:
@@ -512,7 +512,7 @@ def _models(
     session_id: str,
     promptdata: dict[str, str],
 ) -> dict[str, str]:
-    """Every bullet's pbt source, keyed by its model name — for a run and an
+    """Every bullet's promptmap source, keyed by its model name — for a run and an
     export alike."""
     feeds = _feeding(nodes, names)
     producers = {n.id for n in nodes if n.kind == "agent" and n.producesFiles}
@@ -540,7 +540,7 @@ def _is_classifier(node: Node) -> bool:
 
 
 def _threshold(node: Node) -> float:
-    """The pass mark for a classifier test, clamped to what pbt accepts."""
+    """The pass mark for a classifier test, clamped to what promptmap accepts."""
     return min(1.0, max(0.0, node.threshold))
 
 
@@ -596,7 +596,7 @@ def _python_source(node: Node, dep_slugs: list[str], packages: str = "") -> str:
 
     A python bullet holds no code of its own — it runs what its one child
     produced. So its own text never reaches the sandbox, and this source
-    carries only the two directives pbt needs.
+    carries only the two directives promptmap needs.
 
     The refs go inside a Jinja *comment* rather than on their own lines the way
     a prompt bullet's do. `extract_dependencies` scans the raw source with a
@@ -686,18 +686,18 @@ def _model_input(
 ) -> str:
     """The prompt as the model received it, rebuilt from the run's outputs.
 
-    pbt renders `{{ ref('x') }}` into x's output, so the prompt a bullet was
+    promptmap renders `{{ ref('x') }}` into x's output, so the prompt a bullet was
     actually sent is its own text followed by each dependency's result, in
     dependency order — the same assembly `_build_source` describes. Rebuilt
-    here rather than fished out of pbt: `async_run` hands back outputs only,
+    here rather than fished out of promptmap: `async_run` hands back outputs only,
     and a cached node never re-renders, so there is nothing to fish.
 
     A python bullet is the exception: its own text is not part of the program,
     and what runs is the code extracted from its child.
 
-    The global instruction sits on top, the way pbt prepends it — but only for
+    The global instruction sits on top, the way promptmap prepends it — but only for
     the bullets that receive one, i.e. prompts. Templates and python bullets
-    opt out, so showing it there would be a lie about what ran. (pbt treats an
+    opt out, so showing it there would be a lie about what ran. (promptmap treats an
     instruction containing `{{ prompt }}` as a wrapper instead; this rebuild
     shows the plain prepend, which is what the settings box invites.)
     """
@@ -725,9 +725,9 @@ def _model_input(
 
 
 def _json_forms(text: str) -> tuple[str, str]:
-    """A JSON answer's two forms: ``(what a person reads, what pbt rendered)``.
+    """A JSON answer's two forms: ``(what a person reads, what promptmap rendered)``.
 
-    `output_format="json"` makes pbt hand the *parsed* value downstream, and
+    `output_format="json"` makes promptmap hand the *parsed* value downstream, and
     Jinja writes a parsed value into the next prompt with `str()` — a
     Python-style mapping, single quotes and all. So the answer panel and the
     "Model input" column genuinely differ here, and pretending otherwise would
@@ -756,7 +756,7 @@ def _node_file_keys(node: Node, session_id: str) -> list[str]:
     """The attachments this bullet may use — its own, and nothing else.
 
     Two gates: the key must sit under the *session* that sent the request, and
-    under *this bullet* within it. pbt's promptfiles are a flat namespace, so a
+    under *this bullet* within it. promptmap's promptfiles are a flat namespace, so a
     node naming someone else's key is ignored rather than trusted.
     """
     return [f.key for f in node.files if attachments.belongs_to(f.key, session_id, node.id)]
@@ -765,7 +765,7 @@ def _node_file_keys(node: Node, session_id: str) -> list[str]:
 def _title(node: Node, others: dict[str, Node] | None = None) -> str:
     """What to call a bullet in a message to a person: its first line.
 
-    Errors used to name the pbt model — `n_gT4b9…`, a slug built from an id
+    Errors used to name the promptmap model — `n_gT4b9…`, a slug built from an id
     nobody has seen — which is the right name for the run and the wrong one for
     the sentence a person reads when it fails.
     """
@@ -789,12 +789,12 @@ def _title(node: Node, others: dict[str, Node] | None = None) -> str:
 PREVIEW_BYTES = 5 * 1024 * 1024
 
 
-def _split_files(value: Any) -> tuple[Any, list[pbt.File]]:
+def _split_files(value: Any) -> tuple[Any, list[promptmap.File]]:
     """A result's files, and what is left of it once they are taken out."""
     if not contains_files(value):
         return value, []
     files = [f for _, f in iter_files(value)]
-    if isinstance(value, pbt.Output):
+    if isinstance(value, promptmap.Output):
         return value.text, files
     if isinstance(value, dict):
         return {k: v for k, v in value.items() if not contains_files(v)}, files
@@ -808,7 +808,7 @@ def _text(value: Any) -> str:
     return json.dumps(to_jsonable(value), ensure_ascii=False)
 
 
-def _file_info(f: pbt.File, session_id: str, bullet_id: str, stored: dict) -> dict:
+def _file_info(f: promptmap.File, session_id: str, bullet_id: str, stored: dict) -> dict:
     """What the browser is told about a file: enough to list it, and either its
     bytes as a data URL when it is small enough to preview, or the bucket key
     to fetch a download link for. `stored` holds the keys already uploaded this
@@ -830,8 +830,8 @@ def _file_info(f: pbt.File, session_id: str, bullet_id: str, stored: dict) -> di
 
 def _serialise(
     outputs: dict[str, Any], titles: dict[str, str] | None = None
-) -> tuple[dict[str, str], list[str], set[str], dict[str, list[pbt.File]]]:
-    """Split pbt outputs into results, error strings, the names it skipped, and
+) -> tuple[dict[str, str], list[str], set[str], dict[str, list[promptmap.File]]]:
+    """Split promptmap outputs into results, error strings, the names it skipped, and
     the files each produced.
 
     A skip is not an error of its own: it is what happens *to* a bullet when
@@ -843,12 +843,12 @@ def _serialise(
     results: dict[str, str] = {}
     errors: list[str] = []
     skipped: set[str] = set()
-    files: dict[str, list[pbt.File]] = {}
+    files: dict[str, list[promptmap.File]] = {}
     for name, value in outputs.items():
         label = titles.get(name, name)
-        if isinstance(value, pbt.ModelError):
+        if isinstance(value, promptmap.ModelError):
             errors.append(f"{label}: {value.message}")
-        elif isinstance(value, pbt.ModelStatus):
+        elif isinstance(value, promptmap.ModelStatus):
             skipped.add(name)
             errors.append(f"{label}: skipped — something it needs did not run.")
         else:
@@ -863,7 +863,7 @@ def _serialise(
     return results, errors, skipped, files
 
 
-app = FastAPI(title="Workflowy mind-map runner", version="0.1.0")
+app = FastAPI(title="Visual Prompt Map runner", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -879,7 +879,7 @@ app.include_router(accounts.router)
 @app.get("/healthz")
 def health() -> dict:
     """Lightweight health check."""
-    return {"status": "ok", "pbt_version": pbt.__version__}
+    return {"status": "ok", "promptmap_version": promptmap.__version__}
 
 
 @app.get("/files/enabled")
@@ -969,7 +969,7 @@ def remove_file(req: FileRequest) -> dict:
 
 @app.post("/export", response_model=ExportResponse)
 def export(req: ExportRequest) -> ExportResponse:
-    """The graph as a pbt project, built from the same sources a run uses.
+    """The graph as a promptmap project, built from the same sources a run uses.
 
     Nothing here is stored and nothing runs — this is `_build_source` over the
     same graph, named for reading rather than for uniqueness, wrapped in a file.
@@ -1011,7 +1011,7 @@ async def run(req: RunRequest, authorization: Optional[str] = Header(None)) -> S
     - ``start`` — a bullet has started;
     - ``log``   — one line of a running agent bullet's log, as it happens;
     - ``done``  — a bullet finished: ``success`` with its answer and the prompt
-      it was sent, ``error`` with pbt's message, or ``skipped``;
+      it was sent, ``error`` with promptmap's message, or ``skipped``;
     - ``final`` — the whole `RunResponse`, the same answer a batch run gives.
       A run that never starts (no key, nothing to run) sends only this.
     """
@@ -1022,7 +1022,7 @@ async def run(req: RunRequest, authorization: Optional[str] = Header(None)) -> S
     loop = asyncio.get_running_loop()
 
     def emit(event: dict) -> None:
-        # pbt may call back from a worker thread when `llm_call` is sync.
+        # promptmap may call back from a worker thread when `llm_call` is sync.
         loop.call_soon_threadsafe(queue.put_nowait, event)
 
     async def work() -> None:
@@ -1053,7 +1053,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
 
     global_instruction = req.globalInstruction.strip()
     # The variables the run may use. `@name`s in the bullets are rewritten
-    # against these names, and pbt is handed the values.
+    # against these names, and promptmap is handed the values.
     promptdata = _clean_promptdata(req.promptdata)
     var_names = set(promptdata)
 
@@ -1096,7 +1096,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             if _calls_model(n):
                 models[id_to_slug[n.id]] = model_line + "\n" + models[id_to_slug[n.id]]
 
-    # A selected run is the selection and everything upstream of it: pbt works
+    # A selected run is the selection and everything upstream of it: promptmap works
     # that out from the models itself, but the plan, prompts and verdicts sent
     # back should name only what will actually run.
     select = [i for i in req.select if i in by_node]
@@ -1106,7 +1106,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
     planned = [n for n in nodes if n.id in in_run]
 
     # Pull each bullet's attachments once, keyed the way the config declares
-    # them, so pbt can route them to the model that asked.
+    # them, so promptmap can route them to the model that asked.
     promptfiles: dict[str, Any] = {}
     try:
         for n in planned:
@@ -1130,7 +1130,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
     # Bucket keys of the large files this run produced — see `_file_info`.
     stored: dict = {}
 
-    def on_done(result: pbt.ModelRunResult) -> None:
+    def on_done(result: promptmap.ModelRunResult) -> None:
         node_id = slug_to_id.get(result.model_name, result.model_name)
         event: dict[str, Any] = {
             "type": "done",
@@ -1140,7 +1140,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             "cached": result.cached,
             "error": result.error,
         }
-        # pbt names models by slug ("upstream models failed: ['n_x']"); a
+        # promptmap names models by slug ("upstream models failed: ['n_x']"); a
         # person knows them by their first line.
         for slug, other in slug_to_id.items():
             event["error"] = event["error"].replace(f"'{slug}'", titles[other])
@@ -1153,7 +1153,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             if node.jsonOutput or node.kind in ("agent", "test"):
                 shown, rendered = _json_forms(text)
             if made:
-                # What pbt put in a downstream prompt: the whole value, each
+                # What promptmap put in a downstream prompt: the whole value, each
                 # file as its one-line handle.
                 rendered = str(value)
                 event["files"] = [_file_info(f, req.sessionId, node_id, stored) for f in made]
@@ -1171,7 +1171,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             pass
 
     # Agent bullets call the model from inside their sandbox, so they need this
-    # run's provider and key too — bound for the tasks pbt spawns, not globally —
+    # run's provider and key too — bound for the tasks promptmap spawns, not globally —
     # along with its step limit and where to send their log lines live.
     run_token = agent_exec.use_run(
         agent_exec.RunSettings(
@@ -1193,12 +1193,12 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             classifier=req.classifier.model_dump(),
             model=llm_model,
         )
-        outputs = await pbt.async_run(
+        outputs = await promptmap.async_run(
             models_from_dict=models,
             llm_call=llm,
             promptfiles=promptfiles or None,
             promptdata=promptdata or None,
-            # `ref()` is refused inside a global instruction — pbt says as much
+            # `ref()` is refused inside a global instruction — promptmap says as much
             # and points at promptdata — but a variable is exactly what belongs
             # there, so `@name` is rewritten here too.
             global_instruction=_escape_jinja(

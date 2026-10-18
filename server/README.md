@@ -1,8 +1,8 @@
-# Mind-map runner (FastAPI + pbt)
+# Visual Prompt Map runner (FastAPI + promptmap)
 
 A tiny, **stateless** server with one meaningful endpoint. It receives the
 bullet graph as JSON and returns each bullet's result after flowing through
-[prompt-build-tool](https://github.com/conradbez/prompt-build-tool).
+[promptmap](https://github.com/conradbez/promptmap).
 
 ## Endpoint
 
@@ -31,9 +31,9 @@ is no `apiKey` for the chosen provider, so nothing ran. Provider keys in the
 server's environment are never used — a public deploy can't spend them. The UI flashes its settings gear rather than printing a
 failure against every bullet.
 
-Each bullet becomes a pbt model. A node **auto-includes its children's outputs**
+Each bullet becomes a promptmap model. A node **auto-includes its children's outputs**
 (children feed up into the parent) plus any explicit `@` references (`refs`) —
-both become `{{ ref('…') }}` dependencies. pbt resolves ordering and runs
+both become `{{ ref('…') }}` dependencies. promptmap resolves ordering and runs
 independent branches in parallel.
 
 An `@` reference is substituted **where it stands**. The mention marks the place
@@ -71,7 +71,7 @@ whole branch. Only a subtree that is empty all the way down is skipped.
 `promptdata` is a flat name → value map for the whole run — the settings table
 in the UI is one row per entry. A bullet uses one by writing `@name`, and the
 server rewrites each `@name` it recognises into `{{ promptdata("name") }}`
-before pbt renders it, so the value arrives through pbt's own mechanism rather
+before promptmap renders it, so the value arrives through promptmap's own mechanism rather
 than by string-splicing on the way in.
 
 Only **known** names are rewritten. An `@word` matching no variable is left
@@ -80,18 +80,18 @@ exactly as typed — it is prose, not a broken reference — and a name that is 
 The `@` must also start a word, so an email address in a prompt is safe.
 
 Variables work in the **global instruction** too, and are the only variable that
-can: pbt refuses `ref()` there (it would make every model depend on one) and
+can: promptmap refuses `ref()` there (it would make every model depend on one) and
 points at `promptdata` instead.
 
 The `prompts` in the response show variables **filled in**, not as the Jinja
 call they compiled to — that column answers "what did the model actually see".
 
-A bullet pbt **skipped** — because something it depends on failed — gets that
+A bullet promptmap **skipped** — because something it depends on failed — gets that
 said at the top of its entry instead. Its inputs are missing from the
 reconstruction because they were never produced, and a prompt that does not
 admit it was never sent reads as a bug in whatever fed it.
 
-Errors name a bullet by its first line, not by its pbt model name: `n_gT4b9…` is
+Errors name a bullet by its first line, not by its promptmap model name: `n_gT4b9…` is
 the right name for the run and the wrong one for the sentence a person reads
 when it fails.
 
@@ -103,8 +103,8 @@ substituted. Rename one of the two; the "Model input" column shows it happening.
 
 ## Enforcing JSON (`jsonOutput`)
 
-A node with `"jsonOutput": true` is emitted with pbt's own
-`{{ config(output_format="json") }}`, so pbt **parses and validates** the answer
+A node with `"jsonOutput": true` is emitted with promptmap's own
+`{{ config(output_format="json") }}`, so promptmap **parses and validates** the answer
 (stripping any ` ```json ` fence). A bullet that comes back as prose fails with
 its parse error rather than passing the prose downstream — that is the part that
 makes it *enforcement* rather than a request.
@@ -121,7 +121,7 @@ Asking is done too, since validating alone does not make a model comply:
   mention JSON — the appended line is what satisfies it). Anthropic has no such
   mode, so there the instruction and the validation are the whole of it.
 
-**The two forms of a JSON answer.** pbt hands the *parsed* value downstream, and
+**The two forms of a JSON answer.** promptmap hands the *parsed* value downstream, and
 Jinja writes a parsed value into the next prompt with `str()` — a Python-style
 mapping, single quotes and all. So `outputs` shows canonical, pretty-printed
 JSON (what a person reads) while `prompts` shows the mapping form (what actually
@@ -130,7 +130,7 @@ say what was really sent.
 
 ## Exporting (`POST /export`)
 
-`POST /export` returns the graph as a pbt project you can run without this app.
+`POST /export` returns the graph as a promptmap project you can run without this app.
 Same body as `/run` plus a `target`:
 
 ```jsonc
@@ -141,9 +141,9 @@ Same body as `/run` plus a `target`:
 ```
 
 * **`script`** — one file: the models as a dict, a small `llm_call`, and
-  `pbt.async_run` over them.
-* **`project`** — one file that *writes* `models/<name>.prompt` per bullet plus
-  a `client.py`, which is the layout `pbt serve` expects. `pbt serve` cannot be
+  `promptmap.async_run` over them.
+* **`project`** — one file that *writes* `map/<name>.prompt` per bullet plus
+  a `client.py`, which is the layout `promptmap serve` expects. `promptmap serve` cannot be
   handed a dict, so the export has to be the thing that lays the project out.
 
 The sources come from `_build_source`, the same function a run uses, so an
@@ -154,7 +154,7 @@ each model after its bullet's first line, because these become file names and
 
 `warnings` says what could not come along — attachments (the bytes stay in this
 server's bucket) and python bullets (they need the `python_modal` kind, which is
-this server's, not pbt's). Nothing is dropped silently.
+this server's, not promptmap's). Nothing is dropped silently.
 
 ## Bullet kinds
 
@@ -167,11 +167,11 @@ Each node carries a `kind`, which decides what running it does:
 | `python`   | Runs the code its **one child** produced, in a **Modal sandbox** — not on this server. |
 | `agent`    | Its rendered text is a **task** for a coding agent (OpenCode) in a Modal sandbox, with its own tools and, optionally, an **MCP server**'s tools. Its output is `{"output", "logs", "run_time"}`. See below. |
 
-`template` needs no model type of its own: pbt parses `{{ config(...) }}` into
+`template` needs no model type of its own: promptmap parses `{{ config(...) }}` into
 `model.config` and hands it to `llm_call`, where `llm.py` short-circuits into a
 passthrough. `python` cannot work that way — `llm_call` never sees the upstream
 outputs, and the code must not run in this process — so `modal_exec.py`
-registers a pbt model kind for `model_type="python_modal"`.
+registers a promptmap model kind for `model_type="python_modal"`.
 
 A python bullet **holds no code of its own** — it is an operator, not an
 editor. Its child's output *is* the program. So one bullet asks an LLM for a
@@ -348,7 +348,7 @@ an image a tool returned is logged as `[N image(s) shown to the model]`, and a l
 over 400 lines keeps its first and last 200. It is a summary of the run: the
 model saw everything.
 
-The object is returned to pbt as a structured value, so it passes on as one,
+The object is returned to promptmap as a structured value, so it passes on as one,
 and `outputs` shows it as pretty-printed JSON. With JSON enforced on the bullet,
 the agent is asked for JSON and `output` holds the answer *parsed*; an answer
 that won't parse fails the bullet.
@@ -358,7 +358,7 @@ or an `@` reference to an agent bullet, renders it in full, so the logs go into
 that prompt as well. That's the point when the next bullet is meant to judge
 the run. When it only needs the answer, it costs tokens.
 
-A failed run doesn't produce the object: the bullet fails, so pbt skips what
+A failed run doesn't produce the object: the bullet fails, so promptmap skips what
 depends on it. Its error message ends with the last 40 lines of the log.
 
 A node may name an **MCP server**: any command that starts one over stdio.
@@ -369,7 +369,7 @@ A node may name an **MCP server**: any command that starts one over stdio.
 ```
 
 It is emitted as `{{ config(model_type="agent_modal", mcp_server="…") }}`, a
-kind `agent_exec.py` registers with pbt on import. Everything lives inside one
+kind `agent_exec.py` registers with promptmap on import. Everything lives inside one
 sandbox — nothing is hosted and no ports are exposed:
 
 ```
@@ -396,7 +396,7 @@ the answer are read from its JSON event stream.
 The agent uses the **run's provider and key** — the same ones prompt bullets
 use, as OpenCode's `<provider>/<*_MODEL>` (Gemini is `google/…` there). The
 key never goes into the model source (it would land in the cache key and in
-exports): `main.run` binds it in a context variable for the tasks pbt spawns,
+exports): `main.run` binds it in a context variable for the tasks promptmap spawns,
 and it reaches the sandbox as a Modal secret made for that one sandbox. The MCP server inherits the sandbox's
 environment, key included — the agent can read it anyway.
 

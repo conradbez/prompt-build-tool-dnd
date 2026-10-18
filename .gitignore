@@ -328,8 +328,8 @@ sketch
 # Local scratch notes. "todo files.md" carries live bucket credentials — it
 # must not be committed.
 todo *.md
-.pbt/pbt.db
-.pbt/pbt.db
+.promptmap/promptmap.db
+.promptmap/promptmap.db
 
 # Local SQLite for accounts and maps (Railway uses its volume instead).
 server/data/

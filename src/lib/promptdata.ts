@@ -1,9 +1,9 @@
 /**
- * Run variables — pbt's `promptdata`.
+ * Run variables — promptmap's `promptdata`.
  *
  * A variable is a name and a value, typed into Settings and written into a
  * bullet as `@name`. At run time the server turns each `@name` into
- * `{{ promptdata("name") }}` and hands the values to pbt, so one value can
+ * `{{ promptdata("name") }}` and hands the values to promptmap, so one value can
  * appear in many bullets and change in one place.
  *
  * Unlike an `@` mention of a bullet — stored as an unchanging id — a variable
@@ -176,7 +176,7 @@ export function usePromptVars(): PromptVar[] {
 /**
  * The variables that actually resolve — name → value. A row is skipped unless
  * its name is a usable identifier, and the first of a duplicated name wins,
- * which is also what happens to the map once the server hands it to pbt.
+ * which is also what happens to the map once the server hands it to promptmap.
  */
 function computeMap(source: PromptVar[]): PromptVarMap {
   const out: PromptVarMap = {};

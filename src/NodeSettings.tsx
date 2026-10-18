@@ -104,7 +104,7 @@ export function NodeSettings({ bullet }: Props) {
             label="Output"
             info={
               <>
-                The answer is parsed and validated (pbt&rsquo;s <code>output_format="json"</code>);
+                The answer is parsed and validated (promptmap&rsquo;s <code>output_format="json"</code>);
                 one that is not JSON fails this bullet instead of flowing on as prose.
               </>
             }

@@ -4,7 +4,7 @@ import type { ModelRunStatus } from './api';
  *
  * - `prompt`   — sent to the LLM. The default.
  * - `template` — never sent: its rendered text, with every upstream output
- *   substituted in, *is* its output. Emitted to pbt as
+ *   substituted in, *is* its output. Emitted to promptmap as
  *   `{{ config(model_type="template") }}`.
  * - `python`   — its text is Python, run in a Modal sandbox rather than on the
  *   server. Whatever it prints is its output, and the upstream outputs arrive
@@ -83,15 +83,15 @@ export interface Bullet {
   /** What running this bullet does — see `BulletKind`. */
   kind: BulletKind;
   /**
-   * Enforce JSON: emitted to pbt as `{{ config(output_format="json") }}`, which
+   * Enforce JSON: emitted to promptmap as `{{ config(output_format="json") }}`, which
    * makes it *validate* the answer as JSON rather than merely ask for one — a
    * bullet that comes back as prose fails instead of passing the prose on. The
    * parsed value is what flows downstream.
    */
   jsonOutput: boolean;
   /**
-   * Reuse pbt's cached answer when nothing changed. Off, a prompt or agent
-   * bullet runs fresh every time (pbt's `config(cache=False)`).
+   * Reuse promptmap's cached answer when nothing changed. Off, a prompt or agent
+   * bullet runs fresh every time (promptmap's `config(cache=False)`).
    */
   cache: boolean;
   /**

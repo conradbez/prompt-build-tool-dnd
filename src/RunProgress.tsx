@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { actions, getState, useOutline } from './store';
 import type { RunLogLine } from './types';
 
-/** How each log line is tagged — the same words pbt's own CLI log uses. */
+/** How each log line is tagged — the same words promptmap's own CLI log uses. */
 const TAG: Record<RunLogLine['kind'], string> = {
   plan: 'PLAN',
   start: 'RUN',
@@ -20,7 +20,7 @@ function clock(ms: number): string {
 
 /**
  * The run as it happens: a progress bar, what is running now, and a log in the
- * shape of pbt's CLI output — one line as each bullet starts and finishes, with
+ * shape of promptmap's CLI output — one line as each bullet starts and finishes, with
  * a failure's full message under it rather than squeezed into the toolbar.
  *
  * Opened from the ☰ beside Run, during a run or after it: the log of the last
