@@ -136,6 +136,22 @@ export function NodeSettings({ bullet }: Props) {
           </Row>
         )}
 
+        {(kind === 'prompt' || kind === 'agent' || (kind === 'test' && bullet.judge === 'llm')) && (
+          <Row
+            label="Model"
+            info="The model this bullet calls, as the provider names it — e.g. gpt-4o-mini, gemini-2.5-pro, claude-sonnet-4-5. Blank uses the run’s: llm_model in Settings, else the server’s default for the provider."
+          >
+            <input
+              className="pd-input"
+              value={bullet.model}
+              placeholder="Run default"
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => actions.setModel(id, e.target.value)}
+            />
+          </Row>
+        )}
+
         {kind === 'test' && (
           <Row
             label="Judge"

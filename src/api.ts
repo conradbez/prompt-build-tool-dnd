@@ -44,6 +44,8 @@ export interface NodePayload {
   persistDisk: boolean;
   /** A python bullet's extra sandbox packages, comma-separated; empty for none. */
   packages: string;
+  /** The model this bullet calls — see `Bullet.model`. Empty for the run's. */
+  model: string;
   /** Validate this bullet's answer as JSON (promptmap's `output_format="json"`). */
   jsonOutput: boolean;
   /** Reuse promptmap's cached answer — see `Bullet.cache`. */

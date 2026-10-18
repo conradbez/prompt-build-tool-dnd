@@ -128,9 +128,10 @@ def make_llm_call(
     environment keys are never used, so a public deploy can't spend them.
     ``classifier`` holds the settings for classifier-judged tests. ``model`` is
     the person's own choice from Settings; without one the server's default
-    for the provider (`model_name`) answers.
+    for the provider (`model_name`) answers. A bullet's own ``llm_model`` in
+    its config beats both.
     """
-    chosen = model or (model_name(provider) if provider in MODEL_ENV else "")
+    default = model or (model_name(provider) if provider in MODEL_ENV else "")
 
     def llm_call(prompt: str, files: Any = None, config: Any = None) -> str:
         if config and config.get("judge") == "classifier":
@@ -140,6 +141,8 @@ def make_llm_call(
             # prompt *is* the output. Stripped because the injected
             # {{ config(...) }} line renders to an empty first line.
             return prompt.strip()
+
+        chosen = (config or {}).get("llm_model") or default
 
         key = api_key
         if not key:

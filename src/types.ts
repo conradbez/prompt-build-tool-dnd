@@ -141,6 +141,12 @@ export interface Bullet {
    * it runs. Empty means none. Ignored on every other kind.
    */
   packages: string;
+  /**
+   * The model this bullet calls, e.g. `gpt-4o-mini` — for a prompt, an agent or
+   * an LLM-judged test. Empty means the run's (Settings → `llm_model`, else the
+   * server's default for the provider).
+   */
+  model: string;
   /** A test bullet's judge — see `TestJudge`. Ignored on every other kind. */
   judge: TestJudge;
   /** A classifier-judged test passes when P(yes) ≥ this, 0–1. */

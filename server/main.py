@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
+import os
 import pathlib
 import re
 from typing import Any, Callable, Optional
@@ -42,6 +44,16 @@ from promptmap_extra_model_kinds import agent37_exec, agent_exec, modal_exec
 import accounts
 from llm import make_llm_call
 from promptmap import model_types as _promptmap_kinds
+
+# A remote-browser agent is told to drive Chromium with Playwright's
+# `connect_over_cdp`, but the agent image has no Playwright — so the agent
+# spent its first steps hunting for a CDP client. The wheel bundles its own
+# driver and needs no browser download for CDP, so it goes in the image's pip
+# extras alongside whatever the deployment set. Read lazily, when the image is
+# first built.
+_pip_extras = os.environ.get(agent_exec.PIP_ENV, "")
+if "playwright" not in _pip_extras.lower():
+    os.environ[agent_exec.PIP_ENV] = ", ".join(p for p in (_pip_extras.strip(), "playwright") if p)
 
 # promptmap registers its own `execute_python` (exec() in this process) and `agent`
 # (bash on this machine) on import. Nothing here asks for them — code runs on
@@ -117,13 +129,48 @@ NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"
 
 
 def _llm_model(promptdata: dict[str, str]) -> str | None:
-    """The model this person chose, or None for the server's default.
+    """The model this person chose, or None for the server's default."""
+    return _model_id(promptdata.get(LLM_MODEL_VAR, ""))
 
-    Anything that could not be a model id is ignored rather than trusted: the
-    value is written into a Jinja `config()` call.
+
+def _model_id(value: str) -> str | None:
+    """``value`` if it could be a model id, else None.
+
+    Anything else is ignored rather than trusted: the value is written into a
+    Jinja `config()` call.
     """
-    value = promptdata.get(LLM_MODEL_VAR, "").strip()
+    value = value.strip()
     return value if _MODEL_ID.match(value) else None
+
+
+def _with_bullet_model(kind_name: str) -> None:
+    """Let an agent kind's bullet name its own model.
+
+    The agent kinds take the model from the run (`agent_exec.RunSettings`), not
+    from `config()`, so the bullet's `LLM_MODEL_VAR` is swapped into the run
+    settings for the length of its own call.
+    """
+    kind = _promptmap_kinds.get_model_kind(kind_name)
+    if kind is None or kind.exec_fn is None:
+        return
+    inner = kind.exec_fn
+
+    async def execute(rendered: str, call: promptmap.ModelCall) -> Any:
+        model = call.spec.config.get(LLM_MODEL_VAR)
+        if not model:
+            return await inner(rendered, call)
+        run = agent_exec._settings.get()
+        token = agent_exec._settings.set(dataclasses.replace(run, model=str(model)))
+        try:
+            return await inner(rendered, call)
+        finally:
+            agent_exec._settings.reset(token)
+
+    _promptmap_kinds.register_model_kind(dataclasses.replace(kind, exec_fn=execute))
+
+
+for _agent_kind in (agent_exec.MODEL_TYPE, agent37_exec.MODEL_TYPE):
+    _with_bullet_model(_agent_kind)
 
 
 def _calls_model(node: Node) -> bool:
@@ -306,6 +353,9 @@ class Node(BaseModel):
     # "classifier" asks the classifier for P(yes) and passes at `threshold`.
     judge: str = "llm"
     threshold: float = 0.5
+    # The model this bullet calls; empty for the run's (`LLM_MODEL_VAR`). Goes
+    # into its `config()`, where `llm.py` and the agent kinds read it.
+    model: str = ""
 
 
 class ClassifierSettings(BaseModel):
@@ -1090,11 +1140,13 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
     models = _models(nodes, children, id_to_slug, req.sessionId, promptdata)
     feeds = _feeding(nodes, id_to_slug)
     llm_model = _llm_model(promptdata)
-    if llm_model:
-        model_line = '{{ config(%s="%s") }}' % (LLM_MODEL_VAR, llm_model)
-        for n in nodes:
-            if _calls_model(n):
-                models[id_to_slug[n.id]] = model_line + "\n" + models[id_to_slug[n.id]]
+    for n in nodes:
+        # The bullet's own model over the run's; either way it is in the config,
+        # where `llm.py` reads it and promptmap's cache keys on it.
+        chosen = _model_id(n.model) or llm_model
+        if chosen and _calls_model(n):
+            model_line = '{{ config(%s="%s") }}' % (LLM_MODEL_VAR, chosen)
+            models[id_to_slug[n.id]] = model_line + "\n" + models[id_to_slug[n.id]]
 
     # A selected run is the selection and everything upstream of it: promptmap works
     # that out from the models itself, but the plan, prompts and verdicts sent

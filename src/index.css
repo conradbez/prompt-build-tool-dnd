@@ -2767,7 +2767,8 @@ body,
 }
 
 @media (max-width: 620px) {
-  .rp__agentlog {
+  .rp__agentlog,
+  .rp__pins {
     padding-left: 0;
   }
 }
@@ -2979,4 +2980,35 @@ button.rf-file__dl:disabled {
 .ios .tb__log,
 .ios .tb__gear {
   padding: 0;
+}
+
+/* Links an agent posted (live browser, desktop, public port), a bar each under
+   its folded log so they are not lost among the lines around them. */
+.rp__pins {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 0 100%;
+  box-sizing: border-box;
+  margin: 0 0 6px;
+  /* Under the agent log, at its indent. */
+  padding-left: 110px;
+  min-width: 0;
+}
+
+.rp__pin {
+  display: block;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rp__pin:hover {
+  border-color: var(--accent);
 }

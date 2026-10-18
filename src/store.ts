@@ -31,6 +31,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     publicUrl: false,
     persistDisk: false,
     packages: '',
+    model: '',
     judge: 'llm',
     threshold: 0.5,
     ...partial,
@@ -111,6 +112,7 @@ export function parseDoc(value: unknown): Doc | null {
         publicUrl: !!b.publicUrl,
         persistDisk: !!b.persistDisk,
         packages: typeof b.packages === 'string' ? b.packages : '',
+        model: typeof b.model === 'string' ? b.model : '',
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
         threshold: typeof b.threshold === 'number' ? clampThreshold(b.threshold) : 0.5,
       });
@@ -271,6 +273,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     publicUrl: b.publicUrl,
     persistDisk: b.persistDisk,
     packages: b.packages,
+    model: b.model,
     judge: b.judge,
     threshold: b.threshold,
   }));
@@ -558,6 +561,15 @@ export const actions = {
     emit(next);
   },
 
+  /** Set the model one bullet calls — see `Bullet.model`. Empty for the run's. */
+  setModel(id: string, model: string) {
+    const b = state.bullets[id];
+    if (!b || b.model === model) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, model };
+    emit(next);
+  },
+
   /** Let one bullet reuse promptmap's cached answer, or not — see `Bullet.cache`. */
   setCache(id: string, on: boolean) {
     const b = state.bullets[id];
@@ -680,6 +692,25 @@ export const actions = {
     const nb = makeBullet({ id: nanoid(), parentId });
     next.bullets[nb.id] = nb;
     next.bullets[parentId] = { ...parent, collapsed: false, children: [...parent.children, nb.id] };
+    next.focus = { id: nb.id, caret: 'end' };
+    next.selectedId = nb.id;
+    emit(next);
+    return nb.id;
+  },
+
+  /**
+   * Put a new empty bullet between `id` and its parent: it takes `id`'s place
+   * among its siblings and `id` becomes its one child. Focuses the new one.
+   */
+  addParent(id: string): string {
+    const b = state.bullets[id];
+    if (!b) return '';
+    const next = clone(state);
+    const nb = makeBullet({ id: nanoid(), parentId: b.parentId, children: [id] });
+    const list = b.parentId ? next.bullets[b.parentId].children : next.rootIds;
+    setChildren(next, b.parentId, list.map((x) => (x === id ? nb.id : x)));
+    next.bullets[nb.id] = nb;
+    next.bullets[id] = { ...b, parentId: nb.id };
     next.focus = { id: nb.id, caret: 'end' };
     next.selectedId = nb.id;
     emit(next);

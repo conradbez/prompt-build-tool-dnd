@@ -104,9 +104,23 @@ export function BulletNode({ id, data, selected }: NodeProps) {
         </button>
       )}
       {d.hasChildren && d.collapsed && <div className="mm-node__badge">▸</div>}
-      {/* The output, on top: it links up into this node's parent. A test has
-          none — its verdict never feeds anything. */}
-      {d.kind !== 'test' && <Handle type="source" position={Position.Top} className="mm-handle" />}
+      {/* The output, on top: it links up into this node's parent, and a click
+          slots a new parent in above it. A test has none — its verdict never
+          feeds anything. */}
+      {d.kind !== 'test' && (
+        <Handle
+          type="source"
+          position={Position.Top}
+          className="mm-handle mm-handle--start"
+          title="Drag to link, click to add a parent"
+          onClick={(e) => {
+            e.stopPropagation();
+            actions.addParent(id);
+          }}
+        >
+          <span className="mm-handle__plus">＋</span>
+        </Handle>
+      )}
     </div>
   );
 }
