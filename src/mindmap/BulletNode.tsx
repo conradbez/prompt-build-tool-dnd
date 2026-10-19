@@ -5,7 +5,8 @@ import { PYTHON_CAPTION, type BulletKind, type TestStatus } from '../types';
 
 export interface BulletNodeData {
   /** The bullet's markdown, already rendered (mentions included). */
-  html: string;
+  /** The node's name — all a node shows of its bullet. */
+  title: string;
   hasChildren: boolean;
   /** False on a python node that already holds its one child. */
   canAddChild: boolean;
@@ -63,6 +64,11 @@ export function BulletNode({ id, data, selected }: NodeProps) {
       >
         {d.canAddChild && <span className="mm-handle__plus">＋</span>}
       </Handle>
+      {/* Name on the left, what kind of node it is on the right. */}
+      <div className="mm-node__top">
+      <div className={`mm-node__title${d.title ? '' : ' mm-node__empty'}`}>
+        {d.title || (d.kind === 'python' ? PYTHON_CAPTION : 'Untitled')}
+      </div>
       {(d.kind !== 'prompt' || d.jsonOutput || d.fileCount > 0) && (
         <div className="mm-node__flags">
           {d.kind !== 'prompt' && <KindChip kind={d.kind} mcpServer={d.mcpServer} test={d.test} />}
@@ -74,15 +80,7 @@ export function BulletNode({ id, data, selected }: NodeProps) {
           )}
         </div>
       )}
-      <div
-        className="mm-node__md"
-        dangerouslySetInnerHTML={{
-          __html:
-            d.kind === 'python'
-              ? `<p class="mm-node__empty">${PYTHON_CAPTION}</p>`
-              : d.html || '<p class="mm-node__empty">Empty</p>',
-        }}
-      />
+      </div>
       {/* A tag, not the answer. A node's job on the map is to show the shape
           of the graph; an LLM answer pasted into it buries that under a wall
           of text, and the answer has a place of its own — the modal. */}

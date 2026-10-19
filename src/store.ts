@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { nanoid } from 'nanoid';
 import type { RunEvent } from './api';
-import type { Bullet, BulletKind, FileRef, Focus, OutlineState, FlatBullet, RunFile, TestJudge, TestStatus } from './types';
+import type { Bullet, BulletKind, Field, FileRef, Focus, OutlineState, FlatBullet, RunFile, TestJudge, TestStatus } from './types';
 import { mentionIds, mentionToken, stripMention } from './lib/mentions';
 import { RENAMED } from './lib/promptdata';
 
@@ -13,6 +13,7 @@ import { RENAMED } from './lib/promptdata';
 
 function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
   return {
+    title: '',
     text: '',
     children: [],
     parentId: null,
@@ -38,26 +39,28 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
   };
 }
 
-const DOC_KEY = 'wm.doc.v5';
+const DOC_KEY = 'wm.doc.v6';
 // Shapes this prototype has outgrown. They are wiped on load, not migrated.
-const STALE_KEYS = ['wm.doc.v1', 'wm.doc.v2', 'wm.doc.v3', 'wm.doc.v4'];
+const STALE_KEYS = ['wm.doc.v1', 'wm.doc.v2', 'wm.doc.v3', 'wm.doc.v4', 'wm.doc.v5'];
 
 function fresh(): { bullets: Record<string, Bullet>; rootIds: string[] } {
   const root = makeBullet({
     id: nanoid(),
+    title: 'Find best fruit',
     text:
-      '# Find best fruit\nUsing the fruit list and the country assessment below, name the ' +
+      'Using the fruit list and the country assessment below, name the ' +
       '**single best** fruit and justify it in two sentences.',
   });
   const a = makeBullet({
     id: nanoid(),
-    text: '## List 10 fruits\nList 10 fruits, one per line, no commentary.',
+    title: 'List 10 fruits',
+    text: 'List 10 fruits, one per line, no commentary.',
     parentId: root.id,
   });
   const b = makeBullet({
     id: nanoid(),
+    title: 'Assess fruits for a random country',
     text:
-      '## Assess fruits for a random country\n' +
       `Pick a random country. For each fruit in ${mentionToken(a.id)}, assess the metrics ` +
       'for that fruit\u2019s growth there and its nutritional suitability for maximising ' +
       'calories with minimal variance. Score each out of 10 in a short table.',
@@ -94,6 +97,7 @@ export function parseDoc(value: unknown): Doc | null {
       if (!b || typeof b !== 'object') continue;
       bullets[id] = makeBullet({
         id,
+        title: typeof b.title === 'string' ? b.title : '',
         text: typeof b.text === 'string' ? renameVars(b.text) : '',
         children: Array.isArray(b.children) ? (b.children as string[]) : [],
         parentId: typeof b.parentId === 'string' ? b.parentId : null,
@@ -324,9 +328,16 @@ export function flatten(s: OutlineState = state): FlatBullet[] {
   return out;
 }
 
-/** Ordered list of focus targets — one editor per visible bullet. */
+/** Ordered list of focus targets — a title and a body per visible bullet. */
 export function focusOrder(s: OutlineState = state): Focus[] {
-  return flatten(s).map(({ id }): Focus => ({ id }));
+  return flatten(s).flatMap(({ id }): Focus[] => [
+    { id, field: 'title' },
+    { id, field: 'body' },
+  ]);
+}
+
+function sameTarget(a: Focus, b: Focus): boolean {
+  return a.id === b.id && (a.field ?? 'title') === (b.field ?? 'title');
 }
 
 /** All bullets as flat run payloads for the server (parentId lets the child
@@ -334,6 +345,7 @@ export function focusOrder(s: OutlineState = state): Focus[] {
 export function buildNodePayloads(s: OutlineState = state) {
   return Object.values(s.bullets).map((b) => ({
     id: b.id,
+    title: b.title,
     // Raw, mention tokens and all: the server puts each referenced bullet's
     // output where its mention stands, so the position has to survive the trip.
     text: b.text,
@@ -367,25 +379,15 @@ export function currentDoc(s: OutlineState = state): Doc {
   return { bullets: s.bullets, rootIds: s.rootIds };
 }
 
-/**
- * What a mention shows, keyed by id: the bullet's first line with any markdown
- * heading marks dropped, since that line is how people name a bullet.
- */
+/** What a mention shows, keyed by id: the bullet's title. */
 export function titleMap(s: OutlineState = state): Record<string, string> {
   const out: Record<string, string> = {};
   for (const b of Object.values(s.bullets)) {
-    // A python bullet has no text to take a name from, but it is still a
-    // legitimate `@` target — the thing its script printed. Name it for what
-    // it is rather than letting mentions to it read "@Untitled".
-    out[b.id] = b.kind === 'python' ? 'Python' : firstLine(b.text);
+    // An untitled python bullet is still a legitimate `@` target — the thing
+    // its script printed — so it is named for what it is, not "@Untitled".
+    out[b.id] = b.title.trim() || (b.kind === 'python' ? 'Python' : '');
   }
   return out;
-}
-
-/** A bullet's opening line, stripped of heading marks and list bullets. */
-export function firstLine(text: string): string {
-  const line = text.split('\n', 1)[0] ?? '';
-  return line.replace(/^\s*(#{1,6}\s+|[-*+]\s+|>\s+)/, '').trim();
 }
 
 /**
@@ -413,9 +415,10 @@ function refsFromText(b: Bullet, selfId: string): string[] {
   return mentionIds(b.text).filter((r, i, all) => r !== selfId && all.indexOf(r) === i);
 }
 
-/** Keep the caret on `id` (used when reordering). */
-function focusFor(_s: OutlineState, id: string): Focus {
-  return { id, caret: 'end' };
+/** Keep the caret on `id`, in whichever of its lines it was (used when reordering). */
+function focusFor(s: OutlineState, id: string, caret: Focus['caret'] = 'end'): Focus {
+  const field: Field = s.focus?.id === id ? (s.focus.field ?? 'title') : 'title';
+  return { id, field, caret };
 }
 
 function siblingsOf(s: OutlineState, id: string): { list: string[]; index: number; parentId: string | null } {
@@ -485,11 +488,21 @@ export const actions = {
   /** Move focus to the previous (-1) or next (+1) editor in reading order. */
   moveFocus(from: Focus, dir: -1 | 1) {
     const order = focusOrder(state);
-    const idx = order.findIndex((f) => f.id === from.id);
+    const idx = order.findIndex((f) => sameTarget(f, from));
     if (idx === -1) return;
     const target = order[idx + dir];
     if (!target) return;
     actions.setFocus({ ...target, caret: dir === 1 ? 'start' : 'end' });
+  },
+
+  setTitle(id: string, value: string) {
+    const b = state.bullets[id];
+    // One line: a title is a name, and a pasted newline would split nothing.
+    const title = value.replace(/\s*\n\s*/g, ' ');
+    if (!b || b.title === title) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, title };
+    emit(next);
   },
 
   setText(id: string, value: string) {
@@ -918,7 +931,7 @@ export const actions = {
     const newList = [...list];
     newList.splice(index, 0, nb.id);
     setChildren(next, parentId, newList);
-    next.focus = { id, caret: 'start' };
+    next.focus = focusFor(state, id, 'start');
     next.selectedId = id;
     emit(next);
     return nb.id;
@@ -956,7 +969,7 @@ export const actions = {
     prev.children = [...prev.children, id];
     next.bullets[prevId] = prev;
     next.bullets[id] = { ...b, parentId: prevId };
-    next.focus = { id, caret: 'end' };
+    next.focus = focusFor(state, id);
     emit(next);
   },
 
@@ -976,7 +989,7 @@ export const actions = {
     newG.splice(pIndex + 1, 0, id);
     setChildren(next, grandParentId, newG);
     next.bullets[id] = { ...next.bullets[id], parentId: grandParentId };
-    next.focus = { id, caret: 'end' };
+    next.focus = focusFor(state, id);
     emit(next);
   },
 
@@ -985,7 +998,7 @@ export const actions = {
     const b = state.bullets[id];
     if (!b || b.children.length > 0) return;
     const order = focusOrder(state);
-    const idx = order.findIndex((f) => f.id === id);
+    const idx = order.findIndex((f) => sameTarget(f, { id }));
     const prev = idx > 0 ? order[idx - 1] : null;
     const next = clone(state);
     const { list } = siblingsOf(next, id);
@@ -1051,7 +1064,7 @@ export const actions = {
     }
     const prev = order.slice(0, Math.max(firstIdx, 0)).reverse().find((f) => next.bullets[f.id]);
     const targetId = prev?.id ?? next.rootIds[0];
-    next.focus = { id: targetId, caret: 'end' };
+    next.focus = { id: targetId, field: prev ? 'body' : 'title', caret: 'end' };
     next.selectedId = targetId;
     next.blockSel = null;
     emit(next);

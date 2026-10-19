@@ -272,8 +272,8 @@ bullets appears; pick one with the arrow keys and `Enter`/`Tab` (or click). This
 draws a **dashed link** from the current bullet to the referenced one.
 
 What gets stored is the target's **id**, not its text — a mention survives the
-target being retyped, reordered or re-parented. The editor shows the first 10
-characters of the target's first line in a different colour; hover it for the
+target being retyped, reordered or re-parented. The editor shows the first 33
+characters of the target's title in a different colour; hover it for the
 full line. Because the text owns the reference, deleting the mention deletes the
 link, and cutting the link on the map deletes the mention.
 

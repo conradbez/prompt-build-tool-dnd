@@ -15,7 +15,7 @@
 import { varRefRe, type PromptVarMap } from './promptdata';
 
 /** How many characters of the target's title a mention shows. */
-export const MENTION_LABEL_CHARS = 10;
+export const MENTION_LABEL_CHARS = 33;
 
 const tokenRe = () => /@\[\[([A-Za-z0-9_-]+)\]\]/g;
 
@@ -26,7 +26,7 @@ export function mentionToken(id: string): string {
   return `@[[${id}]]`;
 }
 
-/** The visible form of a mention: `@` + the first 10 chars of the title. */
+/** The visible form of a mention: `@` + the first 33 chars of the title. */
 export function mentionLabel(title: string | undefined): string {
   const t = (title ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return '@Untitled';

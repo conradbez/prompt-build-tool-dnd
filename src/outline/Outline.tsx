@@ -47,10 +47,11 @@ export function Outline() {
   useLayoutEffect(() => {
     const f = state.focus;
     if (!f) return;
-    const el = getEditor(f.id);
+    const el = getEditor(f.id, f.field ?? 'title');
     if (!el) return;
-    el.focus();
-    placeCaret(el, f.caret ?? 'end');
+    if (document.activeElement !== el) el.focus();
+    // No caret means the focus came from a click, which already placed it.
+    if (f.caret) placeCaret(el, f.caret);
     el.scrollIntoView({ block: 'nearest' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.focus]);
@@ -85,7 +86,11 @@ export function Outline() {
       } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault();
         const edge = e.key === 'ArrowUp' ? ids[0] : ids[ids.length - 1];
-        actions.setFocus({ id: edge, caret: e.key === 'ArrowUp' ? 'start' : 'end' });
+        actions.setFocus(
+          e.key === 'ArrowUp'
+            ? { id: edge, field: 'title', caret: 'start' }
+            : { id: edge, field: 'body', caret: 'end' },
+        );
       }
     }
     window.addEventListener('keydown', onKey);
@@ -271,10 +276,9 @@ function blockText(ids: string[]): string {
   return rows
     .map((r) => {
       const pad = '  '.repeat(r.depth - base);
-      return toDisplay(s.bullets[r.id].text, titles)
-        .split('\n')
-        .map((line, i) => (i === 0 ? `${pad}- ${line}` : `${pad}  ${line}`))
-        .join('\n');
+      const b = s.bullets[r.id];
+      const body = toDisplay(b.text, titles);
+      return [`${pad}- ${b.title}`, ...(body ? body.split('\n').map((line) => `${pad}  ${line}`) : [])].join('\n');
     })
     .join('\n');
 }

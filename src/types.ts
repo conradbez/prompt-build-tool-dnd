@@ -62,10 +62,12 @@ export interface FileRef {
 export interface Bullet {
   id: string;
   /**
-   * The bullet's text, written in markdown. There is no separate title: the
-   * first line is simply the first line, and anything that needs to stand out
-   * says so in markdown (`# heading`, `**bold**`).
+   * The bullet's name — its top line, shown bold. Plain text, one line. It is
+   * what an `@` mention reads as and what the exported file is called, but it
+   * is never sent to the model: the id stays the identity, so renaming is free.
    */
+  title: string;
+  /** The bullet's body, written in markdown — what is sent to the model. */
   text: string;
   /** Ordered child bullet ids (many children to one parent). */
   children: string[];
@@ -153,8 +155,13 @@ export interface Bullet {
   threshold: number;
 }
 
+/** Which of a bullet's two lines an editor is. */
+export type Field = 'title' | 'body';
+
 export interface Focus {
   id: string;
+  /** The title or the body. Absent means the title. */
+  field?: Field;
   /** Where to place the caret once the element is focused. */
   caret?: 'start' | 'end';
 }
@@ -226,7 +233,7 @@ export interface RunLogLine {
   kind: 'plan' | 'start' | 'log' | 'success' | 'error' | 'skipped' | 'end';
   /** The bullet the line is about; absent on lines about the whole run. */
   id?: string;
-  /** The bullet's first line, or a note about the run as a whole. */
+  /** The bullet's title, or a note about the run as a whole. */
   title: string;
   /** Timing on a finished bullet, the message on a failed one. */
   detail?: string;

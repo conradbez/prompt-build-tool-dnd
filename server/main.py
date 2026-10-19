@@ -337,7 +337,10 @@ class FileRequest(BaseModel):
 
 class Node(BaseModel):
     id: str
-    # One markdown text field per bullet; `@` mentions arrive already expanded.
+    # The bullet's name — its top line. Not sent to the model: it names the
+    # bullet in `@` mentions, run logs, and the exported file.
+    title: str = ""
+    # The bullet's body, in markdown; `@` mentions arrive already expanded.
     text: str = ""
     files: list[FileRef] = []
     parentId: Optional[str] = None
@@ -836,19 +839,13 @@ def _node_file_keys(node: Node, session_id: str) -> list[str]:
 
 
 def _title(node: Node, others: dict[str, Node] | None = None) -> str:
-    """What to call a bullet in a message to a person: its first line.
+    """What to call a bullet in a message to a person: its title.
 
     Errors used to name the promptmap model — `n_gT4b9…`, a slug built from an id
     nobody has seen — which is the right name for the run and the wrong one for
     the sentence a person reads when it fails.
     """
-    line = node.text.split("\n", 1)[0].strip() if node.text else ""
-    # A mention reads as the bullet it names, the way the editor shows it.
-    line = _MENTION.sub(
-        lambda m: "@" + (others[m.group(1)].text.split("\n", 1)[0].strip()[:20] if others and m.group(1) in others else ""),
-        line,
-    )
-    line = re.sub(r"^\s*(#{1,6}\s+|[-*+]\s+|>\s+)", "", line)
+    line = node.title.strip()
     if node.kind == "python" and not line:
         return "the python bullet"
     return f"“{line[:40]}…”" if len(line) > 40 else f"“{line}”" if line else "an empty bullet"
@@ -1216,7 +1213,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             "error": result.error,
         }
         # promptmap names models by slug ("upstream models failed: ['n_x']"); a
-        # person knows them by their first line.
+        # person knows them by their title.
         for slug, other in slug_to_id.items():
             event["error"] = event["error"].replace(f"'{slug}'", titles[other])
         node = by_node.get(node_id)

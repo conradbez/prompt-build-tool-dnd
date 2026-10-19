@@ -12,7 +12,7 @@ The sources come from `main._build_source`, the same function the runner uses,
 so an export is the graph as it actually runs rather than a second rendering of
 it that can drift. What differs is the naming: a run uses `n_<bullet id>`, which
 is stable but unreadable, while an export names each model after its bullet's
-first line, because a person is going to open these files.
+title, because a person is going to open these files.
 """
 
 from __future__ import annotations
@@ -30,11 +30,11 @@ _MAX_NAME = 40
 
 
 def model_names(nodes: list["Node"]) -> dict[str, str]:
-    """Bullet id → a readable, unique model name taken from its first line."""
+    """Bullet id → a readable, unique model name taken from its title."""
     out: dict[str, str] = {}
     used: set[str] = set()
     for i, node in enumerate(nodes, start=1):
-        base = _slug(node.text) or f"bullet_{i}"
+        base = _slug(node.title) or f"bullet_{i}"
         name = base
         n = 2
         while name in used:
@@ -46,7 +46,7 @@ def model_names(nodes: list["Node"]) -> dict[str, str]:
 
 
 def _slug(text: str) -> str:
-    """The first line, as a Python-ish identifier. Empty when there is none."""
+    """A title, as a Python-ish identifier. Empty when there is none."""
     line = text.split("\n", 1)[0] if text else ""
     line = re.sub(r"^\s*(#{1,6}\s+|[-*+]\s+|>\s+)", "", line)  # markdown marks
     slug = _UNSAFE.sub("_", line.lower()).strip("_")[:_MAX_NAME].strip("_")

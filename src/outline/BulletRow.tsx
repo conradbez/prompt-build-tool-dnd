@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { PYTHON_CAPTION, type Bullet, type RunFile, type TestStatus } from '../types';
+import { PYTHON_CAPTION, type Bullet, type Field, type RunFile, type TestStatus } from '../types';
 import { FileThumbs } from '../RunFiles';
 import { actions, flatten, getState, titleMap } from '../store';
 import { register, getEditor } from './focusRegistry';
@@ -118,9 +118,11 @@ export function BulletRow({
   const titles: TitleMap = titleMap(getState());
   const vars = usePromptVarMap();
   // The stored text holds `@[[id]]` tokens; the editor works on the display
-  // form, where each token is the target's first line, first 10 characters.
+  // form, where each token is the target's title, first 33 characters.
   const display = toDisplay(bullet.text, titles);
-  const editing = getState().focus?.id === id;
+  const focus = getState().focus;
+  // Only the body has a read view to swap out; the title is always its editor.
+  const editing = focus?.id === id && focus.field === 'body';
 
   function findMatches(query: string): Match[] {
     const s = getState();
@@ -150,7 +152,7 @@ export function BulletRow({
   }
 
   function accept(match: Match) {
-    const el = getEditor(id);
+    const el = getEditor(id, 'body');
     if (!el || !ac) return;
     // For a bullet the id — not the text — is what gets stored, so editing the
     // target later just changes how the mention reads. A variable is stored as
@@ -169,7 +171,7 @@ export function BulletRow({
     actions.setText(id, raw);
     setAc(null);
     requestAnimationFrame(() => {
-      const el2 = getEditor(id);
+      const el2 = getEditor(id, 'body');
       if (el2) {
         el2.focus();
         el2.setSelectionRange(caret, caret);
@@ -181,6 +183,90 @@ export function BulletRow({
     // Back to the stored form (labels → id tokens) before anything is saved.
     actions.setText(id, displayToRaw(e.currentTarget.value, bullet.text, titles));
     refreshMention(e.currentTarget);
+  }
+
+  /**
+   * The keys that act on the bullet as a whole, the same from either of its
+   * lines. True when one of them was handled.
+   */
+  function structuralKey(e: React.KeyboardEvent<HTMLTextAreaElement>, field: Field): boolean {
+    const el = e.currentTarget;
+
+    // ---- Shift+Enter slots a new parent in above this bullet ----
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault();
+      actions.addParent(id);
+      return true;
+    }
+
+    // ---- Tab / Shift+Tab: indent / outdent ----
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) actions.outdent(id);
+      else actions.indent(id);
+      return true;
+    }
+
+    // ---- Alt+Shift+Up/Down: reorder the bullet (Workflowy) ----
+    if (e.altKey && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      if (e.key === 'ArrowUp') actions.moveUp(id);
+      else actions.moveDown(id);
+      return true;
+    }
+
+    // ---- Shift+Up/Down past a bullet's edge selects whole bullets ----
+    // The bullet's edges are the top of its title and the bottom of its body.
+    if (e.shiftKey && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      const up = e.key === 'ArrowUp';
+      const atEdge = up
+        ? field === 'title' && el.selectionStart === 0
+        : field === 'body' && el.selectionEnd === el.value.length;
+      if (atEdge) {
+        const ids = flatten(getState()).map((r) => r.id);
+        const head = ids[ids.indexOf(id) + (up ? -1 : 1)];
+        if (head) {
+          e.preventDefault();
+          actions.setFocus(null);
+          el.blur();
+          actions.setBlockSel({ anchor: id, head });
+        }
+      }
+      return atEdge;
+    }
+
+    // ---- Vertical navigation: title → body → next title, and back ----
+    if (e.key === 'ArrowUp' && caretOnFirstLine(el)) {
+      e.preventDefault();
+      actions.moveFocus({ id, field }, -1);
+      return true;
+    }
+    if (e.key === 'ArrowDown' && caretOnLastLine(el)) {
+      e.preventDefault();
+      actions.moveFocus({ id, field }, 1);
+      return true;
+    }
+    return false;
+  }
+
+  function onTitleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (structuralKey(e, 'title')) return;
+    const el = e.currentTarget;
+
+    // ---- Enter goes down to the body: a title is one line ----
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      actions.setFocus({ id, field: 'body', caret: 'start' });
+      return;
+    }
+
+    // ---- Backspace in an empty title deletes an empty bullet ----
+    if (e.key === 'Backspace' && caretAtStart(el)) {
+      if (bullet.title === '' && bullet.text === '' && bullet.children.length === 0) {
+        e.preventDefault();
+        actions.deleteBullet(id);
+      }
+    }
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -211,12 +297,7 @@ export function BulletRow({
       }
     }
 
-    // ---- Shift+Enter slots a new parent in above this bullet ----
-    if (e.key === 'Enter' && e.shiftKey) {
-      e.preventDefault();
-      actions.addParent(id);
-      return;
-    }
+    if (structuralKey(e, 'body')) return;
 
     // ---- Enter makes the next bullet ----
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -231,57 +312,10 @@ export function BulletRow({
       return;
     }
 
-    // ---- Tab / Shift+Tab: indent / outdent ----
-    if (e.key === 'Tab') {
+    // ---- Backspace at the start of an empty body goes back to the title ----
+    if (e.key === 'Backspace' && caretAtStart(el) && bullet.text === '') {
       e.preventDefault();
-      if (e.shiftKey) actions.outdent(id);
-      else actions.indent(id);
-      return;
-    }
-
-    // ---- Alt+Shift+Up/Down: reorder the bullet (Workflowy) ----
-    if (e.altKey && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-      e.preventDefault();
-      if (e.key === 'ArrowUp') actions.moveUp(id);
-      else actions.moveDown(id);
-      return;
-    }
-
-    // ---- Shift+Up/Down past a bullet's edge selects whole bullets ----
-    if (e.shiftKey && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-      const up = e.key === 'ArrowUp';
-      const atEdge = up ? el.selectionStart === 0 : el.selectionEnd === el.value.length;
-      if (atEdge) {
-        const ids = flatten(getState()).map((r) => r.id);
-        const head = ids[ids.indexOf(id) + (up ? -1 : 1)];
-        if (head) {
-          e.preventDefault();
-          actions.setFocus(null);
-          el.blur();
-          actions.setBlockSel({ anchor: id, head });
-        }
-        return;
-      }
-    }
-
-    // ---- Vertical navigation across bullets ----
-    if (e.key === 'ArrowUp' && caretOnFirstLine(el)) {
-      e.preventDefault();
-      actions.moveFocus({ id }, -1);
-      return;
-    }
-    if (e.key === 'ArrowDown' && caretOnLastLine(el)) {
-      e.preventDefault();
-      actions.moveFocus({ id }, 1);
-      return;
-    }
-
-    // ---- Backspace at the very start deletes an empty bullet ----
-    if (e.key === 'Backspace' && caretAtStart(el)) {
-      if (bullet.text === '' && bullet.children.length === 0) {
-        e.preventDefault();
-        actions.deleteBullet(id);
-      }
+      actions.setFocus({ id, field: 'title', caret: 'end' });
     }
   }
 
@@ -311,6 +345,16 @@ export function BulletRow({
       return;
     }
     if (tip?.text !== full || tip.x !== e.clientX) setTip({ x: e.clientX, y: e.clientY, text: full });
+  }
+
+  /**
+   * A click straight into a textarea moves the DOM focus without the store
+   * knowing. Tell it — with no caret, so the click's own caret stays put.
+   */
+  function noteFocus(field: Field) {
+    const f = getState().focus;
+    if (f?.id === id && (f.field ?? 'title') === field) actions.select(id);
+    else actions.setFocus({ id, field });
   }
 
   const hasChildren = bullet.children.length > 0;
@@ -375,18 +419,32 @@ export function BulletRow({
               box — and every row below it moved. Stacked, the cell is as tall
               as the taller of the two whatever has focus, so the outline
               holds still. */}
+          {/* The title: the bullet's name, bold, in the body's own type. It
+              has no read view — plain text reads the same either way. */}
+          <AutoTextarea
+            id={id}
+            field="title"
+            value={bullet.title}
+            className="ol-text ol-title"
+            placeholder="Untitled"
+            onChange={(e) => actions.setTitle(id, e.currentTarget.value)}
+            onKeyDown={onTitleKeyDown}
+            onKeyUp={() => {}}
+            onFocus={() => noteFocus('title')}
+          />
           <div className={`ol-view ${editing ? 'ol-view--editing' : ''}`}>
             <Rendered bullet={bullet} titles={titles} vars={vars} />
             {editing && hasHighlight && <Mirror segments={segments} titles={titles} vars={vars} />}
             <AutoTextarea
               id={id}
+              field="body"
               value={isPython ? '' : display}
               readOnly={isPython}
               placeholder={isPython ? PYTHON_CAPTION : 'Empty'}
               onChange={onChange}
               onKeyDown={onKeyDown}
               onKeyUp={onKeyUp}
-              onFocus={() => actions.select(id)}
+              onFocus={() => noteFocus('body')}
             />
             {editing && ac && <Dropdown ac={ac} onPick={accept} />}
           </div>
@@ -510,7 +568,7 @@ function Rendered({
       onMouseDown={(e) => {
         // Focus is driven by the store, so take the click ourselves.
         e.preventDefault();
-        actions.setFocus({ id: bullet.id, caret: 'end' });
+        actions.setFocus({ id: bullet.id, field: 'body', caret: 'end' });
       }}
       dangerouslySetInnerHTML={{ __html: html || '<p class="ol-md__empty">Empty</p>' }}
     />
@@ -551,7 +609,7 @@ function Mirror({
   );
 }
 
-/** The hovered mention's full first line, following the pointer. */
+/** The hovered mention's full title, following the pointer. */
 function MentionTip({ tip }: { tip: Tip }) {
   const x = Math.min(Math.max(tip.x, 90), window.innerWidth - 90);
   return (
@@ -585,7 +643,10 @@ function Dropdown({ ac, onPick }: { ac: AutocompleteState; onPick: (m: Match) =>
 
 interface AutoProps {
   id: string;
+  /** Which of the bullet's lines this is, for the focus registry. */
+  field: Field;
   value: string;
+  className?: string;
   /** Shown when the value is empty — a python bullet says what it does here. */
   placeholder?: string;
   /** Python bullets take no typing; the editor mounts only to carry focus. */
@@ -597,7 +658,7 @@ interface AutoProps {
 }
 
 /** Textarea that grows to fit its content and registers itself for focus. */
-function AutoTextarea({ id, value, placeholder = 'Empty', ...handlers }: AutoProps) {
+function AutoTextarea({ id, field, value, className = 'ol-text', placeholder = 'Empty', ...handlers }: AutoProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
   useLayoutEffect(() => {
@@ -611,12 +672,12 @@ function AutoTextarea({ id, value, placeholder = 'Empty', ...handlers }: AutoPro
     <textarea
       ref={(el) => {
         ref.current = el;
-        register(id, el);
+        register(id, field, el);
       }}
       value={value}
       rows={1}
       spellCheck={false}
-      className="ol-text"
+      className={className}
       placeholder={placeholder}
       {...handlers}
     />

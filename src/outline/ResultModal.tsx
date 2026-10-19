@@ -3,7 +3,7 @@ import { FileGallery } from '../RunFiles';
 import { renderMarkdown } from '../lib/markdown';
 import { displayToRaw, toDisplay } from '../lib/mentions';
 import { usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
-import { actions, firstLine, getState, titleMap, useOutline } from '../store';
+import { actions, getState, titleMap, useOutline } from '../store';
 import { PYTHON_CAPTION, type Bullet } from '../types';
 import { NodeSettings } from '../NodeSettings';
 import { JsonChip, KindChip } from '../mindmap/BulletNode';
@@ -76,7 +76,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
   const status = getState().runStatus[bullet.id];
   const failure = getState().runFailures[bullet.id];
   const files = getState().files[bullet.id];
-  const title = toDisplay(firstLine(bullet.text), titles) || (bullet.kind === 'python' ? 'Python' : 'Untitled');
+  const title = titles[bullet.id] || 'Untitled';
   // Under the answer column's heading, where the live browser and the app an
   // agent served are looked for — see `AgentLinks`.
   const links =
@@ -95,9 +95,18 @@ export function ResultModal({ bullet, prompt, result }: Props) {
         {...drop.handlers}
       >
         <div className="res-modal__head">
-          <h2 className="res-modal__title" title={title}>
-            {title}
-          </h2>
+          {/* The bullet's name, edited in place — the same title as the outline's top line. */}
+          <input
+            className="res-modal__title"
+            value={bullet.title}
+            placeholder={title}
+            aria-label="Title"
+            spellCheck={false}
+            onChange={(e) => actions.setTitle(bullet.id, e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
+          />
           <KindChip kind={bullet.kind} mcpServer={bullet.mcpServer} test={getState().tests[bullet.id]} />
           {bullet.jsonOutput && <JsonChip />}
           <button
