@@ -15,7 +15,7 @@ const VIEW: Row[] = [
 
 const EDITING: Row[] = [
   { keys: 'Enter', desc: 'New bullet below' },
-  { keys: 'Shift + Enter', desc: 'New line inside this bullet' },
+  { keys: 'Shift + Enter', desc: 'New parent above this bullet (or above every selected bullet)' },
   { keys: 'Tab / Shift + Tab', desc: 'Indent / outdent (nest under, or lift out of, a bullet)' },
   { keys: 'Alt + Shift + ↑ / ↓', desc: 'Reorder the bullet among its siblings (Workflowy-style)' },
   { keys: '↑ / ↓', desc: 'Move the caret to the previous / next bullet' },

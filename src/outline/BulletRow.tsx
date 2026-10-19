@@ -19,6 +19,7 @@ import { describeVar, usePromptVarMap, type PromptVarMap } from '../lib/promptda
 import { renderInlineMarkdown, renderMarkdown } from '../lib/markdown';
 import { deleteFile, fileLink, type ModelRunStatus } from '../api';
 import { INDENT } from './dragDrop';
+import { useFileDrop } from './fileDrop';
 import { caretAtStart, caretOnFirstLine, caretOnLastLine } from '../lib/caret';
 
 /**
@@ -210,7 +211,14 @@ export function BulletRow({
       }
     }
 
-    // ---- Enter makes the next bullet; Shift+Enter is a newline ----
+    // ---- Shift+Enter slots a new parent in above this bullet ----
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault();
+      actions.addParent(id);
+      return;
+    }
+
+    // ---- Enter makes the next bullet ----
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       // At the very start of a bullet that has something in it, the new bullet
@@ -314,11 +322,13 @@ export function BulletRow({
   // editor still mounts (focus and arrow-key navigation run through it), it
   // just refuses input and reads out what the bullet does instead.
   const isPython = bullet.kind === 'python';
+  const drop = useFileDrop(id);
 
   return (
     <div
-      className={`ol-row ${bullet.kind !== 'prompt' ? `ol-row--${bullet.kind}` : ''} ${dragging ? 'ol-row--dragging' : ''} ${inBlock ? 'ol-row--block' : ''}`}
+      className={`ol-row ${bullet.kind !== 'prompt' ? `ol-row--${bullet.kind}` : ''} ${dragging ? 'ol-row--dragging' : ''} ${inBlock ? 'ol-row--block' : ''} ${drop.over ? 'ol-row--filedrop' : ''}`}
       data-row={id}
+      {...drop.handlers}
       style={{ marginLeft: depth * INDENT }}
       onMouseMove={onMouseMove}
       onMouseLeave={() => setTip(null)}
@@ -381,44 +391,7 @@ export function BulletRow({
             {editing && ac && <Dropdown ac={ac} onPick={accept} />}
           </div>
 
-          {bullet.files.length > 0 && (
-            <ul className="ol-files">
-              {bullet.files.map((f) => (
-                <li className="ol-file" key={f.key}>
-                  <button
-                    className="ol-file__name"
-                    title={`Download ${f.name}`}
-                    // The row hands clicks to the editor; this one is ours.
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={async () => {
-                      try {
-                        // Signed on demand and short-lived, so the link can't
-                        // be kept or shared for long.
-                        window.location.href = await fileLink(f);
-                      } catch (err) {
-                        actions.setRunResult({}, [
-                          err instanceof Error ? err.message : String(err),
-                        ]);
-                      }
-                    }}
-                  >
-                    📎 {f.name}
-                  </button>
-                  <button
-                    className="ol-file__x"
-                    title="Remove this attachment"
-                    aria-label={`Remove ${f.name}`}
-                    onClick={() => {
-                      actions.detachFile(id, f.key);
-                      void deleteFile(f.key);
-                    }}
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+          <Attachments bullet={bullet} />
         </div>
       </div>
 
@@ -471,6 +444,49 @@ export function BulletRow({
         )}
       </div>
     </div>
+  );
+}
+
+/** A bullet's attachments: click to download, × to remove. */
+export function Attachments({ bullet }: { bullet: Bullet }) {
+  if (bullet.files.length === 0) return null;
+  return (
+    <ul className="ol-files">
+      {bullet.files.map((f) => (
+        <li className="ol-file" key={f.key}>
+          <button
+            className="ol-file__name"
+            title={`Download ${f.name}`}
+            // The row hands clicks to the editor; this one is ours.
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={async () => {
+              try {
+                // Signed on demand and short-lived, so the link can't
+                // be kept or shared for long.
+                window.location.href = await fileLink(f);
+              } catch (err) {
+                actions.setRunResult({}, [
+                  err instanceof Error ? err.message : String(err),
+                ]);
+              }
+            }}
+          >
+            📎 {f.name}
+          </button>
+          <button
+            className="ol-file__x"
+            title="Remove this attachment"
+            aria-label={`Remove ${f.name}`}
+            onClick={() => {
+              actions.detachFile(bullet.id, f.key);
+              void deleteFile(f.key);
+            }}
+          >
+            ×
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -1205,6 +1205,22 @@ body,
 
 /* ----------------------------------------------------------- attachments */
 
+/* Files dragged in from the desktop hover a row or the modal: drop to attach. */
+.ol-row--filedrop {
+  border-radius: 6px;
+  background: var(--accent-soft);
+  outline: 2px dashed var(--accent);
+}
+
+.res-modal__panel--filedrop {
+  outline: 3px dashed var(--accent);
+  outline-offset: -6px;
+}
+
+.res-left .ol-files {
+  margin: 8px 12px;
+}
+
 .ol-files {
   display: flex;
   flex-wrap: wrap;

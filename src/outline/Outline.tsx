@@ -69,6 +69,9 @@ export function Outline() {
       } else if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault();
         actions.deleteBullets(ids);
+      } else if (e.key === 'Enter' && e.shiftKey) {
+        e.preventDefault();
+        actions.addParents(ids);
       } else if (e.key === 'Tab') {
         e.preventDefault();
         actions.shiftBullets(ids, e.shiftKey ? -1 : 1);

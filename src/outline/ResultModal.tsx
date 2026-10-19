@@ -8,6 +8,8 @@ import { PYTHON_CAPTION, type Bullet } from '../types';
 import { NodeSettings } from '../NodeSettings';
 import { JsonChip, KindChip } from '../mindmap/BulletNode';
 import { AgentLinks, agentLinks } from '../AgentLinks';
+import { Attachments } from './BulletRow';
+import { useFileDrop } from './fileDrop';
 
 interface Props {
   bullet: Bullet;
@@ -61,6 +63,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  const drop = useFileDrop(bullet.id);
   const [split, startDrag, resetSplit] = useSplit();
   const cols = useRef<HTMLDivElement | null>(null);
   const [showInput, setShowInput] = useState(false);
@@ -86,7 +89,11 @@ export function ResultModal({ bullet, prompt, result }: Props) {
       role="dialog"
       aria-modal="true"
     >
-      <div className="res-modal__panel" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`res-modal__panel${drop.over ? ' res-modal__panel--filedrop' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+        {...drop.handlers}
+      >
         <div className="res-modal__head">
           <h2 className="res-modal__title" title={title}>
             {title}
@@ -136,6 +143,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
                 ) : (
                   <Editor bullet={bullet} titles={titles} />
                 )}
+                <Attachments bullet={bullet} />
               </>
             )}
             {full !== 'text' && (

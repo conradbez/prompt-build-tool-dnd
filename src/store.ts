@@ -806,16 +806,32 @@ export const actions = {
    * among its siblings and `id` becomes its one child. Focuses the new one.
    */
   addParent(id: string): string {
-    const b = state.bullets[id];
-    if (!b) return '';
+    return actions.addParents([id]);
+  },
+
+  /**
+   * `addParent` for a block: the new bullet takes the first selected bullet's
+   * place and every selected bullet (the topmost of them, in reading order)
+   * moves under it. Focuses the new one and clears the block.
+   */
+  addParents(ids: string[]): string {
+    const tops = topmost(state, ids);
+    if (tops.length === 0) return '';
+    const first = state.bullets[tops[0]];
     const next = clone(state);
-    const nb = makeBullet({ id: nanoid(), parentId: b.parentId, children: [id] });
-    const list = b.parentId ? next.bullets[b.parentId].children : next.rootIds;
-    setChildren(next, b.parentId, list.map((x) => (x === id ? nb.id : x)));
+    const nb = makeBullet({ id: nanoid(), parentId: first.parentId, children: tops });
+    // Lift the others out first so the first's position is still right.
+    for (const id of tops.slice(1)) {
+      const { list, parentId } = siblingsOf(next, id);
+      setChildren(next, parentId, list.filter((x) => x !== id));
+    }
+    const list = first.parentId ? next.bullets[first.parentId].children : next.rootIds;
+    setChildren(next, first.parentId, list.map((x) => (x === first.id ? nb.id : x)));
     next.bullets[nb.id] = nb;
-    next.bullets[id] = { ...b, parentId: nb.id };
+    for (const id of tops) next.bullets[id] = { ...next.bullets[id], parentId: nb.id };
     next.focus = { id: nb.id, caret: 'end' };
     next.selectedId = nb.id;
+    next.blockSel = null;
     emit(next);
     return nb.id;
   },

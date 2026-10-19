@@ -144,6 +144,12 @@ export function BulletMenu({ bullet, shortcuts = false }: Props) {
             </li>
           )}
           <li>
+            <button role="menuitem" onClick={() => run(() => focusNew(actions.addParent(id)))}>
+              Add parent
+              {key('addParent')}
+            </button>
+          </li>
+          <li>
             <button role="menuitem" onClick={() => run(() => actions.indent(id))}>
               Indent
               {key('indent')}
