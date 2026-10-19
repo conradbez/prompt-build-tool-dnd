@@ -1891,7 +1891,7 @@ wheels = [
 
 [[package]]
 name = "promptmap"
-version = "0.5.14"
+version = "0.5.15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1902,9 +1902,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/02/958bc0f7b7f003416e1704b71165bddb7258cc1cac7cc54660c44454f047/promptmap-0.5.14.tar.gz", hash = "sha256:6f911a60fbdc52dfe9634c12b16f6e43cf7222414bbf7d62ef00d2a5ff7d241c", size = 199798, upload-time = "2026-10-19T09:07:28.859Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/ed/f077293caf0918d7ff2a27fd4a4b206d95cccbc1ddc7b94f9225ae9ec942/promptmap-0.5.15.tar.gz", hash = "sha256:4da169912a544f04f02954f884d8beb8f36c723b45bfad83fd39d5616609c210", size = 200450, upload-time = "2026-10-19T10:00:38.906Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/34/b4/a79dd48321c7ac6191a667f2152f6e4b3869ddb54662fc8cf46df16b674e/promptmap-0.5.14-py3-none-any.whl", hash = "sha256:4a8c0c5c7f51acf6aea23dc4795075e5477e84c312da87f2e88e22f3b902c05a", size = 181860, upload-time = "2026-10-19T09:07:27.098Z" },
+    { url = "https://files.pythonhosted.org/packages/14/be/9136b1bcc9b4ae7754db1693721c2c26b76d496958da24a13f639e35ea3c/promptmap-0.5.15-py3-none-any.whl", hash = "sha256:c4bea5e7db353645049da43cd7916b4866fbc9fe8a53a2ee668b79278200a9a1", size = 182085, upload-time = "2026-10-19T10:00:37.209Z" },
 ]
 
 [package.optional-dependencies]
@@ -2965,7 +2965,7 @@ requires-dist = [
     { name = "google-genai", specifier = ">=1.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "openai", specifier = ">=1.40" },
-    { name = "promptmap", extras = ["extras"], specifier = ">=0.5.14" },
+    { name = "promptmap", extras = ["extras"], specifier = ">=0.5.15" },
     { name = "pydantic", specifier = ">=2" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
