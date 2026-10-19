@@ -88,8 +88,8 @@ def warnings(nodes: list["Node"]) -> list[str]:
         )
     if any(n.kind == "search" for n in nodes):
         out.append(
-            "Search bullets call `do_RAG` in rag.py, which uses the Brave Search API: "
-            "set BRAVE_API_KEY before running, or swap `do_RAG` for any search you like."
+            "Search bullets call `rag_brave_search` from promptmap-extra-model-kinds "
+            '(pip install "promptmap[extras]"): set BRAVE_API_KEY before running.'
         )
     return out
 
@@ -195,65 +195,8 @@ def _llm_call(provider: str) -> str:
     )
 
 
-# Search bullets render `return_list_RAG_results(query)`, which promptmap answers
-# with `do_RAG` — from rag.py beside map/ in a project, or passed as `rag_call`
-# in a script. The same search as `search.py`, standing on its own.
-_RAG_SETUP = """\
-Web search for search bullets, via the Brave Search API.
-
-Get it working:
-
-  1. Get an API key at https://brave.com/search/api/ (there is a free tier).
-  2. export BRAVE_API_KEY=...
-
-Any other search works too: do_RAG just has to take the query and return a
-list of strings."""
-
-_RAG_CODE = """\
-import json
-import os
-import re
-import urllib.parse
-import urllib.request
-
-BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
-MAX_RESULTS = 8
-# The `[name]` / `[/name]` lines wrap_refs puts around each ref() — noise in a query.
-_REF_TAG = re.compile(r"^\\[/?[\\w-]+\\]$", re.M)
-# Brave marks the matched words in a snippet with <strong>.
-_HTML_TAG = re.compile(r"</?\\w+>")
-
-
-def do_RAG(query):
-    \"\"\"The top web results for *query*, one title / url / snippet block each.\"\"\"
-    query = " ".join(_REF_TAG.sub("", query).split())
-    if not query:
-        return ["[Search skipped: the query was empty.]"]
-    params = urllib.parse.urlencode({"q": query[:400], "count": MAX_RESULTS})
-    req = urllib.request.Request(
-        f"{BRAVE_URL}?{params}",
-        headers={"Accept": "application/json", "X-Subscription-Token": os.environ["BRAVE_API_KEY"]},
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        results = json.load(resp).get("web", {}).get("results", [])[:MAX_RESULTS]
-    if not results:
-        return [f"[No web results for: {query}]"]
-    return [
-        "\\n".join(
-            filter(None, [r.get("title", ""), r.get("url", ""), _HTML_TAG.sub("", r.get("description", ""))])
-        )
-        for r in results
-    ]
-"""
-
-
 def _searches(models: dict[str, str]) -> bool:
-    return any("return_list_RAG_results" in src for src in models.values())
-
-
-def _rag_py() -> str:
-    """rag.py for a project: the setup steps on top, then `do_RAG`."""
-    return f'\"\"\"\n{_RAG_SETUP}\n\"\"\"\n\n{_RAG_CODE}'
+    return any("rag_brave_search" in src for src in models.values())
 
 
 def script(
@@ -268,14 +211,16 @@ def script(
     """One runnable file: the whole pipeline, `promptmap.async_run` over it, then
     the tests through `promptmap.tester.execute_tests`. That is after the whole
     run rather than as gates, since `async_run` does not run tests."""
+    searches = _searches(models)
     head = _header(
         [
             f"{name} — exported from the mind map, as a promptmap pipeline.",
             "",
             "Run it:",
             "",
-            "  pip install promptmap",
+            "  pip install " + ('"promptmap[extras]"' if searches else "promptmap"),
             f"  export {_ENV_KEY.get(provider, 'GEMINI_API_KEY')}=...",
+            *(["  export BRAVE_API_KEY=...   # for the search bullets"] if searches else []),
             "  python " + filename(name, "script"),
             "",
             "Each bullet is one promptmap model. A bullet's children and its @ references",
@@ -296,8 +241,6 @@ def script(
     )
     entries = "\n".join(f"    {n!r}: {_lit(src)},\n" for n, src in models.items())
     test_entries = "\n".join(f"    {n!r}: {_lit(src)},\n" for n, src in tests.items())
-    searches = _searches(models)
-    rag = f"{_header(_RAG_SETUP.splitlines())}\n\n{_RAG_CODE}\n\n" if searches else ""
     return (
         f"{head}\n\n"
         "import asyncio\n"
@@ -315,13 +258,11 @@ def script(
         f"PROMPTDATA = {promptdata!r}\n\n"
         f"GLOBAL_INSTRUCTION = {_lit(global_instruction) if global_instruction else 'None'}\n\n\n"
         f"{_llm_call(provider)}\n\n"
-        f"{rag}"
         "async def main():\n"
         "    store = SQLiteStorageBackend()\n"
         "    outputs = await promptmap.async_run(\n"
         "        models_from_dict=MODELS,\n"
         "        llm_call=llm_call,\n"
-        f"{'        rag_call=do_RAG,\n' if searches else ''}"
         "        promptdata=PROMPTDATA or None,\n"
         "        global_instruction=GLOBAL_INSTRUCTION,\n"
         "        wrap_refs=True,\n"
@@ -371,11 +312,10 @@ def project(
             "",
             "Run it:",
             "",
-            "  pip install promptmap uvicorn",
+            "  pip install " + ('"promptmap[extras]"' if searches else "promptmap") + " uvicorn",
             f"  export {_ENV_KEY.get(provider, 'GEMINI_API_KEY')}=...",
-            "  python " + filename(name, "project") + "   # writes ./map and ./client.py"
-            + (" and ./rag.py" if searches else ""),
-            *(["  export BRAVE_API_KEY=...   # for the search bullets — see rag.py"] if searches else []),
+            "  python " + filename(name, "project") + "   # writes ./map and ./client.py",
+            *(["  export BRAVE_API_KEY=...   # for the search bullets"] if searches else []),
             "  promptmap serve --map-dir map",
             "",
             "`promptmap serve` then answers POST /run with",
@@ -419,8 +359,7 @@ def project(
         "}\n\n"
         f"PROMPTDATA = {promptdata!r}  # promptmap run --promptdata key=value, or POST /run\n\n"
         f"GLOBAL_INSTRUCTION = {_lit(global_instruction) if global_instruction else '\"\"'}\n\n"
-        f"CLIENT_PY = {_lit(_llm_call(provider))}\n\n"
-        f"RAG_PY = {_lit(_rag_py()) if searches else '\"\"'}  # backs the search bullets\n\n\n"
+        f"CLIENT_PY = {_lit(_llm_call(provider))}\n\n\n"
         "def main():\n"
         "    MODELS_DIR.mkdir(exist_ok=True)\n"
         "    for model, source in MODELS.items():\n"
@@ -428,8 +367,6 @@ def project(
         "    for test, source in TESTS.items():\n"
         '        (MODELS_DIR / f"{test}.testprompt").write_text(source, encoding="utf-8")\n'
         '    (ROOT / "client.py").write_text("import os\\n\\n\\n" + CLIENT_PY, encoding="utf-8")\n'
-        "    if RAG_PY:\n"
-        '        (ROOT / "rag.py").write_text(RAG_PY, encoding="utf-8")\n'
         "    if GLOBAL_INSTRUCTION:\n"
         f"        {global_block}"
         '    print(f"Wrote {len(MODELS)} prompts and {len(TESTS)} tests to {MODELS_DIR}, and client.py.")\n'

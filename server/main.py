@@ -42,7 +42,6 @@ import files as attachments
 # promptmap finds these kinds by entry point; imported here for their helpers.
 from promptmap_extra_model_kinds import agent37_exec, agent_exec, modal_exec
 import accounts
-import search
 from llm import make_llm_call
 from promptmap import model_types as _promptmap_kinds
 
@@ -82,10 +81,10 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 TEMPLATE_CONFIG_LINE = '{{ config(model_type="template", global_instruction=False) }}'
 
 # A search bullet is a template whose rendered text — refs and variables filled
-# in — is captured as the query and swapped for the web results promptmap's
-# `rag_call` (`search.do_search`) returns for it.
+# in — is captured as the query and swapped for the web results
+# `rag_brave_search` (from promptmap-extra-model-kinds) returns for it.
 SEARCH_OPEN = "{% set query %}"
-SEARCH_CLOSE = '{% endset %}{{ return_list_RAG_results(query) | join("\\n\\n") }}'
+SEARCH_CLOSE = '{% endset %}{{ rag_brave_search(query) | join("\\n\\n") }}'
 
 # JSON enforcement, also promptmap's own: it parses the answer (stripping ```json
 # fences), fails the model if it will not parse, and hands the *parsed* value
@@ -1318,7 +1317,6 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
         outputs = await promptmap.async_run(
             models_from_dict=models,
             llm_call=llm,
-            rag_call=search.do_search,
             promptfiles=promptfiles or None,
             promptdata=promptdata or None,
             # `ref()` is refused inside a global instruction — promptmap says as much
