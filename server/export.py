@@ -4,9 +4,14 @@ Turn a bullet graph into a promptmap project you can run without this app.
 Two shapes, both plain Python files:
 
 * ``script``  — one file: the models as a dict, a small ``llm_call``, and
-  ``promptmap.async_run``. Run it and it prints every bullet's answer.
+  ``promptmap.async_run``. Run it and it prints every bullet's answer, then
+  judges the test bullets with promptmap's own tester.
 * ``project`` — one file that *writes* a promptmap project: ``map/<name>.prompt``
-  per bullet plus a ``client.py``, which is the layout ``promptmap serve`` expects.
+  per bullet, ``map/<name>.testprompt`` per test bullet, plus a ``client.py`` —
+  the layout ``promptmap serve`` / ``run`` / ``test`` expect.
+
+Test bullets leave as promptmap *tests*, not models. In a project they are
+gates, so ``promptmap run`` stops when one fails, which this app never does.
 
 The sources come from `main._build_source`, the same function the runner uses,
 so an export is the graph as it actually runs rather than a second rendering of
@@ -173,30 +178,30 @@ def _llm_call(provider: str) -> str:
         "        # A template bullet is a passthrough: the rendered prompt *is*\n"
         "        # the output, so it is never sent anywhere.\n"
         "        return prompt.strip()\n"
-        '    if cfg.get("judge") == "classifier":\n'
-        "        # A classifier-judged test: P(yes) for the question above `---`.\n"
-        "        # Reads TYPESAFE_API_KEY / TYPESAFE_BASE_URL / TYPESAFE_DEFAULT_MODEL.\n"
-        "        import json\n\n        import promptmap\n"
-        "        from promptmap.classifier import split_question\n\n"
-        "        question, state = split_question(prompt)\n"
-        "        p = promptmap.systemone_classifier()(state, question)\n"
-        '        return json.dumps({"pass": p >= float(cfg.get("threshold", 0.5)), "p_yes": p})\n'
         "    if not KEY:\n"
         f'        raise RuntimeError("Set {key_env} before running this.")\n'
         '    wants_json = cfg.get("output_format") == "json"\n\n'
-        f"{body}\n"
+        f"{body}\n\n\n"
+        "def classify_call(state, question):\n"
+        '    """P(yes) for a classifier-judged test. promptmap calls this, not llm_call.\n\n'
+        '    Reads TYPESAFE_API_KEY / TYPESAFE_BASE_URL / TYPESAFE_DEFAULT_MODEL."""\n'
+        "    import promptmap\n\n"
+        "    return promptmap.systemone_classifier()(state, question)\n"
     )
 
 
 def script(
     name: str,
     models: dict[str, str],
+    tests: dict[str, str],
     provider: str,
     global_instruction: str,
     promptdata: dict[str, str],
     notes: list[str],
 ) -> str:
-    """One runnable file: the whole pipeline, and `promptmap.async_run` over it."""
+    """One runnable file: the whole pipeline, `promptmap.async_run` over it, then
+    the tests through `promptmap.tester.execute_tests`. That is after the whole
+    run rather than as gates, since `async_run` does not run tests."""
     head = _header(
         [
             f"{name} — exported from the mind map, as a promptmap pipeline.",
@@ -211,39 +216,73 @@ def script(
             "became {{ ref('...') }} dependencies, so promptmap works out the order and runs",
             "independent branches in parallel — the graph is in MODELS, not in the",
             "order the dict happens to be written in.",
+            *(
+                [
+                    "",
+                    "Test bullets are promptmap tests (TESTS), judged once every model has",
+                    "run. Each verdict is printed, and a failing test exits non-zero.",
+                ]
+                if tests
+                else []
+            ),
             *(["", *notes] if notes else []),
         ]
     )
     entries = "\n".join(f"    {n!r}: {_lit(src)},\n" for n, src in models.items())
+    test_entries = "\n".join(f"    {n!r}: {_lit(src)},\n" for n, src in tests.items())
     return (
         f"{head}\n\n"
         "import asyncio\n"
-        "import os\n\n"
-        "import promptmap\n\n"
+        "import os\n"
+        "import sys\n\n"
+        "import promptmap\n"
+        "from promptmap.storage.sqlite import SQLiteStorageBackend\n"
+        "from promptmap.tester import execute_tests\n\n"
         "MODELS = {\n"
         f"{entries}"
+        "}\n\n"
+        "TESTS = {\n"
+        f"{test_entries}"
         "}\n\n"
         f"PROMPTDATA = {promptdata!r}\n\n"
         f"GLOBAL_INSTRUCTION = {_lit(global_instruction) if global_instruction else 'None'}\n\n\n"
         f"{_llm_call(provider)}\n\n"
         "async def main():\n"
+        "    store = SQLiteStorageBackend()\n"
         "    outputs = await promptmap.async_run(\n"
         "        models_from_dict=MODELS,\n"
         "        llm_call=llm_call,\n"
         "        promptdata=PROMPTDATA or None,\n"
         "        global_instruction=GLOBAL_INSTRUCTION,\n"
         "        wrap_refs=True,\n"
+        "        storage_backend=store,\n"
         "    )\n"
         "    for model, value in outputs.items():\n"
-        '        print(f"\\n=== {model} ===\\n{value}")\n\n\n'
+        '        print(f"\\n=== {model} ===\\n{value}")\n'
+        "    if not TESTS:\n"
+        "        return 0\n"
+        "    results = execute_tests(\n"
+        '        run_id=store.get_latest_runs(1)[0]["run_id"],\n'
+        "        tests=TESTS,\n"
+        "        model_outputs=outputs,\n"
+        "        storage_backend=store,\n"
+        "        llm_call=llm_call,\n"
+        "        classify_call=classify_call,\n"
+        "        promptdata=PROMPTDATA or None,\n"
+        "    )\n"
+        '    print("\\n=== tests ===")\n'
+        "    for r in results:\n"
+        '        print(f"{r.status.upper():5}  {r.test_name}  {r.error or r.llm_output}")\n'
+        '    return 0 if all(r.status == "pass" for r in results) else 1\n\n\n'
         'if __name__ == "__main__":\n'
-        "    asyncio.run(main())\n"
+        "    sys.exit(asyncio.run(main()))\n"
     )
 
 
 def project(
     name: str,
     models: dict[str, str],
+    tests: dict[str, str],
     provider: str,
     global_instruction: str,
     promptdata: dict[str, str],
@@ -269,6 +308,17 @@ def project(
             "`promptmap serve` then answers POST /run with",
             '  {"promptdata": {...}, "select": ["model_name"]}',
             "and returns every model's output. `promptmap run` works on the same folder.",
+            *(
+                [
+                    "",
+                    "Test bullets are written as map/*.testprompt. `promptmap run` treats",
+                    "each as a gate: it runs right after the models it reads, and a failing",
+                    "one stops the run. `promptmap test` runs them on their own. Add",
+                    "{{ config(gate=False) }} to a test to keep it out of `run`.",
+                ]
+                if tests
+                else []
+            ),
             "",
             "The prompts are ordinary files after this — edit them there, not here;",
             "this script overwrites them each time it runs.",
@@ -276,6 +326,7 @@ def project(
         ]
     )
     entries = "\n".join(f"    {n!r}: {_lit(src)},\n" for n, src in models.items())
+    test_entries = "\n".join(f"    {n!r}: {_lit(src)},\n" for n, src in tests.items())
     global_block = (
         f"(ROOT / \"global.prompt\").write_text(GLOBAL_INSTRUCTION, encoding=\"utf-8\")\n"
         if global_instruction
@@ -290,6 +341,9 @@ def project(
         "MODELS = {\n"
         f"{entries}"
         "}\n\n"
+        "TESTS = {\n"
+        f"{test_entries}"
+        "}\n\n"
         f"PROMPTDATA = {promptdata!r}  # promptmap run --promptdata key=value, or POST /run\n\n"
         f"GLOBAL_INSTRUCTION = {_lit(global_instruction) if global_instruction else '\"\"'}\n\n"
         f"CLIENT_PY = {_lit(_llm_call(provider))}\n\n\n"
@@ -297,10 +351,12 @@ def project(
         "    MODELS_DIR.mkdir(exist_ok=True)\n"
         "    for model, source in MODELS.items():\n"
         '        (MODELS_DIR / f"{model}.prompt").write_text(source, encoding="utf-8")\n'
+        "    for test, source in TESTS.items():\n"
+        '        (MODELS_DIR / f"{test}.testprompt").write_text(source, encoding="utf-8")\n'
         '    (ROOT / "client.py").write_text("import os\\n\\n\\n" + CLIENT_PY, encoding="utf-8")\n'
         "    if GLOBAL_INSTRUCTION:\n"
         f"        {global_block}"
-        '    print(f"Wrote {len(MODELS)} prompts to {MODELS_DIR} and client.py beside them.")\n'
+        '    print(f"Wrote {len(MODELS)} prompts and {len(TESTS)} tests to {MODELS_DIR}, and client.py.")\n'
         '    print("Now run:  promptmap serve --map-dir map")\n\n\n'
         'if __name__ == "__main__":\n'
         "    main()\n"

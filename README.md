@@ -183,7 +183,7 @@ Two verbs, and everything else is a choice of *where*:
 | | |
 |---|---|
 | **Save** | keeps this map in this browser under the name in the dropdown — and **opens** it: from then on your edits go into it as you make them |
-| **Save ▴** | **Export to promptmap** (a `.py` running `promptmap.async_run` over every bullet) · **Export to server** (a `.py` that writes `map/*.prompt` + `client.py`, the layout `promptmap serve` expects) · **Copy to clipboard** as JSON |
+| **Save ▴** | **Export to promptmap** (a `.py` running `promptmap.async_run` over every bullet, then judging the test bullets as promptmap tests) · **Export to server** (a `.py` that writes `map/*.prompt`, test bullets as `map/*.testprompt` gates, and `client.py`: the layout `promptmap serve` expects) · **Copy to clipboard** as JSON |
 | **Load** | puts the named save back on screen |
 | **Load ▴** | JSON on the clipboard |
 

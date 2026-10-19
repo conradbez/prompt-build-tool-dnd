@@ -105,6 +105,16 @@ TEST_INSTRUCTION = (
 )
 TEST_MATERIAL = "Material under test:"
 
+# The same check, exported as a promptmap test (`*.testprompt`) rather than a
+# model: promptmap reads the verdict itself, and only as `{"results": "pass"}`.
+# No config line — promptmap never gives a test the global instruction, and a
+# test's `llm_call` is handed no config to ask for JSON mode with.
+NATIVE_TEST_INSTRUCTION = (
+    "You are checking a test. Decide whether the assertion above holds for the "
+    "material below it. Respond with JSON only — no prose, no code fences: "
+    '{"results": "pass" or "fail", "reason": "one sentence saying why"}.'
+)
+
 # A classifier-judged test skips the LLM: a classifier (TypeSafe's Jev, or a
 # local Ollaya) answers the assertion as a yes/no question with P(yes). promptmap's
 # own classifier-test shape — question above a `---` line, material below — is
@@ -570,6 +580,23 @@ def _build_source(
     if keys:
         source = _promptfiles_line(keys) + "\n" + source
     return source
+
+
+def _native_test_source(
+    node: Node, child_ids: list[str], id_to_slug: dict[str, str], var_names: set[str]
+) -> str:
+    """A test bullet as a promptmap test (`*.testprompt`), for an export.
+
+    The same assertion and material as `_build_source` gives it, in the shape
+    promptmap's own tester judges: `{"results": "pass"}` from an LLM, or P(yes)
+    from the run's `classify_call` for a classifier-judged one.
+    """
+    text = _escape_jinja(_test_assertion(_as_promptdata(node.text.strip(), var_names)))
+    ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in _deps(node, child_ids, id_to_slug)]
+    if _is_classifier(node):
+        config = '{{ config(judge="classifier", threshold="%s") }}' % _threshold(node)
+        return "\n".join([config, text, CLASSIFIER_SEPARATOR, *ref_lines])
+    return "\n".join([text, NATIVE_TEST_INSTRUCTION, TEST_MATERIAL, *ref_lines])
 
 
 def _children(nodes: list[Node]) -> dict[str, list[str]]:
@@ -1052,7 +1079,20 @@ def export(req: ExportRequest) -> ExportResponse:
     # Readable names, not `n_<id>`: these become file names and `ref('…')`
     # calls that a person is going to read and edit.
     id_to_name = exporter.model_names(nodes)
-    models = _models(nodes, _children(nodes), id_to_name, req.sessionId, promptdata)
+    children = _children(nodes)
+    # Test bullets leave as promptmap tests, not models: nothing depends on a
+    # test (see `_feeding`), so taking them out of the models breaks no ref().
+    feeds = _feeding(nodes, id_to_name)
+    tests = {
+        id_to_name[n.id]: _native_test_source(n, children[n.id], feeds, set(promptdata))
+        for n in nodes
+        if n.kind == "test"
+    }
+    models = {
+        name: src
+        for name, src in _models(nodes, children, id_to_name, req.sessionId, promptdata).items()
+        if name not in tests
+    }
 
     notes = exporter.warnings(nodes)
     build = exporter.project if req.target == "project" else exporter.script
@@ -1061,6 +1101,7 @@ def export(req: ExportRequest) -> ExportResponse:
         text=build(
             req.name,
             models,
+            tests,
             req.provider,
             req.globalInstruction.strip(),
             promptdata,

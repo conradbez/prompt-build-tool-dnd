@@ -141,10 +141,21 @@ Same body as `/run` plus a `target`:
 ```
 
 * **`script`** — one file: the models as a dict, a small `llm_call`, and
-  `promptmap.async_run` over them.
-* **`project`** — one file that *writes* `map/<name>.prompt` per bullet plus
-  a `client.py`, which is the layout `promptmap serve` expects. `promptmap serve` cannot be
-  handed a dict, so the export has to be the thing that lays the project out.
+  `promptmap.async_run` over them, then the test bullets as a `TESTS` dict
+  judged by `promptmap.tester.execute_tests`. Tests run after the whole
+  pipeline (`async_run` has no gates), and a failing one makes the script exit 1.
+* **`project`** — one file that *writes* `map/<name>.prompt` per bullet,
+  `map/<name>.testprompt` per test bullet, and a `client.py` with `llm_call`
+  and `classify_call`. That is the layout `promptmap serve` / `run` / `test` expect.
+  `promptmap serve` cannot be handed a dict, so the export has to be the thing
+  that lays the project out.
+
+Test bullets leave as promptmap **tests**, not models (`_native_test_source`):
+an LLM judge answers `{"results": "pass"}`, which is promptmap's verdict format,
+and a classifier judge gets `config(judge="classifier", threshold=…)`. In a
+project every test is a **gate**: `promptmap run` judges it right after the models
+it reads and stops the run if it fails. The app never stops a run on a failing
+test, so this is the one place an export behaves differently.
 
 The sources come from `_build_source`, the same function a run uses, so an
 export is the graph **as it actually runs** rather than a second rendering that
