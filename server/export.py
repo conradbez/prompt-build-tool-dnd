@@ -232,6 +232,7 @@ def script(
         "        llm_call=llm_call,\n"
         "        promptdata=PROMPTDATA or None,\n"
         "        global_instruction=GLOBAL_INSTRUCTION,\n"
+        "        wrap_refs=True,\n"
         "    )\n"
         "    for model, value in outputs.items():\n"
         '        print(f"\\n=== {model} ===\\n{value}")\n\n\n'

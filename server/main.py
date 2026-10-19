@@ -1278,6 +1278,8 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             ) or None,
             select=[id_to_slug[i] for i in select] or None,
             verbose=False,
+            # Tag each `ref()` with its bullet's name so the LLM can tell inputs apart.
+            wrap_refs=True,
             on_model_start=on_start,
             on_model_done=on_done,
         )
