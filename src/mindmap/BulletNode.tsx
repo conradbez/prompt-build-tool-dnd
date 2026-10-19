@@ -222,6 +222,8 @@ export function KindChip({
   const [label, title] =
     kind === 'template'
       ? ['TPL', 'Not sent to the LLM — its text, with refs filled in, is its output']
+      : kind === 'search'
+        ? ['WEB', 'Its text, with refs filled in, is searched on the web — the results are its output']
       : kind === 'agent'
         ? [
             'AGENT',

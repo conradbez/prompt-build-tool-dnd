@@ -1804,6 +1804,12 @@ body,
   background: #d8ecfb;
 }
 
+/* A search reaches outside the map — teal, apart from the kinds that stay in it. */
+.tpl-chip--search {
+  color: #1f6b62;
+  background: #d9f2ee;
+}
+
 /* An agent works on its own for many steps — violet, apart from the kinds that
    make a single call. */
 .tpl-chip--agent {

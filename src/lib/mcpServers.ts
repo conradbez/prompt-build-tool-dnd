@@ -2,6 +2,9 @@
 export const KNOWN_MCP_SERVERS: { command: string; desc: string }[] = [
   { command: 'uvx --python 3.12 build123d-mcp@latest', desc: 'build123d CAD' },
   { command: 'npx -y @playwright/mcp@latest', desc: 'Playwright browser' },
+  // `mcp<2`: the package leaves mcp unpinned, and 2.x renamed the FastMCP it imports.
+  { command: "uvx --from office-powerpoint-mcp-server --with 'mcp<2' ppt_mcp_server", desc: 'PowerPoint decks (.pptx)' },
+  { command: 'uvx excel-mcp-server stdio', desc: 'Excel workbooks (.xlsx)' },
   { command: 'uvx mcp-server-fetch', desc: 'fetch web pages' },
   { command: 'uvx mcp-server-git', desc: 'git repositories' },
   { command: 'uvx mcp-server-time', desc: 'time and time zones' },

@@ -166,7 +166,7 @@ function loadDoc(): Doc | null {
 }
 
 function isKind(v: unknown): v is BulletKind {
-  return v === 'prompt' || v === 'template' || v === 'python' || v === 'agent' || v === 'test';
+  return v === 'prompt' || v === 'template' || v === 'search' || v === 'python' || v === 'agent' || v === 'test';
 }
 
 function isPos(v: unknown): v is { x: number; y: number } {

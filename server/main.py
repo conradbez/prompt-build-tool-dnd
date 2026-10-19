@@ -42,6 +42,7 @@ import files as attachments
 # promptmap finds these kinds by entry point; imported here for their helpers.
 from promptmap_extra_model_kinds import agent37_exec, agent_exec, modal_exec
 import accounts
+import search
 from llm import make_llm_call
 from promptmap import model_types as _promptmap_kinds
 
@@ -79,6 +80,12 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 # rendered prompt *is* its output, so a prepended instruction would show up as
 # text in the result instead of steering a model.
 TEMPLATE_CONFIG_LINE = '{{ config(model_type="template", global_instruction=False) }}'
+
+# A search bullet is a template whose rendered text — refs and variables filled
+# in — is captured as the query and swapped for the web results promptmap's
+# `rag_call` (`search.do_search`) returns for it.
+SEARCH_OPEN = "{% set query %}"
+SEARCH_CLOSE = '{% endset %}{{ return_list_RAG_results(query) | join("\\n\\n") }}'
 
 # JSON enforcement, also promptmap's own: it parses the answer (stripping ```json
 # fences), fails the model if it will not parse, and hands the *parsed* value
@@ -355,7 +362,7 @@ class Node(BaseModel):
     files: list[FileRef] = []
     parentId: Optional[str] = None
     refs: list[str] = []
-    # "prompt" | "template" | "python" | "agent" | "test" — see `_build_source`.
+    # "prompt" | "template" | "search" | "python" | "agent" | "test" — see `_build_source`.
     # Else treated as a prompt rather than rejected: a bullet is not worth a 422.
     kind: str = "prompt"
     # An agent bullet's MCP server: the command that starts it over stdio, e.g.
@@ -542,6 +549,8 @@ def _build_source(
     # sentence must not also be pasted underneath it.
     ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids if d not in inlined]
     source = "\n".join([prompt, *ref_lines]) if ref_lines else prompt
+    if node.kind == "search":
+        return "\n".join([TEMPLATE_CONFIG_LINE, SEARCH_OPEN + source + SEARCH_CLOSE])
     if node.jsonOutput:
         source = JSON_CONFIG_LINE + "\n" + source
     if node.kind == "template":
@@ -799,8 +808,8 @@ def _model_input(
     and what runs is the code extracted from its child.
 
     The global instruction sits on top, the way promptmap prepends it — but only for
-    the bullets that receive one, i.e. prompts. Templates and python bullets
-    opt out, so showing it there would be a lie about what ran. (promptmap treats an
+    the bullets that receive one, i.e. prompts. Templates, searches and python
+    bullets opt out, so showing it there would be a lie about what ran. (promptmap treats an
     instruction containing `{{ prompt }}` as a wrapper instead; this rebuild
     shows the plain prepend, which is what the settings box invites.)
     """
@@ -822,7 +831,7 @@ def _model_input(
     own = _json_body(node, text)
     parts = [results[d] for d in dep_ids if d in results and d not in inlined]
     body = "\n".join([own, *parts]) if parts else own
-    if global_instruction and node.kind != "template":
+    if global_instruction and node.kind not in ("template", "search"):
         return _fill_vars(global_instruction, promptdata or {}).rstrip("\n") + "\n\n" + body
     return body
 
@@ -1309,6 +1318,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
         outputs = await promptmap.async_run(
             models_from_dict=models,
             llm_call=llm,
+            rag_call=search.do_search,
             promptfiles=promptfiles or None,
             promptdata=promptdata or None,
             # `ref()` is refused inside a global instruction — promptmap says as much

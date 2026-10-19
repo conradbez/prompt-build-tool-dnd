@@ -19,7 +19,7 @@ import type { ModelRunStatus } from './api';
  *   an answer, and the node shows it: see `TestStatus`. A test's output never
  *   flows onward — it checks the graph from the side.
  */
-export type BulletKind = 'prompt' | 'template' | 'python' | 'agent' | 'test';
+export type BulletKind = 'prompt' | 'template' | 'search' | 'python' | 'agent' | 'test';
 
 /**
  * Where a test bullet stands after the latest run:

@@ -22,6 +22,11 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
     desc: 'Never sent to the LLM — its text, with every reference filled in, is the output.',
   },
   {
+    kind: 'search',
+    label: 'Search',
+    desc: 'Its text, with every reference filled in, is a web search query — the top results are the output.',
+  },
+  {
     kind: 'python',
     label: 'Python',
     desc: 'Takes no text of its own: runs the code its one child produced in a Modal sandbox, and whatever that prints is the output.',
