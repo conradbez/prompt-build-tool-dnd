@@ -21,7 +21,7 @@ without one overwrites whatever is there.
 
 Everything lives in one SQLite file: `DB_PATH`, else `app.db` in Railway's
 volume (`RAILWAY_VOLUME_MOUNT_PATH`, set when a volume is attached), else
-`server/data/app.db` for local runs. Without a volume on Railway the file is
+`/data/app.db` if `/data` exists, else `server/data/app.db` for local runs. Without a volume on Railway the file is
 lost on every deploy.
 
 Mail goes over JMAP to Fastmail, which is plain HTTPS: Railway blocks outbound
@@ -80,10 +80,21 @@ def _db_path() -> pathlib.Path:
         return pathlib.Path(os.environ["DB_PATH"])
     if os.environ.get("RAILWAY_VOLUME_MOUNT_PATH"):
         return pathlib.Path(os.environ["RAILWAY_VOLUME_MOUNT_PATH"]) / "app.db"
+    # A volume mounted at `/data` without Railway's variable (or another host).
+    if pathlib.Path("/data").is_dir():
+        return pathlib.Path("/data") / "app.db"
     return pathlib.Path(__file__).resolve().parent / "data" / "app.db"
 
 
 DB_PATH = _db_path()
+print(f"[accounts] database: {DB_PATH}", flush=True)
+if os.environ.get("RAILWAY_ENVIRONMENT") and not str(DB_PATH).startswith(
+    os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "/data"
+):
+    print(
+        "[accounts] WARNING: no Railway volume — sessions and maps are lost on every deploy.",
+        flush=True,
+    )
 _lock = threading.Lock()
 
 
