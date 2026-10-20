@@ -5,6 +5,7 @@ import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
 import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';
 import { SETTINGS_HINT } from './lib/shortcuts';
+import { showHint } from './lib/hint';
 import { setAgent37Key, useAgent37Key } from './lib/agent37Key';
 import { useAccount } from './lib/account';
 import { keepMine, takeTheirs, useSaveStatus } from './lib/saves';
@@ -198,7 +199,11 @@ export function Toolbar() {
           className={`tb__gear${settingsOpen ? ' tb__gear--on' : ''}${
             globalInstruction.trim() || written ? ' tb__gear--set' : ''
           }`}
-          onClick={() => (settingsOpen ? setSettingsOpen(false) : openSettings())}
+          onClick={() => {
+            if (settingsOpen) setSettingsOpen(false);
+            else openSettings();
+            showHint(SETTINGS_HINT, settingsOpen ? 'closes settings' : 'opens settings');
+          }}
           title={`Settings (${SETTINGS_HINT})`}
           aria-label="Settings"
           aria-expanded={settingsOpen}

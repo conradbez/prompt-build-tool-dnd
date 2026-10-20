@@ -6,6 +6,8 @@ import { Help } from './Help';
 import { ResultModal } from './outline/ResultModal';
 import { actions, useOutline } from './store';
 import { SWITCH_HINT } from './lib/shortcuts';
+import { showHint } from './lib/hint';
+import { ShortcutHint } from './ShortcutHint';
 
 type View = 'map' | 'outline';
 
@@ -45,6 +47,11 @@ export default function App() {
   const openBullet = open ? state.bullets[open] : undefined;
   const compact = useCompact();
   const toggle = useCallback(() => setFull((v) => (v === 'map' ? 'outline' : 'map')), []);
+  // A click on the swap control — the key would have done it too.
+  const clickToggle = () => {
+    toggle();
+    showHint(SWITCH_HINT, 'switches views');
+  };
 
   // Mod+\ swaps the views. The modifier keeps it out of the way of typing.
   useEffect(() => {
@@ -89,7 +96,7 @@ export default function App() {
 
       <div className="app__corner">
         {compact ? (
-          <button className="app__toggle" onClick={toggle} title={swapLabel} aria-label={swapLabel}>
+          <button className="app__toggle" onClick={clickToggle} title={swapLabel} aria-label={swapLabel}>
             ⇄
           </button>
         ) : (
@@ -101,7 +108,7 @@ export default function App() {
             tabIndex={0}
             title={swapLabel}
             aria-label={swapLabel}
-            onClick={toggle}
+            onClick={clickToggle}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
@@ -115,6 +122,8 @@ export default function App() {
       </div>
 
       <Help />
+
+      <ShortcutHint />
 
       {openBullet && (
         <ResultModal

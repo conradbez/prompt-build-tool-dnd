@@ -3,6 +3,7 @@ import type { Bullet } from '../types';
 import { actions, canTakeChild, getState } from '../store';
 import { filesEnabled, uploadFile } from '../api';
 import { ROW_KEYS, SETTINGS_HINT } from '../lib/shortcuts';
+import { showHint } from '../lib/hint';
 
 interface Props {
   bullet: Bullet;
@@ -70,9 +71,11 @@ export function BulletMenu({ bullet, shortcuts = false }: Props) {
     };
   }, [open]);
 
-  function run(fn: () => void) {
+  /** Run a menu item. `hint` names its row key, toasted where rows bind keys. */
+  function run(fn: () => void, hint?: [keys: string, desc: string]) {
     fn();
     setOpen(false);
+    if (hint && shortcuts) showHint(...hint);
   }
 
   function focusNew(newId: string) {
@@ -110,7 +113,10 @@ export function BulletMenu({ bullet, shortcuts = false }: Props) {
             <button
               role="menuitem"
               title="Node type, JSON output, and what that type needs — python packages, an agent's MCP server."
-              onClick={() => run(() => actions.openSettings(id))}
+              onClick={() => run(() => {
+                  actions.openSettings(id);
+                  showHint(SETTINGS_HINT, 'opens settings');
+                })}
             >
               Settings…
               {/* Bound app-wide (Toolbar), so shown in the map's menu too. */}
@@ -137,38 +143,38 @@ export function BulletMenu({ bullet, shortcuts = false }: Props) {
           )}
           {canTakeChild(getState(), bullet.parentId) && (
             <li>
-              <button role="menuitem" onClick={() => run(() => focusNew(actions.addSiblingAfter(id)))}>
+              <button role="menuitem" onClick={() => run(() => focusNew(actions.addSiblingAfter(id)), [ROW_KEYS.addBelow, 'adds a bullet below'])}>
                 Add bullet below
                 {key('addBelow')}
               </button>
             </li>
           )}
           <li>
-            <button role="menuitem" onClick={() => run(() => focusNew(actions.addParent(id)))}>
+            <button role="menuitem" onClick={() => run(() => focusNew(actions.addParent(id)), [ROW_KEYS.addParent, 'adds a parent'])}>
               Add parent
               {key('addParent')}
             </button>
           </li>
           <li>
-            <button role="menuitem" onClick={() => run(() => actions.indent(id))}>
+            <button role="menuitem" onClick={() => run(() => actions.indent(id), [ROW_KEYS.indent, 'indents'])}>
               Indent
               {key('indent')}
             </button>
           </li>
           <li>
-            <button role="menuitem" onClick={() => run(() => actions.outdent(id))}>
+            <button role="menuitem" onClick={() => run(() => actions.outdent(id), [ROW_KEYS.outdent, 'outdents'])}>
               Outdent
               {key('outdent')}
             </button>
           </li>
           <li>
-            <button role="menuitem" onClick={() => run(() => actions.moveUp(id))}>
+            <button role="menuitem" onClick={() => run(() => actions.moveUp(id), [ROW_KEYS.moveUp, 'moves up'])}>
               Move up
               {key('moveUp')}
             </button>
           </li>
           <li>
-            <button role="menuitem" onClick={() => run(() => actions.moveDown(id))}>
+            <button role="menuitem" onClick={() => run(() => actions.moveDown(id), [ROW_KEYS.moveDown, 'moves down'])}>
               Move down
               {key('moveDown')}
             </button>

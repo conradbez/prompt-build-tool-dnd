@@ -3,6 +3,8 @@ import { actions, blockIds, flatten, getState, titleMap, useOutline } from '../s
 import { toDisplay } from '../lib/mentions';
 import { getEditor } from './focusRegistry';
 import { placeCaret } from '../lib/caret';
+import { showHint } from '../lib/hint';
+import { ROW_KEYS } from '../lib/shortcuts';
 import { BulletRow } from './BulletRow';
 import { computeDrop, INDENT, type DropTarget, type RowRect } from './dragDrop';
 
@@ -200,7 +202,14 @@ export function Outline() {
   function onPointerUp() {
     textDrag.current = null;
     if (drag?.active && drag.target) {
+      const before = getState().bullets[drag.id]?.parentId;
       actions.moveTo(drag.id, drag.target.parentId, drag.target.index);
+      // A drag is usually a reorder or a re-nest — both have keys.
+      if (before === drag.target.parentId) {
+        showHint(`${ROW_KEYS.moveUp} / ${ROW_KEYS.moveDown}`, 'moves a bullet up / down');
+      } else {
+        showHint(`${ROW_KEYS.indent} / ${ROW_KEYS.outdent}`, 'indents / outdents');
+      }
     }
     if (drag?.active) {
       // The pointer is captured by the dot, so letting go also clicks it — and

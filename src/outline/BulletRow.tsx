@@ -215,13 +215,12 @@ export function BulletRow({
       return true;
     }
 
-    // ---- Shift+Up/Down past a bullet's edge selects whole bullets ----
-    // The bullet's edges are the top of its title and the bottom of its body.
+    // ---- Shift+Up/Down past the text's edge selects whole bullets ----
+    // Until then the browser extends the text selection; once it reaches the
+    // start (or end) of the field, the next press switches to bullets.
     if (e.shiftKey && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
       const up = e.key === 'ArrowUp';
-      const atEdge = up
-        ? field === 'title' && el.selectionStart === 0
-        : field === 'body' && el.selectionEnd === el.value.length;
+      const atEdge = up ? el.selectionStart === 0 : el.selectionEnd === el.value.length;
       if (atEdge) {
         const ids = flatten(getState()).map((r) => r.id);
         const head = ids[ids.indexOf(id) + (up ? -1 : 1)];

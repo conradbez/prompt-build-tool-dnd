@@ -3223,3 +3223,37 @@ button.rf-file__dl:disabled {
   opacity: 0.5;
   cursor: default;
 }
+
+/* ------------------------------------------------------- shortcut hint toast */
+
+.hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: hint-life 2.6s ease forwards;
+}
+
+.hint__keys {
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--text);
+}
+
+@keyframes hint-life {
+  0% { opacity: 0; transform: translate(-50%, 4px); }
+  8%, 85% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 0); }
+}
