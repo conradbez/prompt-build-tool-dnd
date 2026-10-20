@@ -252,10 +252,14 @@ export function BulletRow({
     if (structuralKey(e, 'title')) return;
     const el = e.currentTarget;
 
-    // ---- Enter goes down to the body: a title is one line ----
+    // ---- Enter: at the start, room above; mid-line, the rest moves down to
+    // a new bullet; at the end, down to the body — a title is one line ----
     if (e.key === 'Enter') {
       e.preventDefault();
-      actions.setFocus({ id, field: 'body', caret: 'start' });
+      const at = el.selectionStart;
+      if (bullet.title !== '' && at === 0 && el.selectionEnd === 0) actions.addSiblingBefore(id);
+      else if (at < bullet.title.length) actions.splitTitle(id, at);
+      else actions.setFocus({ id, field: 'body', caret: 'start' });
       return;
     }
 
@@ -429,6 +433,13 @@ export function BulletRow({
             onChange={(e) => actions.setTitle(id, e.currentTarget.value)}
             onKeyDown={onTitleKeyDown}
             onKeyUp={() => {}}
+            onPaste={(e) => {
+              const text = e.clipboardData.getData('text/plain');
+              if (!text.includes('\n')) return;
+              e.preventDefault();
+              const el = e.currentTarget;
+              actions.pasteTitles(id, text, el.selectionStart, el.selectionEnd);
+            }}
             onFocus={() => noteFocus('title')}
           />
           <div className={`ol-view ${editing ? 'ol-view--editing' : ''}`}>
@@ -654,6 +665,7 @@ interface AutoProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onKeyUp: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onFocus: () => void;
+  onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
 }
 
 /** Textarea that grows to fit its content and registers itself for focus. */

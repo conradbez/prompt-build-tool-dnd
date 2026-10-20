@@ -505,6 +505,81 @@ export const actions = {
     emit(next);
   },
 
+  /**
+   * A multi-line paste into a title: the first line lands at the caret, and
+   * every other non-blank line becomes a new bullet titled with it, in order.
+   * Leading whitespace nests: a line indented deeper than the one above is its
+   * child, one indented the same is its sibling, and a shallower one climbs
+   * back to the last line at that depth (a tab counts as four spaces). Leading
+   * list markers (`•`, `-`, `–`, `*`) are dropped — a title is a name.
+   * Focuses the end of the last one.
+   */
+  pasteTitles(id: string, pasted: string, start: number, end: number) {
+    const b = state.bullets[id];
+    if (!b) return;
+    const lines = pasted
+      .split(/\r?\n/)
+      .map((l) => ({
+        depth: (l.match(/^[ \t]*/)?.[0] ?? '').replace(/\t/g, '    ').length,
+        title: l.replace(/^\s*(?:[•\-–—*]\s+)?/, '').trim(),
+      }))
+      .filter((l) => l.title !== '');
+    if (lines.length === 0) return;
+    const next = clone(state);
+    const [first, ...rest] = lines;
+    next.bullets[id] = { ...b, title: b.title.slice(0, start) + first.title + b.title.slice(end) };
+    // The open chain of pasted lines, shallowest first; the bottom is the bullet pasted into.
+    const stack = [{ depth: first.depth, id }];
+    let lastId = id;
+    for (const line of rest) {
+      while (stack.length > 1 && stack[stack.length - 1].depth > line.depth) stack.pop();
+      const top = stack[stack.length - 1];
+      let nb: Bullet | null = null;
+      if (line.depth > top.depth && canTakeChild(next, top.id)) {
+        // Deeper: the first child of the line above.
+        const parent = next.bullets[top.id];
+        nb = makeBullet({ id: nanoid(), parentId: top.id, title: line.title });
+        next.bullets[nb.id] = nb;
+        next.bullets[top.id] = { ...parent, collapsed: false, children: [nb.id, ...parent.children] };
+        stack.push({ depth: line.depth, id: nb.id });
+      } else if (canTakeChild(next, next.bullets[top.id].parentId)) {
+        // Same depth (or nowhere to nest): a sibling right after the line above.
+        const { list, index, parentId } = siblingsOf(next, top.id);
+        nb = makeBullet({ id: nanoid(), parentId, title: line.title });
+        next.bullets[nb.id] = nb;
+        const newList = [...list];
+        newList.splice(index + 1, 0, nb.id);
+        setChildren(next, parentId, newList);
+        stack[stack.length - 1] = { depth: Math.max(line.depth, top.depth), id: nb.id };
+      }
+      if (nb) lastId = nb.id;
+    }
+    next.focus = { id: lastId, field: 'title', caret: 'end' };
+    next.selectedId = lastId;
+    emit(next);
+  },
+
+  /**
+   * Enter in the middle of a title: the text before `at` stays, and the rest
+   * moves down into a new sibling directly below, with the caret at its start.
+   * The body and children stay with the original bullet.
+   */
+  splitTitle(id: string, at: number) {
+    const b = state.bullets[id];
+    if (!b || !canTakeChild(state, b.parentId)) return;
+    const next = clone(state);
+    const { list, index, parentId } = siblingsOf(next, id);
+    const nb = makeBullet({ id: nanoid(), parentId, title: b.title.slice(at).trimStart() });
+    next.bullets[id] = { ...b, title: b.title.slice(0, at).trimEnd() };
+    next.bullets[nb.id] = nb;
+    const newList = [...list];
+    newList.splice(index + 1, 0, nb.id);
+    setChildren(next, parentId, newList);
+    next.focus = { id: nb.id, field: 'title', caret: 'start' };
+    next.selectedId = nb.id;
+    emit(next);
+  },
+
   setText(id: string, value: string) {
     const b = state.bullets[id];
     if (!b || b.text === value) return;

@@ -452,7 +452,11 @@ function Documents({
   // Signing in or out swaps which saves there are; the sync ends by opening one.
   useEffect(() => setNames(listSaves()), [open, account]);
   // The empty string is "no save chosen yet"; NEW_NAME reveals the text box.
-  const [chosen, setChosen] = useState<string>(() => listSaves()[0] ?? NEW_NAME);
+  const [chosen, setChosen] = useState<string>(() => open ?? NEW_NAME);
+  // The picker shows the map on screen: opening one elsewhere moves it too.
+  useEffect(() => {
+    if (open) setChosen(open);
+  }, [open]);
   const [typed, setTyped] = useState('');
   const [status, setStatus] = useState<{ text: string; bad?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -461,16 +465,14 @@ function Documents({
    * the button turning into the question — not a browser dialog, which stops
    * the whole page and reads as an error rather than a choice.
    */
-  const [pending, setPending] = useState<null | 'save' | 'load' | 'paste'>(null);
+  const [pending, setPending] = useState<null | 'save' | 'paste'>(null);
   /** The clipboard document read on the first click of a two-step paste. */
   const [pasted, setPasted] = useState<Doc | null>(null);
   /**
-   * Which menu is open. There are two verbs here — putting this map somewhere,
-   * and bringing one back — and everything else is a choice of *where*: a named
-   * save, a promptmap project, the clipboard. Four buttons in a row made those look
-   * like four unrelated things.
+   * Which menu is open. Picking a save in the list opens it; the menus are
+   * for everywhere else a map goes to (export) or comes from (import).
    */
-  const [menu, setMenu] = useState<null | 'save' | 'load'>(null);
+  const [menu, setMenu] = useState<null | 'export' | 'import'>(null);
   const section = useRef<HTMLElement | null>(null);
 
   /**
@@ -533,7 +535,7 @@ function Documents({
 
   /** Open (or close) a menu. Reaching for it is changing your mind about any
    *  question left standing on the button beside it. */
-  const openMenu = (which: 'save' | 'load') => {
+  const openMenu = (which: 'export' | 'import') => {
     reset();
     setStatus(null);
     setMenu(menu === which ? null : which);
@@ -556,29 +558,24 @@ function Documents({
     say(`Saved as “${name}”. Changes from here go into it as you make them.`);
   }
 
-  async function onLoad() {
-    if (naming || !chosen) return say('Pick a saved document to load.', true);
+  /** Picking a save opens it straight away — the map on screen is already saved as you go. */
+  async function onOpen(target: string) {
+    reset();
+    if (target === open) return;
     let doc: Doc | null;
     try {
-      doc = await loadSave(chosen);
+      doc = await loadSave(target);
     } catch (e) {
-      return say(`“${chosen}” could not be fetched: ${(e as Error).message}`, true);
+      return say(`“${target}” could not be fetched: ${(e as Error).message}`, true);
     }
-    if (!doc) return say(`“${chosen}” could not be read.`, true);
-    if (pending !== 'load') {
-      setPending('load');
-      return say(
-        `This replaces what is on screen with “${chosen}” — click again to go ahead. ` +
-          `The current map is kept as “${BEFORE_LOAD}”.`,
-      );
-    }
-    reset();
+    if (!doc) return say(`“${target}” could not be read.`, true);
     flushAutoSave();
-    writeSave(BEFORE_LOAD, currentDoc(getState()));
+    // Nothing open means the map on screen is in no save — keep a copy of it.
+    if (!open) writeSave(BEFORE_LOAD, currentDoc(getState()));
     actions.replaceDoc(doc);
-    setOpenSave(chosen);
+    setOpenSave(target);
     setNames(listSaves());
-    say(`Loaded “${chosen}”. The map it replaced is saved as “${BEFORE_LOAD}”.`);
+    say(open ? `Opened “${target}”.` : `Opened “${target}”. The map it replaced is saved as “${BEFORE_LOAD}”.`);
   }
 
   function onNew() {
@@ -673,7 +670,7 @@ function Documents({
             <>Nothing is open: save this map under a name and edits will go into it. </>
           )}
           {account ? `Saves are kept on the server for ${account.email}.` : 'Saves stay in this browser.'}{' '}
-          Loading replaces what is on screen and keeps a copy as “
+          Picking a map opens it; importing replaces what is on screen and keeps a copy as “
           {BEFORE_LOAD}”.
         </Info>
       </h3>
@@ -683,9 +680,9 @@ function Documents({
             className="pd-select pd-select--wide"
             value={names.length === 0 ? NEW_NAME : chosen}
             onChange={(e) => {
-              reset();
               setMenu(null);
               setChosen(e.target.value);
+              if (e.target.value !== NEW_NAME) void onOpen(e.target.value);
             }}
           >
             {names.map((n) => (
@@ -707,30 +704,31 @@ function Documents({
                 setMenu(null);
                 setTyped(e.target.value);
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onSave();
+              }}
             />
           )}
-          {/* Split: the button does the ordinary thing — keep this map here,
-              bring that one back — and the caret is where the same verb points
-              somewhere else. The caret points up because the menu opens up. */}
-          <div className="pd-menu pd-split">
+          {naming && (
             <button
               className={`pd-btn ${pending === 'save' ? 'pd-btn--confirm' : ''}`}
               disabled={!name}
-              title={`Save this map in this browser as “${name || '…'}”`}
+              title={`Save this map as “${name || '…'}”`}
               onClick={() => act(onSave)}
             >
               {pending === 'save' ? 'Replace?' : 'Save'}
             </button>
+          )}
+          <div className="pd-menu">
             <button
-              className="pd-btn pd-btn--caret"
+              className="pd-btn"
               aria-haspopup="menu"
-              aria-expanded={menu === 'save'}
-              aria-label="Other places to put this map"
-              onClick={() => openMenu('save')}
+              aria-expanded={menu === 'export'}
+              onClick={() => openMenu('export')}
             >
-              <Chevron />
+              Export <Chevron />
             </button>
-            {menu === 'save' && (
+            {menu === 'export' && (
               <ul className="pd-pop" role="menu">
                 <li>
                   <button
@@ -765,25 +763,16 @@ function Documents({
             )}
           </div>
 
-          <div className="pd-menu pd-split">
+          <div className="pd-menu">
             <button
-              className={`pd-btn ${pending === 'load' || pending === 'paste' ? 'pd-btn--confirm' : ''}`}
-              disabled={naming && pending === null}
-              title={naming ? 'Pick a saved map first' : `Put “${chosen}” on screen`}
-              onClick={() => act(() => (pending === 'paste' ? void onPaste() : void onLoad()))}
-            >
-              {pending === 'load' || pending === 'paste' ? 'Replace this map?' : 'Load'}
-            </button>
-            <button
-              className="pd-btn pd-btn--caret"
+              className={`pd-btn ${pending === 'paste' ? 'pd-btn--confirm' : ''}`}
               aria-haspopup="menu"
-              aria-expanded={menu === 'load'}
-              aria-label="Other places to load a map from"
-              onClick={() => openMenu('load')}
+              aria-expanded={menu === 'import'}
+              onClick={() => (pending === 'paste' ? act(() => void onPaste()) : openMenu('import'))}
             >
-              <Chevron />
+              {pending === 'paste' ? 'Replace this map?' : <>Import <Chevron /></>}
             </button>
-            {menu === 'load' && (
+            {menu === 'import' && (
               <ul className="pd-pop" role="menu">
 
                 <li>
@@ -792,7 +781,7 @@ function Documents({
                     title="Replace this map with JSON on the clipboard."
                     onClick={() => pick(() => void onPaste())}
                   >
-                    Load from clipboard
+                    From clipboard
                   </button>
                 </li>
               </ul>

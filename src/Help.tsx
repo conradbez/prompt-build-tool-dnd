@@ -33,8 +33,8 @@ const MAP: Row[] = [
 ];
 
 const KEEPING: Row[] = [
-  { keys: '⚙ → Save', desc: 'Keeps this map in this browser under the name beside it, and opens it — edits then go into it as you make them. The ▴ next to it is where else it can go: a promptmap pipeline (.py), a `promptmap serve` project (.py), or the clipboard as JSON' },
-  { keys: '⚙ → Load', desc: 'Puts the named save back on screen; the ▴ loads JSON from the clipboard instead. Either replaces what is on screen — the button asks first, and the map it replaces is kept as “Before last load”' },
+  { keys: '⚙ → pick a map', desc: 'Opens that save straight away — edits then go into it as you make them. “New name…” saves this map under a new name' },
+  { keys: '⚙ → Export / Import', desc: 'Export: a promptmap pipeline (.py), a `promptmap serve` project (.py), or the clipboard as JSON. Import: JSON from the clipboard — it replaces what is on screen, asking first, and the map it replaces is kept as “Before last load”' },
 ];
 
 const RUNNING: Row[] = [
