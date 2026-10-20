@@ -486,23 +486,17 @@ body,
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background: rgba(15, 23, 32, 0.45);
+  background: #fff;
 }
 
+/* Every modal fills the screen: a floating card left too little room to edit
+   in on a phone, and the extra room is just as useful on a desktop. */
 .res-modal__panel {
   display: flex;
   flex-direction: column;
-  width: min(1200px, 100%);
-  max-height: 100%;
-  border-radius: 12px;
+  width: 100%;
+  height: 100%;
   background: #fff;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
-}
-
-/* A one-column modal (settings) has no reason to be 1200px wide. */
-.res-modal__panel--narrow {
-  width: min(560px, 100%);
 }
 
 /* One column: the three-way split is the answer modal's layout, not this
@@ -517,7 +511,7 @@ body,
 .res-modal__panel--narrow .res-modal__cols {
   grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: min-content;
-  max-height: min(680px, 84vh);
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -841,19 +835,7 @@ body,
   color: var(--text);
 }
 
-/* One column filling the screen: the panel goes edge to edge, the settings
-   fold away and the other two columns hide. */
-.res-modal--full {
-  padding: 0;
-}
-
-.res-modal--full .res-modal__panel {
-  width: 100%;
-  height: 100%;
-  max-height: 100%;
-  border-radius: 0;
-}
-
+/* One column: the settings fold away and the other two columns hide. */
 .res-modal--full .res-expander {
   display: none;
 }
@@ -2337,20 +2319,13 @@ body,
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: rgba(15, 23, 42, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
+  background: #fff;
 }
 
 .help__panel {
   background: #fff;
-  border-radius: 14px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  width: 560px;
-  max-width: 100%;
-  max-height: 85vh;
+  width: 100%;
+  height: 100%;
   overflow-y: auto;
   padding: 20px 22px 24px;
 }
@@ -2713,11 +2688,6 @@ body,
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-/* The progress modal. */
-.rp {
-  width: min(680px, 100%);
 }
 
 .rp__summary {
