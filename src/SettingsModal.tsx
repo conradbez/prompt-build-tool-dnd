@@ -721,7 +721,7 @@ function Documents({
           )}
           <div className="pd-menu">
             <button
-              className="pd-btn"
+              className="pd-btn pd-btn--menu"
               aria-haspopup="menu"
               aria-expanded={menu === 'export'}
               onClick={() => openMenu('export')}
@@ -765,7 +765,7 @@ function Documents({
 
           <div className="pd-menu">
             <button
-              className={`pd-btn ${pending === 'paste' ? 'pd-btn--confirm' : ''}`}
+              className={`pd-btn pd-btn--menu ${pending === 'paste' ? 'pd-btn--confirm' : ''}`}
               aria-haspopup="menu"
               aria-expanded={menu === 'import'}
               onClick={() => (pending === 'paste' ? act(() => void onPaste()) : openMenu('import'))}

@@ -72,7 +72,7 @@ export function Outline() {
       } else if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault();
         actions.deleteBullets(ids);
-      } else if (e.key === 'Enter' && e.shiftKey) {
+      } else if (e.key === 'Enter' && mod && e.shiftKey) {
         e.preventDefault();
         actions.addParents(ids);
       } else if (e.key === 'Tab') {

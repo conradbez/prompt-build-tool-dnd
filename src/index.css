@@ -242,7 +242,7 @@ body,
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  width: 18px;
+  width: 22px;
   height: 20px;
 }
 
@@ -253,8 +253,10 @@ body,
   font-size: 9px;
   letter-spacing: 0.5px;
   line-height: 1;
-  width: 18px;
+  width: 22px;
   padding: 0;
+  /* Hug the caret slot, so the glyph reads as the dot's menu. */
+  text-align: right;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -327,7 +329,7 @@ body,
   background: none;
   color: var(--muted);
   font-size: 11px;
-  width: 16px;
+  width: 12px;
   cursor: pointer;
   padding: 0;
   line-height: 1;
@@ -1501,40 +1503,19 @@ body,
   color: var(--accent);
 }
 
-/* Save and Load are the two verbs; where the map goes or comes from is a choice
-   inside each. The popup hangs off its own button, so the row can wrap. */
+/* Export and Import each open a menu of where the map goes or comes from.
+   The popup hangs off its own button, so the row can wrap. */
 .pd-menu {
   position: relative;
   flex: 0 0 auto;
 }
 
-/* One control, two targets: the verb, and where else it could point. They share
-   an edge so they read as a pair rather than as two buttons that happen to be
-   adjacent. */
-.pd-split {
-  display: flex;
-}
-
-.pd-split > .pd-btn:first-child {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.pd-btn--caret {
+/* The label and its chevron on one line. */
+.pd-btn--menu {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  padding: 0 9px;
-  border-left: none;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  color: #52606d;
-}
-
-/* The seam belongs to whichever half is not being hovered, so hovering one
-   half never makes the pair look broken in the middle. */
-.pd-btn--caret:hover:not(:disabled) {
-  border-left: none;
+  gap: 5px;
+  white-space: nowrap;
 }
 
 .pd-pop {

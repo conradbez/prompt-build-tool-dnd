@@ -192,10 +192,17 @@ export function BulletRow({
   function structuralKey(e: React.KeyboardEvent<HTMLTextAreaElement>, field: Field): boolean {
     const el = e.currentTarget;
 
-    // ---- Shift+Enter slots a new parent in above this bullet ----
-    if (e.key === 'Enter' && e.shiftKey) {
+    // ---- Cmd/Ctrl+Shift+Enter slots a new parent in above this bullet ----
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
       e.preventDefault();
       actions.addParent(id);
+      return true;
+    }
+
+    // ---- Cmd/Ctrl+Enter runs this bullet and what it depends on ----
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      actions.runNode(id);
       return true;
     }
 
@@ -252,6 +259,13 @@ export function BulletRow({
     if (structuralKey(e, 'title')) return;
     const el = e.currentTarget;
 
+    // ---- Shift+Enter: a newline belongs in the body, so go there ----
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault();
+      actions.setFocus({ id, field: 'body', caret: 'start' });
+      return;
+    }
+
     // ---- Enter: at the start, room above; mid-line, the rest moves down to
     // a new bullet; at the end, down to the body — a title is one line ----
     if (e.key === 'Enter') {
@@ -302,7 +316,7 @@ export function BulletRow({
 
     if (structuralKey(e, 'body')) return;
 
-    // ---- Enter makes the next bullet ----
+    // ---- Enter makes the next bullet; Shift+Enter is a newline ----
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       // At the very start of a bullet that has something in it, the new bullet

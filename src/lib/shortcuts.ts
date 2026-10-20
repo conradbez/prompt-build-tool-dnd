@@ -21,7 +21,7 @@ export const SETTINGS_HINT = IS_MAC ? '⌘,' : 'Ctrl+,';
  */
 export const ROW_KEYS = {
   addBelow: 'Enter',
-  addParent: IS_MAC ? '⇧Enter' : 'Shift+Enter',
+  addParent: IS_MAC ? '⌘⇧Enter' : 'Ctrl+Shift+Enter',
   indent: 'Tab',
   outdent: IS_MAC ? '⇧Tab' : 'Shift+Tab',
   moveUp: IS_MAC ? '⌥⇧↑' : 'Alt+Shift+↑',
