@@ -1,44 +1,51 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { actions, blockIds, flatten, getState, titleMap, useOutline } from '../store';
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { DraggableRenderer, translate, type Draggable, type DragSpecBuilder, type Svgx } from 'dragology';
+import { actions, blockIds, canTakeChild, flatten, getState, titleMap, useOutline } from '../store';
 import { toDisplay } from '../lib/mentions';
 import { getEditor } from './focusRegistry';
 import { placeCaret } from '../lib/caret';
 import { showHint } from '../lib/hint';
 import { ROW_KEYS } from '../lib/shortcuts';
 import { BulletRow } from './BulletRow';
-import { computeDrop, INDENT, type DropTarget, type RowRect } from './dragDrop';
+import { dropStates, INDENT, moveToIndex, treeKey, visibleTree, type DragState, type TreeNode } from './dragTree';
 
 /** Pointer travel before a press on a bullet dot becomes a drag (px). */
 const DRAG_SLOP = 4;
 
-interface Drag {
-  id: string;
-  /** The dragged bullet and everything under it — not valid drop targets. */
-  subtree: string[];
-  startX: number;
-  startY: number;
-  /** False until the pointer has moved past the slop, so a tap still focuses. */
-  active: boolean;
-  target: DropTarget | null;
-  /** Viewport x of a top-level bullet dot, for placing the indicator. */
-  dotBase: number;
+/** A row's height before it has been measured. */
+const ROW_GUESS = 28;
+
+/** What the rows, mounted inside the SVG, report back to the outline. */
+interface RowCtxValue {
+  setHeight: (id: string, h: number) => void;
+  block: Set<string>;
 }
+const RowCtx = createContext<RowCtxValue | null>(null);
+
+/** SVG ids can't be bare bullet ids (they may start with a digit). */
+const layerId = (id: string) => `b-${id}`;
 
 /**
  * Right panel: the Workflowy-style outline. Reads the shared store, so any
  * change made from the mind map (selection, focus) shows up here too.
  *
- * Drag and drop follows Workflowy: press a bullet's **dot** and move, and the
- * row you are dragging stays put with a grey highlight while a line shows where
- * it will land. The line's left edge is the nesting level — drag right to nest
- * under the row above, left to pop out — and dropping moves the bullet with its
- * whole subtree. Works with a mouse or a finger; the dot is the only handle, so
- * dragging never fights with selecting text.
+ * Drag and drop is Workflowy-style, built on dragology (declarative
+ * dragging): the rows are drawn as an SVG tree, each row's HTML living in a
+ * `<foreignObject>`. Press a bullet's **dot** and move: the bullet and its
+ * subtree float with the pointer while the rest of the outline opens a gap
+ * where it would land. Every possible landing spot is a whole alternative
+ * outline (see `dragTree.ts`); dragology renders them and picks the one that
+ * puts the bullet nearest the pointer, so moving sideways chooses the nesting
+ * level — right to nest under the row above, left to pop out. The dot is the
+ * only handle, so dragging never fights with selecting text.
  */
 export function Outline() {
   const state = useOutline();
-  const rows = flatten(state);
-  const [drag, setDrag] = useState<Drag | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
+  const [heights, setHeights] = useState<Record<string, number>>({});
+  const [width, setWidth] = useState(0);
+  const sizerRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // The row a mouse text-selection started in. Dragging it into another row
   // turns the selection into whole bullets, as Workflowy does.
@@ -118,47 +125,6 @@ export function Outline() {
     return null;
   }
 
-  /**
-   * Measure the visible rows, minus the subtree being dragged. `dotBase` is
-   * where a top-level bullet's dot sits, so the drop indicator can line its
-   * circle up with the real bullets of whatever level it is snapping to.
-   */
-  function measure(exclude: string[]): { rects: RowRect[]; dotBase: number } {
-    const scroll = scrollRef.current;
-    const rects: RowRect[] = [];
-    let dotBase = 0;
-    for (const { id, depth } of flatten(getState())) {
-      const el = scroll?.querySelector(`[data-row="${id}"]`) as HTMLElement | null;
-      if (!el) continue;
-      const dot = el.querySelector('.ol-dot') as HTMLElement | null;
-      if (dot) dotBase = dot.getBoundingClientRect().x - depth * INDENT;
-      if (exclude.includes(id)) continue;
-      const r = el.getBoundingClientRect();
-      rects.push({ id, depth, top: r.y, bottom: r.y + r.height });
-    }
-    return { rects, dotBase };
-  }
-
-  function onDragStart(id: string, e: React.PointerEvent) {
-    const s = getState();
-    const subtree = [id];
-    const walk = (bid: string) => {
-      for (const c of s.bullets[bid]?.children ?? []) {
-        subtree.push(c);
-        walk(c);
-      }
-    };
-    walk(id);
-    // Keep receiving moves even if the pointer leaves the dot. Browsers throw
-    // if the pointer is no longer active, and it isn't worth failing over.
-    try {
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    } catch {
-      /* capture is an optimisation, not a requirement */
-    }
-    setDrag({ id, subtree, startX: e.clientX, startY: e.clientY, active: false, target: null, dotBase: 0 });
-  }
-
   function onPointerDownCapture(e: React.PointerEvent) {
     if (getState().blockSel) actions.setBlockSel(null);
     const t = e.target as HTMLElement;
@@ -185,90 +151,203 @@ export function Outline() {
       }
       return;
     }
-    if (!drag) return;
-    const moved = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
-    if (!drag.active && moved < DRAG_SLOP) return;
-    e.preventDefault();
-    const s = getState();
-    const { rects, dotBase } = measure(drag.subtree);
-    // Sideways movement is measured from where the drag began.
-    const target = computeDrop(rects, e.clientX, e.clientY, drag.startX, {
-      parentOf: (bid) => s.bullets[bid]?.parentId ?? null,
-      childrenOf: (pid) => (pid ? (s.bullets[pid]?.children ?? []) : s.rootIds),
-    });
-    setDrag({ ...drag, active: true, target, dotBase });
   }
 
   function onPointerUp() {
     textDrag.current = null;
-    if (drag?.active && drag.target) {
-      const before = getState().bullets[drag.id]?.parentId;
-      actions.moveTo(drag.id, drag.target.parentId, drag.target.index);
-      // A drag is usually a reorder or a re-nest — both have keys.
-      if (before === drag.target.parentId) {
-        showHint(`${ROW_KEYS.moveUp} / ${ROW_KEYS.moveDown}`, 'moves a bullet up / down');
-      } else {
-        showHint(`${ROW_KEYS.indent} / ${ROW_KEYS.outdent}`, 'indents / outdents');
-      }
-    }
-    if (drag?.active) {
-      // The pointer is captured by the dot, so letting go also clicks it — and
-      // a click on the dot opens the bullet. A drag is not a click: swallow it.
-      const swallow = (ev: MouseEvent) => {
-        ev.stopPropagation();
-        ev.preventDefault();
-      };
-      window.addEventListener('click', swallow, { capture: true, once: true });
-      // No click follows if the pointer was let go off the dot's element.
-      setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0);
-    }
-    setDrag(null);
   }
 
-  const scroll = scrollRef.current?.getBoundingClientRect();
+  // The content width the rows lay out in.
+  useLayoutEffect(() => {
+    const el = sizerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Only rebuilt when the visible structure changes, not on every keystroke.
+  const key = treeKey(visibleTree(state));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tree: DragState = useMemo(() => ({ roots: visibleTree(getState()) }), [key]);
+
+  const draggable = useMemo(() => makeDraggable({ heights, width }), [heights, width]);
+
+  const rowCtx: RowCtxValue = {
+    setHeight: (id, h) => setHeights((hs) => (hs[id] === h ? hs : { ...hs, [id]: h })),
+    block,
+  };
+
+  function onDrop(next: DragState) {
+    const move = next.move;
+    if (!move) return; // let go far from any landing spot: nothing moves
+    const s = getState();
+    const before = s.bullets[move.id]?.parentId ?? null;
+    actions.moveTo(move.id, move.parentId, moveToIndex(s, move));
+    // A drag is usually a reorder or a re-nest — both have keys.
+    if (before === move.parentId) {
+      showHint(`${ROW_KEYS.moveUp} / ${ROW_KEYS.moveDown}`, 'moves a bullet up / down');
+    } else {
+      showHint(`${ROW_KEYS.indent} / ${ROW_KEYS.outdent}`, 'indents / outdents');
+    }
+  }
 
   return (
     <div
-      className={`ol-root ${drag?.active ? 'ol-root--dragging' : ''}`}
+      className={`ol-root ${dragging ? 'ol-root--dragging' : ''}`}
       onPointerDownCapture={onPointerDownCapture}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
       <div className="ol-scroll" ref={scrollRef}>
-        {rows.map(({ id, depth }) => (
-          <BulletRow
-            key={id}
-            bullet={state.bullets[id]}
-            depth={depth}
-            selected={state.selectedId === id}
-            inBlock={block.has(id)}
-            dragging={drag?.active === true && drag.subtree.includes(id)}
-            onDragStart={onDragStart}
-            result={state.results[id]}
-            test={state.tests[id]}
-            runStatus={state.runStatus[id]}
-            failure={state.runFailures[id]}
-            files={state.files[id]}
-            onExpand={actions.openResult}
-          />
-        ))}
-
-        {/* The drop indicator. Its circle sits exactly on the bullet column of
-            the level being chosen, so the nesting reads at a glance. */}
-        {drag?.active && drag.target && scroll && (
-          <div
-            className="ol-drop"
-            style={{
-              top: drag.target.y - scroll.y + (scrollRef.current?.scrollTop ?? 0),
-              left: drag.dotBase + drag.target.depth * INDENT - scroll.x,
-            }}
-          >
-            <span className="ol-drop__dot" />
-            <span className="ol-drop__line" />
-          </div>
-        )}
+        <div ref={sizerRef} className="ol-sizer">
+          {width > 0 && (
+            <RowCtx.Provider value={rowCtx}>
+              <DraggableRenderer
+                draggable={draggable}
+                state={tree}
+                width={width}
+                height={treeHeight(tree.roots, heights)}
+                dragThreshold={DRAG_SLOP}
+                onDropState={onDrop}
+                onDragStatus={(st) => {
+                  const on = st.type === 'dragging';
+                  if (on !== draggingRef.current) {
+                    draggingRef.current = on;
+                    setDragging(on);
+                  }
+                }}
+              />
+            </RowCtx.Provider>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+interface Layout {
+  heights: Record<string, number>;
+  width: number;
+}
+
+const noop = () => {};
+
+const rowHeight = (heights: Record<string, number>, id: string) => heights[id] ?? ROW_GUESS;
+
+function treeHeight(nodes: TreeNode[], heights: Record<string, number>): number {
+  return nodes.reduce((h, n) => h + rowHeight(heights, n.id) + treeHeight(n.children, heights), 0);
+}
+
+/**
+ * The outline as a dragology draggable: a pure function from a (possibly
+ * hypothetical) tree to SVG. Each bullet is a layer holding its row and,
+ * nested inside it, its children's layers — so dragging a bullet carries its
+ * whole subtree along.
+ */
+function makeDraggable(layout: Layout): Draggable<DragState> {
+  return ({ state, d, draggedId }) => (
+    <g>{renderNodes(state.roots, 0, state, d, draggedId, layout, { n: 0 }).elems}</g>
+  );
+}
+
+function renderNodes(
+  nodes: TreeNode[],
+  depth: number,
+  state: DragState,
+  d: DragSpecBuilder<DragState>,
+  draggedId: string | null,
+  layout: Layout,
+  /** Rows drawn so far, top to bottom — the stacking order. */
+  count: { n: number },
+): { elems: Svgx[]; h: number } {
+  let y = 0;
+  const elems = nodes.map((node) => {
+    const row = count.n++;
+    const rowH = rowHeight(layout.heights, node.id);
+    const kids = renderNodes(node.children, depth + 1, state, d, draggedId, layout, count);
+    const lid = layerId(node.id);
+    const elem = (
+      // The no-op `onClick` is a flag for dragology: it can't see the dot's
+      // own click handler inside the row component, and with no click handler
+      // in sight it starts the drag on press, swallowing the click that opens
+      // the bullet. With one, a press becomes a drag only after `DRAG_SLOP`.
+      <g
+        id={lid}
+        transform={translate(0, y)}
+        onClick={noop}
+        // Each row paints over the rows below it, so a menu or autocomplete
+        // list dropping out of a row isn't covered by the next one (HTML
+        // z-index can't reach across foreignObjects). The order is fixed by
+        // the outline, never by hover or focus: re-stacking moves DOM nodes,
+        // which would eat clicks and blur the field being typed in.
+        dragologyZIndex={draggedId === lid ? '/1' : `/${-1 - row}`}
+        dragologyOnDrag={() => {
+          const s = getState();
+          const targets = dropStates(state.roots, node.id, (pid) => canTakeChild(s, pid, node.id));
+          return d.closest(targets).whenFar(state).withFloating();
+        }}
+      >
+        <foreignObject
+          className="ol-fo"
+          width={Math.max(0, layout.width - depth * INDENT)}
+          height={rowH}
+        >
+          <RowSlot id={node.id} dragging={draggedId === lid} />
+        </foreignObject>
+        {kids.elems.length > 0 && <g transform={translate(INDENT, rowH)}>{kids.elems}</g>}
+      </g>
+    );
+    y += rowH + kids.h;
+    return elem;
+  });
+  return { elems, h: y };
+}
+
+/**
+ * One row, mounted by dragology inside its `<foreignObject>`. It reads the
+ * store itself and reports its natural height, which the layout above stacks.
+ * Presses anywhere but the dot are kept from the drag, so the text stays
+ * editable and selectable.
+ */
+function RowSlot({ id, dragging }: { id: string; dragging: boolean }) {
+  const state = useOutline();
+  const ctx = useContext(RowCtx)!;
+  const ref = useRef<HTMLDivElement | null>(null);
+  const report = ctx.setHeight;
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => report(id, el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const bullet = state.bullets[id];
+  if (!bullet) return null;
+  return (
+    <div
+      ref={ref}
+      className="ol-slot"
+      onPointerDown={(e) => {
+        if (!(e.target as Element).closest('.ol-dot')) e.stopPropagation();
+      }}
+      >
+      <BulletRow
+        bullet={bullet}
+        selected={state.selectedId === id}
+        inBlock={ctx.block.has(id)}
+        dragging={dragging}
+        result={state.results[id]}
+        test={state.tests[id]}
+        runStatus={state.runStatus[id]}
+        failure={state.runFailures[id]}
+        files={state.files[id]}
+        onExpand={actions.openResult}
+      />
     </div>
   );
 }

@@ -143,7 +143,7 @@ body,
 }
 
 .ol-scroll {
-  position: relative; /* the drop indicator is positioned against this */
+  position: relative;
   height: 100%;
   overflow-y: auto;
   /* Wide enough for two columns: the bullets on the left and their answers on
@@ -157,6 +157,28 @@ body,
 
 /* --------------------------------------------------------- drag and drop */
 
+/* The rows are drawn by dragology as an SVG tree, each row's HTML in its own
+   <foreignObject> (see Outline.tsx). Let popups spill out of a row's box, put
+   back the text selection and scrolling the SVG switches off, and keep the
+   dot — the only drag handle — from scrolling the page on touch. */
+.ol-sizer > svg {
+  display: block;
+  touch-action: pan-y !important;
+}
+
+.ol-fo {
+  overflow: visible;
+}
+
+.ol-slot {
+  display: flow-root; /* so the measured height includes every margin */
+  user-select: text;
+}
+
+.ol-dot {
+  touch-action: none;
+}
+
 /* While a drag is in flight: one cursor everywhere, no text selection, and
    the row menus get out of the way (Workflowy hides them the same way). */
 .ol-root--dragging,
@@ -169,10 +191,11 @@ body,
   display: none;
 }
 
-/* The row being dragged stays in place, marked with a soft highlight. */
+/* The bullet being dragged is picked up: it floats over the outline. */
 .ol-row--dragging {
-  background: #f0f2f5;
+  background: #fff;
   border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
 }
 
 .ol-row--block {
@@ -181,40 +204,6 @@ body,
 
 .ol-row--block .ol-text::selection {
   background: transparent;
-}
-
-.ol-row--dragging .ol-dot {
-  opacity: 0.25;
-}
-
-/* Where it will land. The circle sits on the bullet column of the level being
-   chosen — the same x as a real bullet at that depth — and the line runs from
-   it to the right margin. */
-.ol-drop {
-  position: absolute;
-  right: 28px;
-  display: flex;
-  align-items: center;
-  height: 10px;
-  margin-top: -5px;
-  pointer-events: none;
-  z-index: 5;
-}
-
-.ol-drop__dot {
-  flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #9aa5b1;
-}
-
-.ol-drop__line {
-  flex: 1 1 auto;
-  height: 4px;
-  margin-left: 4px;
-  border-radius: 2px;
-  background: #cbd2d9;
 }
 
 .ol-row {

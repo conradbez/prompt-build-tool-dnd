@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { PYTHON_CAPTION, type Bullet, type Field, type RunFile, type TestStatus } from '../types';
 import { FileThumbs } from '../RunFiles';
 import { actions, flatten, getState, titleMap } from '../store';
@@ -18,7 +19,6 @@ import {
 import { describeVar, usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
 import { renderInlineMarkdown, renderMarkdown } from '../lib/markdown';
 import { deleteFile, fileLink, type ModelRunStatus } from '../api';
-import { INDENT } from './dragDrop';
 import { useFileDrop } from './fileDrop';
 import { caretAtStart, caretOnFirstLine, caretOnLastLine } from '../lib/caret';
 
@@ -51,15 +51,12 @@ interface Tip {
 
 interface Props {
   bullet: Bullet;
-  depth: number;
   /** True when this bullet is the one highlighted in the mind map. */
   selected: boolean;
   /** Part of a multi-row selection — see `OutlineState.blockSel`. */
   inBlock: boolean;
-  /** True while this row (or an ancestor of it) is being dragged. */
+  /** True while this row is the one being dragged. */
   dragging: boolean;
-  /** Press on the bullet dot — the drag handle. */
-  onDragStart: (id: string, e: React.PointerEvent) => void;
   /** This bullet's latest run output, if it has one. */
   result?: string;
   /** A test bullet's verdict from the latest run, if it has one. */
@@ -99,11 +96,9 @@ const STATUS_TIP: Record<ModelRunStatus, string> = {
  */
 export function BulletRow({
   bullet,
-  depth,
   selected,
   inBlock,
   dragging,
-  onDragStart,
   result,
   test,
   runStatus,
@@ -390,7 +385,6 @@ export function BulletRow({
       className={`ol-row ${bullet.kind !== 'prompt' ? `ol-row--${bullet.kind}` : ''} ${dragging ? 'ol-row--dragging' : ''} ${inBlock ? 'ol-row--block' : ''} ${drop.over ? 'ol-row--filedrop' : ''}`}
       data-row={id}
       {...drop.handlers}
-      style={{ marginLeft: depth * INDENT }}
       onMouseMove={onMouseMove}
       onMouseLeave={() => setTip(null)}
     >
@@ -412,9 +406,6 @@ export function BulletRow({
             effect of clicking where you meant to type. */}
         <button
           className={`ol-dot ${selected ? 'ol-dot--selected' : hasChildren && bullet.collapsed ? 'ol-dot--full' : ''}`}
-          onPointerDown={(e) => {
-            if (e.button === 0 || e.pointerType !== 'mouse') onDragStart(id, e);
-          }}
           onClick={() => {
             actions.select(id);
             onExpand(id);
@@ -636,10 +627,13 @@ function Mirror({
 /** The hovered mention's full title, following the pointer. */
 function MentionTip({ tip }: { tip: Tip }) {
   const x = Math.min(Math.max(tip.x, 90), window.innerWidth - 90);
-  return (
+  // Portaled out: inside the outline's SVG `<foreignObject>`, `fixed` would be
+  // relative to the row rather than the window.
+  return createPortal(
     <div className="ol-tip" style={{ left: x, top: tip.y - 10 }} role="tooltip">
       {tip.text}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
