@@ -42,6 +42,7 @@ import files as attachments
 # promptmap finds these kinds by entry point; imported here for their helpers.
 from promptmap_extra_model_kinds import agent37_exec, agent_exec, modal_exec
 import accounts
+import bug_reports
 import search
 from llm import make_llm_call
 from promptmap_extra_model_kinds.models import model_name
@@ -983,6 +984,7 @@ app.add_middleware(
 
 
 app.include_router(accounts.router)
+app.include_router(bug_reports.router)
 
 
 @app.get("/healthz")

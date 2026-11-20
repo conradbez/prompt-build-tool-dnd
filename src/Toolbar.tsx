@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PROVIDERS, runGraph, type ClassifierSettings, type Provider } from './api';
 import { RunProgress } from './RunProgress';
+import { BugButton } from './bugReport/BugButton';
 import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
 import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';
@@ -196,6 +197,7 @@ export function Toolbar() {
         <button className="tb__run" onClick={() => run()} disabled={state.running}>
           {state.running ? `Running ${progress.done}/${progress.total}…` : 'Run'}
         </button>
+        <BugButton />
         {state.runLog.length > 0 && (
           <button
             className={`tb__log${progress.failed || state.runErrors.length ? ' tb__log--failed' : ''}${state.running ? ' tb__log--live' : ''}`}
