@@ -53,6 +53,9 @@ interface Props {
   /** Steps an agent bullet may take before it must answer; 0 = server default. */
   agentSteps: number;
   onAgentStepsChange: (v: number) => void;
+  /** Most bullets a run works on at once; 0 = server default. */
+  maxParallel: number;
+  onMaxParallelChange: (v: number) => void;
   /** The user's own Agent37 key for preserve-disk agents; blank = shared instance. */
   agent37Key: string;
   onAgent37KeyChange: (v: string) => void;
@@ -84,16 +87,30 @@ export function SettingsModal({
   onClassifierChange,
   agentSteps,
   onAgentStepsChange,
+  maxParallel,
+  onMaxParallelChange,
   agent37Key,
   onAgent37KeyChange,
 }: Props) {
   // The server's own limits, shown so a blank field says what it means.
-  const [{ defaultSteps, maxSteps }, setLimits] = useState({ defaultSteps: 30, maxSteps: 200 });
+  const [{ defaultSteps, maxSteps, defaultParallel, maxParallel: parallelCap }, setLimits] = useState({
+    defaultSteps: 30,
+    maxSteps: 200,
+    defaultParallel: 4,
+    maxParallel: 8,
+  });
   useEffect(() => {
     if (focus === 'account') document.getElementById('settings-account')?.scrollIntoView({ block: 'start' });
   }, [focus]);
   useEffect(() => {
-    agentInfo().then((info) => setLimits({ defaultSteps: info.defaultSteps, maxSteps: info.maxSteps }));
+    agentInfo().then((info) =>
+      setLimits({
+        defaultSteps: info.defaultSteps,
+        maxSteps: info.maxSteps,
+        defaultParallel: info.defaultParallel,
+        maxParallel: info.maxParallel,
+      }),
+    );
   }, []);
 
   useEffect(() => {
@@ -167,6 +184,29 @@ export function SettingsModal({
                 placeholder={`${defaultSteps} (server default)`}
                 value={agentSteps || ''}
                 onChange={(e) => onAgentStepsChange(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+              />
+            </div>
+          </section>
+
+          <section className="res-col">
+            <h3 className="res-col__head">
+              Parallel bullets
+              <Info>
+                How many bullets a run works on at once. Bullets that don&rsquo;t depend on each other run
+                side by side — agents too — so a lower number spends more slowly and stays under a
+                provider&rsquo;s rate limit; 1 runs them one at a time. Blank uses the server&rsquo;s default (
+                {defaultParallel}); at most {parallelCap}.
+              </Info>
+            </h3>
+            <div className="res-col__body pd-model">
+              <input
+                className="pd-input"
+                type="number"
+                min={1}
+                max={parallelCap}
+                placeholder={`${defaultParallel} (server default)`}
+                value={maxParallel || ''}
+                onChange={(e) => onMaxParallelChange(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
               />
             </div>
           </section>

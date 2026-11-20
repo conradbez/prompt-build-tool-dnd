@@ -42,7 +42,9 @@ import files as attachments
 # promptmap finds these kinds by entry point; imported here for their helpers.
 from promptmap_extra_model_kinds import agent37_exec, agent_exec, modal_exec
 import accounts
+import search
 from llm import make_llm_call
+from promptmap_extra_model_kinds.models import model_name
 from promptmap import model_types as _promptmap_kinds
 
 # A remote-browser agent is told to drive Chromium with Playwright's
@@ -55,12 +57,23 @@ _pip_extras = os.environ.get(agent_exec.PIP_ENV, "")
 if "playwright" not in _pip_extras.lower():
     os.environ[agent_exec.PIP_ENV] = ", ".join(p for p in (_pip_extras.strip(), "playwright") if p)
 
-# promptmap registers its own `execute_python` (exec() in this process) and `agent`
-# (bash on this machine) on import. Nothing here asks for them — code runs on
-# Modal or Agent37 — so they are taken out: a `model_type` naming one is then
-# unknown, and promptmap runs it as a plain LLM call instead.
-for _local in ("execute_python", "agent"):
-    _promptmap_kinds._REGISTRY.pop(_local, None)
+# Only the kinds this server asks for stay registered. promptmap and its extras
+# also register kinds that run code on *this* machine — `agent` / `coding_agent`
+# (bash), `execute_python` (exec() in-process), `agent_multi_harness`,
+# `browser_use` — and nothing here wants them: code runs on Modal or Agent37.
+# Plugins are loaded first so a later lookup cannot bring one back. A
+# `model_type` naming a removed kind then fails the bullet as unknown.
+ALLOWED_KINDS = {"", "template", modal_exec.MODEL_TYPE, agent_exec.MODEL_TYPE, agent37_exec.MODEL_TYPE}
+_promptmap_kinds.load_plugins()
+for _kind_name in list(_promptmap_kinds._REGISTRY):
+    if _kind_name not in ALLOWED_KINDS:
+        del _promptmap_kinds._REGISTRY[_kind_name]
+
+# Most bullets a run works on at once (promptmap's `max_parallel`). Independent
+# bullets — agents included — run side by side, so this caps concurrent spend
+# and provider rate limits too. Settings may ask for fewer or more, within MAX.
+DEFAULT_PARALLEL = 4
+MAX_PARALLEL = 8
 
 # The built frontend (repo-root `dist/`), if it was shipped alongside the
 # server. When present it is served at `/`, so one deployment hosts both the
@@ -72,19 +85,20 @@ PROVIDERS = {"gemini", "openai", "anthropic", "openrouter"}
 # Attachments are held in memory on the way through, so keep them modest.
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
-# promptmap has no model_type semantics of its own: it parses this directive into
-# `model.config` and passes it to `llm_call(config=...)`, which is where the
-# passthrough happens (see `llm.py`). Prepended to a template node's source.
-# `global_instruction=False` because a template bullet is a passthrough: its
-# rendered prompt *is* its output, so a prepended instruction would show up as
-# text in the result instead of steering a model.
-TEMPLATE_CONFIG_LINE = '{{ config(model_type="template", global_instruction=False) }}'
+# promptmap's built-in `template` kind: the rendered prompt *is* the output, no
+# LLM call, and no global instruction (the kind opts out of it).
+TEMPLATE_CONFIG_LINE = '{{ config(model_type="template") }}'
 
 # A search bullet is a template whose rendered text — refs and variables filled
-# in — is captured as the query and swapped for the web results
-# `rag_brave_search` (from promptmap-extra-model-kinds) returns for it.
+# in — is captured as the query and swapped for the web results a RAG kind from
+# promptmap-extra-model-kinds returns for it. Which one depends on the run's
+# provider (see `search.py`): the provider's own grounded search, on the key the
+# person sent, or Brave where the provider has none.
 SEARCH_OPEN = "{% set query %}"
-SEARCH_CLOSE = '{% endset %}{{ rag_brave_search(query) | join("\\n\\n") }}'
+
+
+def _search_close(provider: str) -> str:
+    return '{%% endset %%}{{ %s(query) | join("\\n\\n") }}' % search.function_for(provider)
 
 # JSON enforcement, also promptmap's own: it parses the answer (stripping ```json
 # fences), fails the model if it will not parse, and hands the *parsed* value
@@ -134,11 +148,13 @@ promptmap.register_config_keys("judge", "threshold")
 # The run variable a person sets in Settings to pick the model they run with.
 # promptmap reads `config()` before any promptdata exists, so the server resolves it
 # itself: it goes straight to the LLM client and the agent sandbox, and into
-# the config of every bullet that calls a model, where `llm.py` and the agent
-# kinds read a bullet's own choice.
+# the config of every bullet that calls a model as promptmap's own `model` key
+# (the one its default LiteLLM backend reads), where `llm.py` and the agent
+# kinds read a bullet's own choice — and where an exported project's backend
+# reads it too.
 LLM_MODEL_VAR = "llm_model"
+MODEL_KEY = "model"
 _MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@-]+$")
-promptmap.register_config_keys(LLM_MODEL_VAR)
 
 # The model is left out of promptmap's cache key: switching models keeps the
 # answers already run rather than paying for them again. A bullet's kind still
@@ -146,7 +162,7 @@ promptmap.register_config_keys(LLM_MODEL_VAR)
 # Turn a bullet's cache off for a fresh answer from the new model.
 from promptmap.executor import run_context as _run_context
 
-_run_context._NON_KEY_CONFIG = _run_context._NON_KEY_CONFIG | {LLM_MODEL_VAR}
+_run_context._NON_KEY_CONFIG = _run_context._NON_KEY_CONFIG | {MODEL_KEY}
 
 # An agent bullet with a public URL ends its answer with the URL in this block,
 # which the editor pulls out and shows as a link of its own (`src/AgentLinks.tsx`)
@@ -160,6 +176,15 @@ URL alone in this block, exactly:
 https://…
 [/public url]
 """
+
+# A bullet that knows its place: the bullets around it, as promptmap's own
+# outline of the graph — the window one step up and down, plus the map's final
+# outputs, with "[you are here]" on this one. Model names are the bullets'
+# titles (see `exporter.model_names`), so the tree reads as the map does.
+OUTLINE_BLOCK = """
+
+Where this sits in the larger map (each bullet is built from the ones nested under it):
+{{ org_outline(up=1, down=1, zoom=1) }}"""
 
 # A bullet with caching off: promptmap skips the cache lookup and always runs it.
 NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"
@@ -184,7 +209,7 @@ def _with_bullet_model(kind_name: str) -> None:
     """Let an agent kind's bullet name its own model.
 
     The agent kinds take the model from the run (`agent_exec.RunSettings`), not
-    from `config()`, so the bullet's `LLM_MODEL_VAR` is swapped into the run
+    from `config()`, so the bullet's `model` is swapped into the run
     settings for the length of its own call.
     """
     kind = _promptmap_kinds.get_model_kind(kind_name)
@@ -193,7 +218,7 @@ def _with_bullet_model(kind_name: str) -> None:
     inner = kind.exec_fn
 
     async def execute(rendered: str, call: promptmap.ModelCall) -> Any:
-        model = call.spec.config.get(LLM_MODEL_VAR)
+        model = call.spec.config.get(MODEL_KEY)
         if not model:
             return await inner(rendered, call)
         run = agent_exec._settings.get()
@@ -220,9 +245,11 @@ def _classifier_config_line(threshold: float) -> str:
 
 # What the "Model input" column says for a bullet that never ran.
 SKIPPED_NOTE = (
-    "[Not sent. Something this bullet depends on failed, so promptmap skipped it — "
-    "which is why the inputs below are missing: they were never produced.]"
+    "[Not sent. Something this bullet depends on failed, so promptmap skipped it. "
+    "Its own text is below; its inputs were never produced.]"
 )
+# …and for one that failed: promptmap reports no rendered prompt for an error.
+FAILED_NOTE = "[This bullet failed — see the error. Its own text is below.]"
 
 
 # Attachments reach the model the same way: promptmap parses the declared names out
@@ -325,17 +352,6 @@ def _as_promptdata(text: str, names: set[str]) -> str:
     )
 
 
-def _fill_vars(text: str, promptdata: dict[str, str]) -> str:
-    """The same rewrite, but substituting the values — for showing a person
-    what a bullet was actually sent, where a Jinja call would say nothing."""
-    if not promptdata:
-        return text
-    return _VAR_REF.sub(
-        lambda m: promptdata.get(m.group(1), m.group(0)),
-        text,
-    )
-
-
 class FileRef(BaseModel):
     """An attachment on a bullet: the object key plus its original name."""
 
@@ -394,8 +410,11 @@ class Node(BaseModel):
     judge: str = "llm"
     threshold: float = 0.5
     # The model this bullet calls; empty for the run's (`LLM_MODEL_VAR`). Goes
-    # into its `config()`, where `llm.py` and the agent kinds read it.
+    # into its `config(model=…)`, where `llm.py` and the agent kinds read it.
     model: str = ""
+    # A prompt or agent bullet told where it sits in the map: promptmap's
+    # `org_outline()` renders the bullets around it as a tree below its text.
+    outline: bool = False
 
 
 class ClassifierSettings(BaseModel):
@@ -429,6 +448,9 @@ class RunRequest(BaseModel):
     # Run just these bullets and what feeds them (promptmap's `select`). Empty runs
     # the whole graph.
     select: list[str] = []
+    # Settings → parallel bullets: most bullets running at once. 0 means the
+    # server's default (`DEFAULT_PARALLEL`); capped at `MAX_PARALLEL`.
+    maxParallel: int = 0
 
 
 class ExportRequest(BaseModel):
@@ -481,11 +503,6 @@ def _has_key(provider: str, api_key: Optional[str]) -> bool:
     return bool(api_key)
 
 
-def _slug(node_id: str) -> str:
-    """A promptmap-safe model name derived from a bullet id (used in ref() too)."""
-    return "n_" + re.sub(r"[^0-9a-zA-Z]", "_", node_id)
-
-
 def _build_source(
     node: Node,
     child_ids: list[str],
@@ -493,6 +510,7 @@ def _build_source(
     session_id: str = "",
     var_names: set[str] | None = None,
     file_sources: set[str] | None = None,
+    provider: str = "gemini",
 ) -> str:
     """Compose a bullet's promptmap prompt.
 
@@ -509,8 +527,8 @@ def _build_source(
     "summarise what follows" means what it says.
 
     A template node additionally gets a `{{ config(model_type="template") }}`
-    line, which promptmap parses into `model.config` and hands to `llm_call`, where
-    it short-circuits into a passthrough instead of an LLM call.
+    line — promptmap's built-in passthrough kind: no LLM call, the rendered text
+    is the output. A search node is a template whose text becomes a query.
 
     A python node gets the `python_modal` config line instead, and its refs go
     into a Jinja *comment* — see `_python_source`. An agent node keeps the
@@ -522,7 +540,26 @@ def _build_source(
 
     Any `@name` naming a run variable becomes `{{ promptdata("name") }}` on the
     way through, which is how the values reach the prompt (see `_as_promptdata`).
+
+    A bullet with a model of its own carries it as `config(model=…)`; one set to
+    know its place gets promptmap's `org_outline()` after its text.
     """
+    source = _compose_source(node, child_ids, id_to_slug, session_id, var_names, file_sources, provider)
+    own_model = _model_id(node.model)
+    if own_model and _calls_model(node):
+        source = '{{ config(%s="%s") }}\n' % (MODEL_KEY, own_model) + source
+    return source
+
+
+def _compose_source(
+    node: Node,
+    child_ids: list[str],
+    id_to_slug: dict[str, str],
+    session_id: str,
+    var_names: set[str] | None,
+    file_sources: set[str] | None,
+    provider: str,
+) -> str:
     dep_ids = _deps(node, child_ids, id_to_slug)
     dep_slugs = [id_to_slug[d] for d in dep_ids]
     if node.kind == "python":
@@ -549,7 +586,9 @@ def _build_source(
     ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids if d not in inlined]
     source = "\n".join([prompt, *ref_lines]) if ref_lines else prompt
     if node.kind == "search":
-        return "\n".join([TEMPLATE_CONFIG_LINE, SEARCH_OPEN + source + SEARCH_CLOSE])
+        return "\n".join([TEMPLATE_CONFIG_LINE, SEARCH_OPEN + source + _search_close(provider)])
+    if node.outline and node.kind in ("prompt", "agent"):
+        source += OUTLINE_BLOCK
     if node.jsonOutput:
         source = JSON_CONFIG_LINE + "\n" + source
     if node.kind == "template":
@@ -622,6 +661,7 @@ def _models(
     names: dict[str, str],
     session_id: str,
     promptdata: dict[str, str],
+    provider: str = "gemini",
 ) -> dict[str, str]:
     """Every bullet's promptmap source, keyed by its model name — for a run and an
     export alike."""
@@ -629,7 +669,7 @@ def _models(
     producers = {n.id for n in nodes if n.kind == "agent" and n.producesFiles}
     return {
         names[n.id]: _build_source(
-            n, children[n.id], feeds, session_id, set(promptdata), producers
+            n, children[n.id], feeds, session_id, set(promptdata), producers, provider
         )
         for n in nodes
     }
@@ -788,51 +828,24 @@ def _overfull_python(nodes: list[Node]) -> list[str]:
     ]
 
 
-def _model_input(
-    node: Node,
-    dep_ids: list[str],
-    results: dict[str, str],
-    global_instruction: str = "",
-    promptdata: dict[str, str] | None = None,
-) -> str:
-    """The prompt as the model received it, rebuilt from the run's outputs.
+def _prompt_shown(node: Node, rendered: str, dep_ids: list[str], live: dict[str, str]) -> str:
+    """What the "Model input" column shows for a bullet that ran.
 
-    promptmap renders `{{ ref('x') }}` into x's output, so the prompt a bullet was
-    actually sent is its own text followed by each dependency's result, in
-    dependency order — the same assembly `_build_source` describes. Rebuilt
-    here rather than fished out of promptmap: `async_run` hands back outputs only,
-    and a cached node never re-renders, so there is nothing to fish.
-
-    A python bullet is the exception: its own text is not part of the program,
-    and what runs is the code extracted from its child.
-
-    The global instruction sits on top, the way promptmap prepends it — but only for
-    the bullets that receive one, i.e. prompts. Templates, searches and python
-    bullets opt out, so showing it there would be a lie about what ran. (promptmap treats an
-    instruction containing `{{ prompt }}` as a wrapper instead; this rebuild
-    shows the plain prepend, which is what the settings box invites.)
+    promptmap's own `prompt_rendered` — exactly what was sent, global
+    instruction, variables and `[ref]` tags included, and filled in for a
+    cached answer too. A python bullet is the exception: its prompt is only its
+    config line, and what runs is the code extracted from its child.
     """
     if node.kind == "python":
-        return modal_exec._inherited_code([results[d] for d in dep_ids if d in results])
-    if node.kind == "test":
-        text = _test_assertion(_fill_vars(node.text.strip(), promptdata or {}))
-        parts = [results[d] for d in dep_ids if d in results]
-        if _is_classifier(node):
-            return "\n".join([text, CLASSIFIER_SEPARATOR, *parts])
-        return "\n".join([text, TEST_INSTRUCTION, TEST_MATERIAL, *parts])
-    # Variables are shown filled in, not as the Jinja call they were compiled
-    # to, and a reference is shown as the answer that replaced it — this column
-    # exists to answer "what did the model actually see".
-    text, inlined = _inline(
-        _fill_vars(node.text.strip(), promptdata or {}),
-        lambda ref_id: results.get(ref_id),
-    )
-    own = _json_body(node, text)
-    parts = [results[d] for d in dep_ids if d in results and d not in inlined]
-    body = "\n".join([own, *parts]) if parts else own
-    if global_instruction and node.kind not in ("template", "search"):
-        return _fill_vars(global_instruction, promptdata or {}).rstrip("\n") + "\n\n" + body
-    return body
+        return modal_exec._inherited_code([live[d] for d in dep_ids if d in live])
+    return rendered.strip()
+
+
+def _prompt_unsent(node: Node, status: str) -> str:
+    """The "Model input" column for a bullet with no rendered prompt to show."""
+    note = SKIPPED_NOTE if status == "skipped" else FAILED_NOTE
+    text = node.text.strip() if node.kind != "python" else ""
+    return note + ("\n\n" + text if text else "")
 
 
 def _json_forms(text: str) -> tuple[str, str]:
@@ -876,9 +889,9 @@ def _node_file_keys(node: Node, session_id: str) -> list[str]:
 def _title(node: Node, others: dict[str, Node] | None = None) -> str:
     """What to call a bullet in a message to a person: its title.
 
-    Errors used to name the promptmap model — `n_gT4b9…`, a slug built from an id
-    nobody has seen — which is the right name for the run and the wrong one for
-    the sentence a person reads when it fails.
+    A model is named after the title too (`exporter.model_names`), but made
+    safe for `ref('…')` — lowercased and underscored — which is the right name
+    for the run and the wrong one for the sentence a person reads.
     """
     line = node.title.strip()
     if node.kind == "python" and not line:
@@ -935,37 +948,28 @@ def _file_info(f: promptmap.File, session_id: str, bullet_id: str, stored: dict)
 
 def _serialise(
     outputs: dict[str, Any], titles: dict[str, str] | None = None
-) -> tuple[dict[str, str], list[str], set[str], dict[str, list[promptmap.File]]]:
-    """Split promptmap outputs into results, error strings, the names it skipped, and
-    the files each produced.
+) -> tuple[dict[str, str], list[str]]:
+    """Split promptmap outputs into text results and error strings.
 
-    A skip is not an error of its own: it is what happens *to* a bullet when
-    something it depends on fails. Kept apart from the errors so the run can say
-    which bullets never went anywhere, rather than leaving a prompt on screen
-    that was never sent.
+    A skip is reported as an error line too — it is what happens *to* a bullet
+    when something it depends on fails. Files were already taken from each
+    result as it landed (see `on_done`), so only the text is kept here.
     """
     titles = titles or {}
     results: dict[str, str] = {}
     errors: list[str] = []
-    skipped: set[str] = set()
-    files: dict[str, list[promptmap.File]] = {}
     for name, value in outputs.items():
         label = titles.get(name, name)
         if isinstance(value, promptmap.ModelError):
             errors.append(f"{label}: {value.message}")
         elif isinstance(value, promptmap.ModelStatus):
-            skipped.add(name)
             errors.append(f"{label}: skipped — something it needs did not run.")
         else:
-            rest, made = _split_files(value)
-            if made:
-                files[name] = made
-            text = _text(rest)
             # Stripped because a template bullet's output is its own rendered
             # source, and the injected `{{ config(...) }}` line renders to an
             # empty first line.
-            results[name] = text.strip()
-    return results, errors, skipped, files
+            results[name] = _text(_split_files(value)[0]).strip()
+    return results, errors
 
 
 app = FastAPI(title="Visual Prompt Map runner", version="0.1.0")
@@ -1019,6 +1023,9 @@ def agent_enabled() -> dict:
         "rejected": agent_exec.rejected(),
         "defaultSteps": agent_exec.STEP_LIMIT,
         "maxSteps": agent_exec.MAX_STEP_LIMIT,
+        # How many bullets a run works on at once — see `DEFAULT_PARALLEL`.
+        "defaultParallel": DEFAULT_PARALLEL,
+        "maxParallel": MAX_PARALLEL,
     }
 
 
@@ -1084,8 +1091,8 @@ def export(req: ExportRequest) -> ExportResponse:
         return ExportResponse(errors=["Nothing to export — every bullet is empty."])
 
     promptdata = _clean_promptdata(req.promptdata)
-    # Readable names, not `n_<id>`: these become file names and `ref('…')`
-    # calls that a person is going to read and edit.
+    # The same readable names a run uses: file names and `ref('…')` calls that
+    # a person is going to read and edit.
     id_to_name = exporter.model_names(nodes)
     children = _children(nodes)
     # Test bullets leave as promptmap tests, not models: nothing depends on a
@@ -1098,12 +1105,17 @@ def export(req: ExportRequest) -> ExportResponse:
     }
     models = {
         name: src
-        for name, src in _models(nodes, children, id_to_name, req.sessionId, promptdata).items()
+        for name, src in _models(
+            nodes, children, id_to_name, req.sessionId, promptdata, req.provider
+        ).items()
         if name not in tests
     }
 
-    notes = exporter.warnings(nodes)
+    notes = exporter.warnings(nodes, req.provider)
     build = exporter.project if req.target == "project" else exporter.script
+    # The run's model — Settings' `llm_model`, else the server's default — goes
+    # into settings.yml; a bullet's own stays in its `config(model=…)`.
+    model = _llm_model(promptdata) or (model_name(req.provider) if req.provider in PROVIDERS else "")
     return ExportResponse(
         filename=exporter.filename(req.name, req.target),
         text=build(
@@ -1111,6 +1123,7 @@ def export(req: ExportRequest) -> ExportResponse:
             models,
             tests,
             req.provider,
+            model,
             req.globalInstruction.strip(),
             promptdata,
             notes,
@@ -1200,26 +1213,21 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             ]
         )
 
-    id_to_slug = {n.id: _slug(n.id) for n in nodes}
+    # Models are named after their bullets' titles — readable in a `[ref]` tag,
+    # an error message and `org_outline()` — and unique within the run.
+    id_to_slug = exporter.model_names(nodes)
     slug_to_id = {v: k for k, v in id_to_slug.items()}
     by_node = {n.id: n for n in nodes}
     titles = {n.id: _title(n, by_node) for n in nodes}
 
     children = _children(nodes)
-    models = _models(nodes, children, id_to_slug, req.sessionId, promptdata)
+    models = _models(nodes, children, id_to_slug, req.sessionId, promptdata, req.provider)
     feeds = _feeding(nodes, id_to_slug)
     llm_model = _llm_model(promptdata)
-    for n in nodes:
-        # The bullet's own model over the run's; either way it is in the config,
-        # where `llm.py` reads it and promptmap's cache keys on it.
-        chosen = _model_id(n.model) or llm_model
-        if chosen and _calls_model(n):
-            model_line = '{{ config(%s="%s") }}' % (LLM_MODEL_VAR, chosen)
-            models[id_to_slug[n.id]] = model_line + "\n" + models[id_to_slug[n.id]]
 
     # A selected run is the selection and everything upstream of it: promptmap works
-    # that out from the models itself, but the plan, prompts and verdicts sent
-    # back should name only what will actually run.
+    # that out from the models itself, but the plan and verdicts sent back should
+    # name only what will actually run.
     select = [i for i in req.select if i in by_node]
     if req.select and not select:
         return RunResponse(errors=["The bullet to run is empty or not runnable."])
@@ -1241,15 +1249,17 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
 
     emit({"type": "plan", "models": [{"id": n.id, "title": titles[n.id]} for n in planned]})
 
-    # What downstream prompts rendered so far, so a finished bullet's "Model
-    # input" can be rebuilt the moment it lands: its inputs all finished first.
+    # Gathered as each bullet lands. `live_rendered` is what downstream prompts
+    # rendered for it — a python bullet's input is read from there.
     live_rendered: dict[str, str] = {}
+    prompts: dict[str, str] = {}
+    tests: dict[str, str] = {}
+    files: dict[str, list[dict]] = {}
+    # Bucket keys of the large files this run produced — see `_file_info`.
+    stored: dict = {}
 
     def on_start(name: str) -> None:
         emit({"type": "start", "id": slug_to_id.get(name, name)})
-
-    # Bucket keys of the large files this run produced — see `_file_info`.
-    stored: dict = {}
 
     def on_done(result: promptmap.ModelRunResult) -> None:
         node_id = slug_to_id.get(result.model_name, result.model_name)
@@ -1259,10 +1269,13 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             "status": result.status,
             "ms": result.execution_ms,
             "cached": result.cached,
+            # How it was produced: "" (ran), "cache", "cache_check", … — see
+            # `promptmap.executor.executor.CACHE_LABELS`.
+            "cache": result.cache,
             "error": result.error,
         }
-        # promptmap names models by slug ("upstream models failed: ['n_x']"); a
-        # person knows them by their title.
+        # promptmap names upstream models in its errors ("upstream models
+        # failed: ['topic']"); a person knows them by their title.
         for slug, other in slug_to_id.items():
             event["error"] = event["error"].replace(f"'{slug}'", titles[other])
         node = by_node.get(node_id)
@@ -1277,15 +1290,19 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
                 # What promptmap put in a downstream prompt: the whole value, each
                 # file as its one-line handle.
                 rendered = str(value)
-                event["files"] = [_file_info(f, req.sessionId, node_id, stored) for f in made]
+                files[node_id] = [_file_info(f, req.sessionId, node_id, stored) for f in made]
+                event["files"] = files[node_id]
             live_rendered[node_id] = rendered
             deps = _deps(node, children[node_id], feeds)
+            prompts[node_id] = _prompt_shown(node, result.prompt_rendered, deps, live_rendered)
             event["output"] = shown
-            event["prompt"] = _model_input(node, deps, live_rendered, global_instruction, promptdata)
+            event["prompt"] = prompts[node_id]
             if node.kind == "test":
-                event["test"] = _verdict(shown)
-        elif node and node.kind == "test" and result.status == "skipped":
-            event["test"] = "skipped"
+                tests[node_id] = event["test"] = _verdict(shown)
+        elif node:
+            prompts[node_id] = event["prompt"] = _prompt_unsent(node, result.status)
+            if node.kind == "test" and result.status == "skipped":
+                tests[node_id] = event["test"] = "skipped"
         try:
             emit(event)
         except Exception:  # noqa: BLE001 — a progress event is never worth failing the run
@@ -1307,6 +1324,8 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             ),
         )
     )
+    # Search bullets search on the same provider and key — see `search.py`.
+    search_token = search.use_key(req.provider, req.apiKey)
     try:
         llm = make_llm_call(
             api_key=req.apiKey,
@@ -1329,50 +1348,32 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             verbose=False,
             # Tag each `ref()` with its bullet's name so the LLM can tell inputs apart.
             wrap_refs=True,
+            max_parallel=_parallel(req.maxParallel),
             on_model_start=on_start,
             on_model_done=on_done,
         )
     finally:
+        search.reset_key(search_token)
         agent_exec.reset_run(run_token)
 
-    results, errors, skipped_slugs, made = _serialise(
+    results, errors = _serialise(
         outputs, {id_to_slug[n.id]: titles[n.id] for n in nodes}
     )
     by_id = {slug_to_id.get(name, name): value for name, value in results.items()}
-    skipped = {slug_to_id.get(name, name) for name in skipped_slugs}
-    # Anything structured reads one way and renders another — see `_json_forms`.
-    rendered = dict(by_id)
+    # Anything structured is shown pretty-printed — see `_json_forms`.
     for n in nodes:
         if (n.jsonOutput or n.kind in ("agent", "test")) and n.id in by_id:
-            by_id[n.id], rendered[n.id] = _json_forms(by_id[n.id])
-    files = {}
-    for slug, found in made.items():
-        node_id = slug_to_id.get(slug, slug)
-        files[node_id] = [_file_info(f, req.sessionId, node_id, stored) for f in found]
-        rendered[node_id] = str(outputs[slug])  # see `on_done`
-
-    prompts = {}
+            by_id[n.id] = _json_forms(by_id[n.id])[0]
+    # A test that errored itself never said it passed.
     for n in planned:
-        deps = _deps(n, children[n.id], feeds)
-        body = _model_input(n, deps, rendered, global_instruction, promptdata)
-        if n.id in skipped:
-            # Say so rather than showing a prompt that was never sent: the
-            # inputs are missing from it because they never arrived, and a
-            # reconstruction that does not admit that reads as a bug in the
-            # reference that fed it.
-            body = SKIPPED_NOTE + "\n\n" + body
-        prompts[n.id] = body
-    # A test that ran says pass or fail; one skipped because what it checks
-    # failed did not run; one that errored itself could not say it passed.
-    tests = {}
-    for n in planned:
-        if n.kind != "test":
-            continue
-        if n.id in skipped:
-            tests[n.id] = "skipped"
-        else:
-            tests[n.id] = _verdict(by_id[n.id]) if n.id in by_id else "fail"
+        if n.kind == "test":
+            tests.setdefault(n.id, "fail")
     return RunResponse(outputs=by_id, prompts=prompts, tests=tests, files=files, errors=errors)
+
+
+def _parallel(requested: int) -> int:
+    """The run's `max_parallel`: the request's, else the default, within bounds."""
+    return min(MAX_PARALLEL, max(1, requested or DEFAULT_PARALLEL))
 
 
 # Serve the built frontend last, so `/run` and `/healthz` take precedence.

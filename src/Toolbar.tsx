@@ -15,6 +15,7 @@ const GLOBAL_INSTRUCTION_STORAGE = 'wm.globalInstruction';
 const keyStorage = (p: Provider) => `wm.apiKey.${p}`;
 const CLASSIFIER_STORAGE = 'wm.classifier';
 const AGENT_STEPS_STORAGE = 'wm.agentSteps';
+const PARALLEL_STORAGE = 'wm.maxParallel';
 
 function loadClassifier(): ClassifierSettings {
   const empty = { apiKey: '', baseUrl: '', model: '' };
@@ -62,6 +63,10 @@ export function Toolbar() {
   const [agentSteps, setAgentSteps] = useState<number>(
     () => Number(localStorage.getItem(AGENT_STEPS_STORAGE)) || 0,
   );
+  // Most bullets a run works on at once; 0 leaves it to the server's default.
+  const [maxParallel, setMaxParallel] = useState<number>(
+    () => Number(localStorage.getItem(PARALLEL_STORAGE)) || 0,
+  );
   // The user's own Agent37 key; blank runs preserve-disk agents on the shared instance.
   const agent37Key = useAgent37Key();
   // Mod+, opens settings, as in most desktop apps; the browser leaves it to the
@@ -99,6 +104,11 @@ export function Toolbar() {
   const onAgentStepsChange = (v: number) => {
     setAgentSteps(v);
     localStorage.setItem(AGENT_STEPS_STORAGE, String(v));
+  };
+
+  const onMaxParallelChange = (v: number) => {
+    setMaxParallel(v);
+    localStorage.setItem(PARALLEL_STORAGE, String(v));
   };
 
   const onProviderChange = (p: Provider) => {
@@ -144,6 +154,7 @@ export function Toolbar() {
         agent37Key,
         actions.runEvent,
         select,
+        maxParallel,
       );
       if (res.needsKey) {
         // Nothing ran, so the last run's answers stand; the popup asks for a key.
@@ -227,6 +238,8 @@ export function Toolbar() {
           onClassifierChange={onClassifierChange}
           agentSteps={agentSteps}
           onAgentStepsChange={onAgentStepsChange}
+          maxParallel={maxParallel}
+          onMaxParallelChange={onMaxParallelChange}
           agent37Key={agent37Key}
           onAgent37KeyChange={setAgent37Key}
         />

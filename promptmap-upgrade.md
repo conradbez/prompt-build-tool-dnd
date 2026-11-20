@@ -99,3 +99,25 @@ f. **Not worth adopting here:** the core `agent` / `coding_agent`, `agent_multi_
 3. Rename `llm_model` → `model`, then move `llm.py` onto litellm with the per-request key.
 4. Rework export onto `settings.yml` + Construct.
 5. Optional features: `org_outline`, provider search, cache labels.
+
+---
+
+## Status: implemented
+
+Everything above is done on this branch. The exceptions are the upstream asks (an `api_key=` on `litellm_llm_call`, a public non-key-config hook, `config_value(spec, "model")` in the extras agent kinds, and `report_progress` in `agent_exec`). Those belong to promptmap, not this repo.
+
+| Item | Where |
+| --- | --- |
+| Kind allowlist (`""`, `template`, `python_modal`, `agent_modal`, `agent37`) | `main.py` `ALLOWED_KINDS` |
+| `max_parallel` with a **Settings → Parallel bullets** field (default 4, max 8) | `main.py` `_parallel`, `/agent/enabled`, `SettingsModal.tsx` |
+| Prompt column from `ModelRunResult.prompt_rendered` (`_model_input` and `_fill_vars` removed); failed/skipped bullets show a note plus their own text | `main.py` `_prompt_shown`, `_prompt_unsent` |
+| Models named after bullet titles in runs too (readable `[ref]` tags, errors, outline) | `exporter.model_names` used in `_run` |
+| `llm_model` config key → promptmap's `model` | `MODEL_KEY` |
+| `llm.py` on LiteLLM with the request's key: attachments for all providers, `LLMResult` tokens | `llm.py` |
+| Dead template passthrough removed | `llm.py`, `export.py` |
+| Export writes `settings.yml` plus construct JSON; `client.py` only for `classify_call` | `export.py` |
+| Per-bullet "Knows where it sits in the map" → `org_outline()` | `Node.outline`, `NodeSettings.tsx` |
+| Search on the provider's own grounded search with the run's key (Brave for OpenRouter) | `search.py` |
+| Cache label in `done` events and the run log (`· cached` / `· reused`) | `main.py`, `store.ts` |
+
+One trade-off: promptmap reports no rendered prompt for a bullet that **errored**. Its "Model input" now shows a note and its own text, where it used to show a reconstruction.

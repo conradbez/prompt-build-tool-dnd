@@ -33,6 +33,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     persistDisk: false,
     packages: '',
     model: '',
+    outline: false,
     judge: 'llm',
     threshold: 0.5,
     ...partial,
@@ -117,6 +118,7 @@ export function parseDoc(value: unknown): Doc | null {
         persistDisk: !!b.persistDisk,
         packages: typeof b.packages === 'string' ? b.packages : '',
         model: typeof b.model === 'string' ? b.model : '',
+        outline: !!b.outline,
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
         threshold: typeof b.threshold === 'number' ? clampThreshold(b.threshold) : 0.5,
       });
@@ -214,6 +216,18 @@ let runTitles: Record<string, string> = {};
 // over how to run; a bullet's settings call it through `actions.runNode`.
 let runner: ((id: string) => void) | null = null;
 const listeners = new Set<() => void>();
+
+/**
+ * The run log's note on how an answer was produced, from promptmap's cache
+ * label — ` · cached` for the same prompt as last time, ` · reused` for a
+ * changed one promptmap judged close enough. Falls back to the bare flag.
+ */
+function cacheNote(label: string | undefined, cached: boolean): string {
+  if (label === 'cache') return ' · cached';
+  if (label === 'cache_check') return ' · reused';
+  if (label) return ` · ${label}`;
+  return cached ? ' · cached' : '';
+}
 
 function emit(next: OutlineState, record = true) {
   if (record) recordHistory(state, next);
@@ -364,6 +378,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     persistDisk: b.persistDisk,
     packages: b.packages,
     model: b.model,
+    outline: b.outline,
     judge: b.judge,
     threshold: b.threshold,
   }));
@@ -758,6 +773,15 @@ export const actions = {
     if (!b || b.model === model) return;
     const next = clone(state);
     next.bullets[id] = { ...b, model };
+    emit(next);
+  },
+
+  /** Tell one bullet where it sits in the map, or not — see `Bullet.outline`. */
+  setOutline(id: string, on: boolean) {
+    const b = state.bullets[id];
+    if (!b || b.outline === on) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, outline: on };
     emit(next);
   },
 
@@ -1216,7 +1240,7 @@ export const actions = {
             title: title(event.id),
             detail:
               event.status === 'success'
-                ? `${(event.ms / 1000).toFixed(1)}s${event.cached ? ' · cached' : ''}`
+                ? `${(event.ms / 1000).toFixed(1)}s${cacheNote(event.cache, event.cached)}`
                 : event.error,
           },
         ],
