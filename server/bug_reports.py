@@ -2,10 +2,13 @@
 
 Self-contained: one table in the accounts database, three routes. The client
 posts `{events, logs}` gzip'd; it is stored as-is and handed back gzip'd for
-the browser to unpack. `/bug-reports/<VIEW_CODE>` lists the reports with an
-rrweb player — the code is the only guard, so change it to revoke a link.
+the browser to unpack. `/bug-reports/<password>` lists the reports with an
+rrweb player. Only the code's hash is kept here (`_hash(code) == VIEW_HASH`);
+change VIEW_HASH to revoke a link.
 """
 
+import hashlib
+import hmac
 import json
 import time
 import zlib
@@ -16,7 +19,7 @@ from fastapi.responses import HTMLResponse, Response
 
 import accounts
 
-VIEW_CODE = "6449b571"
+VIEW_HASH = "67367231"
 MAX_GZ = 25 * 1024 * 1024
 MAX_JSON = 200 * 1024 * 1024  # gzip-bomb guard
 
@@ -62,8 +65,12 @@ async def create(
     return {"id": cur.lastrowid}
 
 
+def _hash(code: str) -> str:
+    return f"{int(hashlib.sha256(code.encode()).hexdigest(), 16) % 10**8:08d}"
+
+
 def _guard(code: str) -> None:
-    if code != VIEW_CODE:
+    if not hmac.compare_digest(_hash(code), VIEW_HASH):
         raise HTTPException(404, "Not Found")
 
 
@@ -85,7 +92,7 @@ def page(code: str) -> HTMLResponse:
             "SELECT id, created, description, url, user_agent, email, duration"
             " FROM bug_reports ORDER BY created DESC").fetchall()
     data = json.dumps([dict(r) for r in rows]).replace("</", "<\\/")
-    return HTMLResponse(_PAGE.replace("__REPORTS__", data).replace("__CODE__", code),
+    return HTMLResponse(_PAGE.replace("__REPORTS__", data).replace("__CODE__", json.dumps(code)[1:-1].replace("</", "<\\/")),
                         headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
 
@@ -115,7 +122,7 @@ async function show(id) {
   location.hash = id; list(id);
   $('#detail').innerHTML = `<h2>${esc(r.description)}</h2><div class="m">${meta(r)}<br>${esc(r.email)}<br>
     ${esc(r.url)}<br>${esc(r.user_agent)}</div><div id="player">Loading…</div><pre id="logs"></pre>`;
-  const { events, logs } = await (await fetch(`/bug-reports/__CODE__/${id}`)).json();
+  const { events, logs } = await (await fetch(`/bug-reports/${encodeURIComponent("__CODE__")}/${id}`)).json();
   $('#player').innerHTML = '';
   const w = Math.min($('#player').clientWidth || 900, 1400);
   new rrwebPlayer.Player({ target: $('#player'), props: { events, width: w, height: Math.round(w * 0.56) } });
