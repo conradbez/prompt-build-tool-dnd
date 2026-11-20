@@ -1,9 +1,16 @@
 """
 Minimal LLM client for the mind-map runner.
 
-One function, ``make_llm_call``, returns a callable bound to a provider and an
-optional API key. promptmap hands it the files a bullet declared (see `files.py`), so
-an attachment on a bullet goes to the model along with that bullet's prompt.
+One function, ``make_llm_call``, returns a callable bound to a provider and the
+API key the UI sent. Every provider goes through LiteLLM — the backend promptmap
+itself uses (`promptmap.llm`) — so one code path handles them all, attachments
+and JSON mode included. promptmap hands it the files a bullet declared (see
+`files.py`), so an attachment on a bullet goes to the model along with that
+bullet's prompt.
+
+Not `promptmap.llm.litellm_llm_call` itself: that reads provider keys from the
+environment, and this server never spends its own — the key is only ever the
+one the request carried.
 """
 
 from __future__ import annotations
@@ -14,12 +21,12 @@ import mimetypes
 import os
 from typing import Any, Callable, Optional
 
-from promptmap_extra_model_kinds.models import ENV_KEYS, MODEL_ENV, model_name
+import promptmap
+from promptmap.llm import litellm_model, quiet_litellm
+from promptmap_extra_model_kinds.models import MODEL_ENV, model_name
 
-
-def _read_files(files: Any) -> list[tuple[bytes, str]]:
-    """Read promptmap's file objects into (bytes, mime type) pairs."""
-    return [(data, mime) for data, mime, _ in _read_named_files(files)]
+# Anthropic requires a cap on the reply; LiteLLM's default is lower than ours was.
+ANTHROPIC_MAX_TOKENS = 4096
 
 
 def _read_named_files(files: Any) -> list[tuple[bytes, str, str]]:
@@ -34,10 +41,12 @@ def _read_named_files(files: Any) -> list[tuple[bytes, str, str]]:
     return out
 
 
-def _openrouter_parts(prompt: str, files: list[tuple[bytes, str, str]]) -> list[dict]:
-    """OpenAI-style content parts for OpenRouter: images as `image_url`, text
-    inlined, everything else (PDFs first of all) as a `file` part, which
-    OpenRouter parses for models that cannot read the format themselves."""
+def _content(prompt: str, files: list[tuple[bytes, str, str]]) -> str | list[dict]:
+    """The user message's content: the prompt alone, or OpenAI-style parts —
+    images as `image_url`, text inlined, everything else (PDFs first of all) as
+    a `file` part. LiteLLM translates these for each provider."""
+    if not files:
+        return prompt
     parts: list[dict] = []
     for i, (data, mime, name) in enumerate(files, 1):
         name = name or f"file-{i}"
@@ -76,22 +85,11 @@ def _wants_json(config: Any) -> bool:
 
     promptmap validates the answer either way — it parses the response and fails the
     model if it will not parse. This is the other half: where a provider has a
-    JSON mode of its own, turn it on, so the model is *made* to comply rather
-    than only checked afterwards. Anthropic has no such mode; there the
-    instruction in the prompt is the whole of it.
+    JSON mode, turn it on, so the model is *made* to comply rather than only
+    checked afterwards. Anthropic has no such mode; there the instruction in the
+    prompt is the whole of it.
     """
     return bool(config) and config.get("output_format") == "json"
-
-
-def _is_template(config: Any) -> bool:
-    """True for nodes the editor marked as ``model_type="template"``.
-
-    promptmap has no model_type semantics of its own — it parses the directive into
-    ``model.config`` and otherwise runs the node like any other prompt — so
-    each runner honours it in its own ``llm_call``. Without this a template
-    node would be sent to the LLM and answer the text instead of passing it on.
-    """
-    return bool(config) and config.get("model_type") == "template"
 
 
 def _classify(prompt: str, config: dict, settings: dict) -> str:
@@ -102,7 +100,6 @@ def _classify(prompt: str, config: dict, settings: dict) -> str:
     fall back to the server's ``TYPESAFE_API_KEY``. An empty key is still a
     valid call — a local Ollaya needs none.
     """
-    import promptmap
     from promptmap.classifier import parse_threshold, split_question
 
     question, state = split_question(prompt)
@@ -121,101 +118,42 @@ def make_llm_call(
     provider: str = "gemini",
     classifier: Optional[dict] = None,
     model: Optional[str] = None,
-) -> Callable[..., str]:
+) -> Callable[..., Any]:
     """Return an ``llm_call(prompt, files=None, config=None)`` bound to a provider.
 
     The key is only ever ``api_key`` (sent from the UI) — the server's own
     environment keys are never used, so a public deploy can't spend them.
     ``classifier`` holds the settings for classifier-judged tests. ``model`` is
     the person's own choice from Settings; without one the server's default
-    for the provider (`model_name`) answers. A bullet's own ``llm_model`` in
-    its config beats both.
+    for the provider (`model_name`) answers. A bullet's own ``config(model=…)``
+    beats both — promptmap's standard key, the one its LiteLLM backend reads.
     """
     default = model or (model_name(provider) if provider in MODEL_ENV else "")
 
-    def llm_call(prompt: str, files: Any = None, config: Any = None) -> str:
-        if config and config.get("judge") == "classifier":
+    def llm_call(prompt: str, files: Any = None, config: Any = None) -> promptmap.LLMResult | str:
+        config = config or {}
+        if config.get("judge") == "classifier":
             return _classify(prompt, config, classifier or {})
-        if _is_template(config):
-            # ref()/promptdata() are already substituted, so the rendered
-            # prompt *is* the output. Stripped because the injected
-            # {{ config(...) }} line renders to an empty first line.
-            return prompt.strip()
-
-        chosen = (config or {}).get("llm_model") or default
-
-        key = api_key
-        if not key:
+        if not api_key:
             raise RuntimeError(f"No API key for '{provider}'. Enter one in settings.")
 
-        if provider == "openrouter":
-            import openai
-
-            client = openai.OpenAI(api_key=key, base_url="https://openrouter.ai/api/v1")
-            named = _read_named_files(files)
-            resp = client.chat.completions.create(
-                model=chosen,
-                messages=[
-                    {"role": "user", "content": _openrouter_parts(prompt, named) if named else prompt}
-                ],
-                **({"response_format": {"type": "json_object"}} if _wants_json(config) else {}),
-            )
-            return resp.choices[0].message.content or ""
-
-        file_data = _read_files(files)
-
-        if provider == "gemini":
-            from google import genai
-            from google.genai import types
-
-            client = genai.Client(api_key=key)
-            parts: list = [
-                types.Part.from_bytes(data=data, mime_type=mime) for data, mime in file_data
-            ]
-            parts.append(prompt)
-            resp = client.models.generate_content(
-                model=chosen,
-                contents=parts,
-                config=types.GenerateContentConfig(response_mime_type="application/json")
-                if _wants_json(config)
-                else None,
-            )
-            return resp.text or ""
-
-        if file_data:
-            # Only Gemini and OpenRouter build multimodal parts so far. Say so
-            # rather than quietly dropping the attachment from the prompt.
-            raise RuntimeError(
-                f"Attachments are only wired up for Gemini and OpenRouter; '{provider}' received "
-                f"{len(file_data)} file(s) it cannot send."
-            )
-
-        if provider == "openai":
-            import openai
-
-            client = openai.OpenAI(api_key=key)
-            resp = client.chat.completions.create(
-                model=chosen,
-                messages=[{"role": "user", "content": prompt}],
-                # JSON mode refuses a prompt that never says "JSON"; the server
-                # appends that instruction to every JSON bullet, so it does.
-                **({"response_format": {"type": "json_object"}} if _wants_json(config) else {}),
-            )
-            return resp.choices[0].message.content or ""
-
+        options: dict[str, Any] = {}
+        if _wants_json(config) and provider != "anthropic":
+            # OpenAI's JSON mode refuses a prompt that never says "JSON"; the
+            # server appends that instruction to every JSON bullet, so it does.
+            options["response_format"] = {"type": "json_object"}
         if provider == "anthropic":
-            import anthropic
-
-            client = anthropic.Anthropic(api_key=key)
-            msg = client.messages.create(
-                model=chosen,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return "".join(
-                block.text for block in msg.content if getattr(block, "type", None) == "text"
-            )
-
-        raise ValueError(f"Unsupported provider: {provider}")
+            options["max_tokens"] = ANTHROPIC_MAX_TOKENS
+        response = quiet_litellm().completion(
+            model=litellm_model(provider, str(config.get("model") or default)),
+            api_key=api_key,
+            messages=[{"role": "user", "content": _content(prompt, _read_named_files(files))}],
+            **options,
+        )
+        usage = getattr(response, "usage", None)
+        return promptmap.LLMResult(
+            response.choices[0].message.content or "",
+            spent_tokens=getattr(usage, "total_tokens", None),
+        )
 
     return llm_call

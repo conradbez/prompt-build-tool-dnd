@@ -83,17 +83,38 @@ Variables work in the **global instruction** too, and are the only variable that
 can: promptmap refuses `ref()` there (it would make every model depend on one) and
 points at `promptdata` instead.
 
-The `prompts` in the response show variables **filled in**, not as the Jinja
-call they compiled to — that column answers "what did the model actually see".
+The `prompts` in the response are promptmap's own `prompt_rendered`: exactly
+what the model was sent — global instruction, variables filled in, each input
+in its `[name]…[/name]` tag — and filled in for a cached answer too. That column
+answers "what did the model actually see". (A python bullet shows the code it
+ran instead.)
 
-A bullet promptmap **skipped** — because something it depends on failed — gets that
-said at the top of its entry instead. Its inputs are missing from the
-reconstruction because they were never produced, and a prompt that does not
-admit it was never sent reads as a bug in whatever fed it.
+A bullet promptmap **skipped** — because something it depends on failed — or one
+that **failed** has no rendered prompt, so its entry says so and shows the
+bullet's own text instead.
 
-Errors name a bullet by its first line, not by its promptmap model name: `n_gT4b9…` is
-the right name for the run and the wrong one for the sentence a person reads
-when it fails.
+Models are named after their bullets' titles (`export.model_names`: lowercased,
+underscored, unique), so a `[ref]` tag, `org_outline()` and an exported file all
+read the way the map does. Errors still name a bullet by its first line as
+written.
+
+### Parallelism, caching, outline
+
+Independent bullets run side by side, up to `maxParallel` at once (Settings →
+parallel bullets; default 4, at most 8) — agents included, so the cap is also a
+cap on concurrent spend. Each `done` event carries promptmap's `cache` label
+(`cache`, `cache_check`, or `""` when the bullet ran).
+
+A prompt or agent bullet with `outline: true` gets promptmap's `org_outline()`
+after its text: the bullets one step up and down from it, plus the map's final
+outputs, as a tree with "[you are here]" on this one.
+
+### Kinds this server allows
+
+Only `""` (LLM), `template`, `python_modal`, `agent_modal` and `agent37` stay
+registered. Every other kind promptmap or its extras register — `agent`,
+`coding_agent`, `execute_python`, `agent_multi_harness`, `browser_use` — runs
+code on *this* machine and is removed at import.
 
 One ambiguity is left standing, since both features share the `@`: an `@`
 mention arrives here already expanded to the target's title (`@[[id]]` →
@@ -116,10 +137,16 @@ Asking is done too, since validating alone does not make a model comply:
   and python bullets do not get the line — a template's text *is* its output, so
   an instruction in it would come out in the answer — but they are still
   validated.
-* where the provider has a JSON mode, `llm.py` turns it on: Gemini's
-  `response_mime_type`, OpenAI's `response_format` (which requires the prompt to
-  mention JSON — the appended line is what satisfies it). Anthropic has no such
-  mode, so there the instruction and the validation are the whole of it.
+* where the provider has a JSON mode, `llm.py` turns it on (`response_format`
+  through LiteLLM, which maps it to Gemini's `response_mime_type`; OpenAI's
+  requires the prompt to mention JSON — the appended line is what satisfies
+  it). Anthropic has no such mode, so there the instruction and the validation
+  are the whole of it.
+
+Every provider goes through LiteLLM — promptmap's own backend (`promptmap.llm`)
+— with the key the request carried, so attachments reach Gemini, OpenAI,
+Anthropic and OpenRouter alike, and token usage comes back as
+`promptmap.LLMResult`.
 
 **The two forms of a JSON answer.** promptmap hands the *parsed* value downstream, and
 Jinja writes a parsed value into the next prompt with `str()` — a Python-style
@@ -140,15 +167,21 @@ Same body as `/run` plus a `target`:
 // → { "filename": "ore_datasets_pipeline.py", "text": "...", "warnings": [] }
 ```
 
-* **`script`** — one file: the models as a dict, a small `llm_call`, and
-  `promptmap.async_run` over them, then the test bullets as a `TESTS` dict
-  judged by `promptmap.tester.execute_tests`. Tests run after the whole
-  pipeline (`async_run` has no gates), and a failing one makes the script exit 1.
-* **`project`** — one file that *writes* `map/<name>.prompt` per bullet,
-  `map/<name>.testprompt` per test bullet, and a `client.py` with `llm_call`
-  and `classify_call`. That is the layout `promptmap serve` / `run` / `test` expect.
-  `promptmap serve` cannot be handed a dict, so the export has to be the thing
-  that lays the project out.
+* **`script`** — one file: the models as a dict and `promptmap.async_run` over
+  them on promptmap's LiteLLM backend (`litellm_llm_call(PROVIDER, MODEL)`),
+  then the test bullets as a `TESTS` dict judged by
+  `promptmap.tester.execute_tests`. Tests run after the whole pipeline
+  (`async_run` has no gates), and a failing one makes the script exit 1.
+* **`project`** — one file that *writes* the project: the models, tests and
+  promptdata as promptmap's construct JSON (`promptmap.construct_to_files`),
+  plus `settings.yml` (provider + model), `global.prompt`, and a `client.py`
+  with `classify_call` only when a test is classifier-judged. That is the layout
+  `promptmap run` / `test` / `serve` expect.
+
+No LLM client is generated: promptmap's default backend reads the provider and
+model from `settings.yml`, the key from the environment, and a bullet's own
+`config(model=…)` — the same key this server uses — so per-bullet models
+survive the export.
 
 Test bullets leave as promptmap **tests**, not models (`_native_test_source`):
 an LLM judge answers `{"results": "pass"}`, which is promptmap's verdict format,
@@ -159,9 +192,7 @@ test, so this is the one place an export behaves differently.
 
 The sources come from `_build_source`, the same function a run uses, so an
 export is the graph **as it actually runs** rather than a second rendering that
-can drift. What differs is naming: a run uses `n_<bullet id>`, an export names
-each model after its bullet's first line, because these become file names and
-`ref('…')` calls a person will read.
+can drift — and both name each model after its bullet's first line.
 
 `warnings` says what could not come along — attachments (the bytes stay in this
 server's bucket) and python bullets (they need the `python_modal` kind, which is
@@ -175,14 +206,14 @@ Each node carries a `kind`, which decides what running it does:
 |------------|------------------------------------------------------------------|
 | `prompt`   | Sent to the LLM. The default.                                     |
 | `template` | Never sent: the rendered text, with every upstream output substituted in, *is* the output. |
+| `search`   | A template whose rendered text is a web search query: `rag_gemini_search` / `rag_openai_search` / `rag_anthropic_search` on the run's provider **and key** (see `search.py`), or `rag_brave_search` (server `BRAVE_API_KEY`) for OpenRouter. |
 | `python`   | Runs the code its **one child** produced, in a **Modal sandbox** — not on this server. |
 | `agent`    | Its rendered text is a **task** for a coding agent (OpenCode) in a Modal sandbox, with its own tools and, optionally, an **MCP server**'s tools. Its output is `{"output", "logs", "run_time"}`. See below. |
 
-`template` needs no model type of its own: promptmap parses `{{ config(...) }}` into
-`model.config` and hands it to `llm_call`, where `llm.py` short-circuits into a
-passthrough. `python` cannot work that way — `llm_call` never sees the upstream
-outputs, and the code must not run in this process — so `modal_exec.py`
-registers a promptmap model kind for `model_type="python_modal"`.
+`template` is promptmap's built-in passthrough kind: `llm_call` is never
+called. `python` needs the upstream outputs and must not run in this process,
+so `modal_exec.py` (promptmap-extra-model-kinds) registers a model kind for
+`model_type="python_modal"`.
 
 A python bullet **holds no code of its own** — it is an operator, not an
 editor. Its child's output *is* the program. So one bullet asks an LLM for a

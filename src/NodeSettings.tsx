@@ -24,7 +24,7 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
   {
     kind: 'search',
     label: 'Search',
-    desc: 'Its text, with every reference filled in, is a web search query — the top results are the output.',
+    desc: 'Its text, with every reference filled in, is a web search query — run through your provider’s own web search on your key (Brave, for OpenRouter) — and the findings are the output.',
   },
   {
     kind: 'python',
@@ -137,6 +137,22 @@ export function NodeSettings({ bullet }: Props) {
                 onChange={(e) => actions.setCache(id, e.target.checked)}
               />
               Reuse cached answer
+            </label>
+          </Row>
+        )}
+
+        {(kind === 'prompt' || kind === 'agent') && (
+          <Row
+            label="Context"
+            info="Ticked, the bullets around this one — what it is built from, what it feeds, and the map’s final outputs — are listed after its text as a tree, with this bullet marked. Lets it fit in: “match your siblings’ tone”, “leave out what the section above covers”."
+          >
+            <label className="ns-check">
+              <input
+                type="checkbox"
+                checked={bullet.outline}
+                onChange={(e) => actions.setOutline(id, e.target.checked)}
+              />
+              Knows where it sits in the map
             </label>
           </Row>
         )}

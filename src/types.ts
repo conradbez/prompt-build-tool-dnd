@@ -149,6 +149,12 @@ export interface Bullet {
    * server's default for the provider).
    */
   model: string;
+  /**
+   * A prompt or agent bullet told where it sits in the map: promptmap's
+   * `org_outline()` lists the bullets around it, as a tree, after its text —
+   * so "summarise the section above" or "fit in with your siblings" makes sense.
+   */
+  outline: boolean;
   /** A test bullet's judge — see `TestJudge`. Ignored on every other kind. */
   judge: TestJudge;
   /** A classifier-judged test passes when P(yes) ≥ this, 0–1. */

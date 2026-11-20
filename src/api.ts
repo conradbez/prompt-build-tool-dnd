@@ -46,6 +46,8 @@ export interface NodePayload {
   packages: string;
   /** The model this bullet calls — see `Bullet.model`. Empty for the run's. */
   model: string;
+  /** Tell it where it sits in the map — see `Bullet.outline`. */
+  outline: boolean;
   /** Validate this bullet's answer as JSON (promptmap's `output_format="json"`). */
   jsonOutput: boolean;
   /** Reuse promptmap's cached answer — see `Bullet.cache`. */
@@ -138,10 +140,13 @@ export interface AgentInfo {
   /** The step limit a run gets when Settings leaves it blank, and the most it may ask for. */
   defaultSteps: number;
   maxSteps: number;
+  /** How many bullets a run works on at once by default, and the most it may ask for. */
+  defaultParallel: number;
+  maxParallel: number;
 }
 
 export async function agentInfo(): Promise<AgentInfo> {
-  const none: AgentInfo = { enabled: false, defaultSteps: 30, maxSteps: 200 };
+  const none: AgentInfo = { enabled: false, defaultSteps: 30, maxSteps: 200, defaultParallel: 4, maxParallel: 8 };
   try {
     const res = await fetch(`${getServerUrl()}/agent/enabled`);
     if (!res.ok) return none;
@@ -150,6 +155,8 @@ export async function agentInfo(): Promise<AgentInfo> {
       enabled: !!data.enabled,
       defaultSteps: Number(data.defaultSteps) || none.defaultSteps,
       maxSteps: Number(data.maxSteps) || none.maxSteps,
+      defaultParallel: Number(data.defaultParallel) || none.defaultParallel,
+      maxParallel: Number(data.maxParallel) || none.maxParallel,
     };
   } catch {
     return none;
@@ -291,6 +298,12 @@ export type RunEvent =
       status: 'success' | 'error' | 'skipped';
       ms: number;
       cached: boolean;
+      /**
+       * How promptmap produced the answer: '' (it ran), 'cache' (same prompt
+       * as before), 'cache_check' (a changed prompt judged close enough to
+       * reuse), or a model kind's own verdict.
+       */
+      cache?: string;
       error: string;
       output?: string;
       prompt?: string;
@@ -317,6 +330,8 @@ export async function runGraph(
   onEvent?: (event: RunEvent) => void,
   /** Run just these bullets and what feeds them; empty runs the whole graph. */
   select?: string[],
+  /** Settings → most bullets running at once; 0 for the server's default. */
+  maxParallel?: number,
 ): Promise<RunResponse> {
   const url = `${getServerUrl()}/run`;
   const account = getAccount();
@@ -340,6 +355,7 @@ export async function runGraph(
         agentSteps: agentSteps || 0,
         agent37Key: agent37Key?.trim() || '',
         select: select || [],
+        maxParallel: maxParallel || 0,
       }),
     });
   } catch (err) {
