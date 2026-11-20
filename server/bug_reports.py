@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, Response
 
 import accounts
 
-VIEW_HASH = "67367231"
+VIEW_HASH = "65b5b0a2c709e06704e42608a1969231f0a6d49c698d37b809a1e47073e154a3"
 MAX_GZ = 25 * 1024 * 1024
 MAX_JSON = 200 * 1024 * 1024  # gzip-bomb guard
 
@@ -66,7 +66,7 @@ async def create(
 
 
 def _hash(code: str) -> str:
-    return f"{int(hashlib.sha256(code.encode()).hexdigest(), 16) % 10**8:08d}"
+    return hashlib.sha256(code.encode()).hexdigest()
 
 
 def _guard(code: str) -> None:
