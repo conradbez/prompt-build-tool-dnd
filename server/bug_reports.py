@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, Response
 
 import accounts
 
-VIEW_HASH = "65b5b0a2c709e06704e42608a1969231f0a6d49c698d37b809a1e47073e154a3"
+VIEW_HASH = "8ae30b8443c10f21eccd3ca2a2cc66f73502b1323b1f264597a49ed1185570b2"
 MAX_GZ = 25 * 1024 * 1024
 MAX_JSON = 200 * 1024 * 1024  # gzip-bomb guard
 
