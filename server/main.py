@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import dataclasses
 import json
 import os
 import pathlib
@@ -161,9 +160,7 @@ _MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@-]+$")
 # answers already run rather than paying for them again. A bullet's kind still
 # counts — it is `model_type` in the same config — so changing that reruns it.
 # Turn a bullet's cache off for a fresh answer from the new model.
-from promptmap.executor import run_context as _run_context
-
-_run_context._NON_KEY_CONFIG = _run_context._NON_KEY_CONFIG | {MODEL_KEY}
+promptmap.exclude_from_cache_key(MODEL_KEY)
 
 # An agent bullet with a public URL ends its answer with the URL in this block,
 # which the editor pulls out and shows as a link of its own (`src/AgentLinks.tsx`)
@@ -204,36 +201,6 @@ def _model_id(value: str) -> str | None:
     """
     value = value.strip()
     return value if _MODEL_ID.match(value) else None
-
-
-def _with_bullet_model(kind_name: str) -> None:
-    """Let an agent kind's bullet name its own model.
-
-    The agent kinds take the model from the run (`agent_exec.RunSettings`), not
-    from `config()`, so the bullet's `model` is swapped into the run
-    settings for the length of its own call.
-    """
-    kind = _promptmap_kinds.get_model_kind(kind_name)
-    if kind is None or kind.exec_fn is None:
-        return
-    inner = kind.exec_fn
-
-    async def execute(rendered: str, call: promptmap.ModelCall) -> Any:
-        model = call.spec.config.get(MODEL_KEY)
-        if not model:
-            return await inner(rendered, call)
-        run = agent_exec._settings.get()
-        token = agent_exec._settings.set(dataclasses.replace(run, model=str(model)))
-        try:
-            return await inner(rendered, call)
-        finally:
-            agent_exec._settings.reset(token)
-
-    _promptmap_kinds.register_model_kind(dataclasses.replace(kind, exec_fn=execute))
-
-
-for _agent_kind in (agent_exec.MODEL_TYPE, agent37_exec.MODEL_TYPE):
-    _with_bullet_model(_agent_kind)
 
 
 def _calls_model(node: Node) -> bool:
@@ -1326,8 +1293,6 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             ),
         )
     )
-    # Search bullets search on the same provider and key — see `search.py`.
-    search_token = search.use_key(req.provider, req.apiKey)
     try:
         llm = make_llm_call(
             api_key=req.apiKey,
@@ -1351,11 +1316,14 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             # Tag each `ref()` with its bullet's name so the LLM can tell inputs apart.
             wrap_refs=True,
             max_parallel=_parallel(req.maxParallel),
+            # The run's key as a promptmap secret — never rendered, cached or
+            # stored — under the name the search kinds read it by, so search
+            # bullets search on the same provider and key (see `search.py`).
+            secrets=search.secrets_for(req.provider, req.apiKey),
             on_model_start=on_start,
             on_model_done=on_done,
         )
     finally:
-        search.reset_key(search_token)
         agent_exec.reset_run(run_token)
 
     results, errors = _serialise(

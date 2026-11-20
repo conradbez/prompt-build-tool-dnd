@@ -7,10 +7,17 @@ dependencies = [
     "boto3>=1.34",
     "fastapi>=0.115",
     "httpx>=0.27",
-    "promptmap[extras]>=0.8.6",
-    "promptmap-extra-model-kinds>=0.7.19",
+    "promptmap[extras]>=0.8.7",
+    "promptmap-extra-model-kinds>=0.7.20",
     "pydantic>=2",
     "python-dotenv>=1.0",
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.30",
 ]
+
+# TEMPORARY: promptmap 0.8.7 / extras 0.7.20 (per-request keys, exclude_from_cache_key,
+# per-bullet agent models, run secrets for search) are on GitHub but not yet on PyPI.
+# Once they are published, delete this table and re-lock.
+[tool.uv.sources]
+promptmap = { git = "https://github.com/conradbez/promptmap", rev = "65199b0270839a17b5778fcb2da2604364500c03" }
+promptmap-extra-model-kinds = { git = "https://github.com/conradbez/promptmap", subdirectory = "promptmap-extra-model-kinds", rev = "65199b0270839a17b5778fcb2da2604364500c03" }

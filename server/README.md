@@ -137,15 +137,15 @@ Asking is done too, since validating alone does not make a model comply:
   and python bullets do not get the line — a template's text *is* its output, so
   an instruction in it would come out in the answer — but they are still
   validated.
-* where the provider has a JSON mode, `llm.py` turns it on (`response_format`
-  through LiteLLM, which maps it to Gemini's `response_mime_type`; OpenAI's
-  requires the prompt to mention JSON — the appended line is what satisfies
-  it). Anthropic has no such mode, so there the instruction and the validation
-  are the whole of it.
+* provider JSON modes (`response_format`) are **not** switched on: models run
+  through promptmap's own backend, which has no option for them. The
+  instruction and promptmap's validation are the whole of it — a bullet whose
+  answer is not JSON fails rather than passing prose on.
 
-Every provider goes through LiteLLM — promptmap's own backend (`promptmap.llm`)
-— with the key the request carried, so attachments reach Gemini, OpenAI,
-Anthropic and OpenRouter alike, and token usage comes back as
+Every provider goes through promptmap's own LiteLLM backend
+(`promptmap.llm.litellm_llm_call`, with `api_key=` set to the key the request
+carried), so attachments reach Gemini, OpenAI, Anthropic and OpenRouter alike,
+a bullet's `config(model=…)` is honoured, and token usage comes back as
 `promptmap.LLMResult`.
 
 **The two forms of a JSON answer.** promptmap hands the *parsed* value downstream, and
@@ -206,7 +206,7 @@ Each node carries a `kind`, which decides what running it does:
 |------------|------------------------------------------------------------------|
 | `prompt`   | Sent to the LLM. The default.                                     |
 | `template` | Never sent: the rendered text, with every upstream output substituted in, *is* the output. |
-| `search`   | A template whose rendered text is a web search query: `rag_gemini_search` / `rag_openai_search` / `rag_anthropic_search` on the run's provider **and key** (see `search.py`), or `rag_brave_search` (server `BRAVE_API_KEY`) for OpenRouter. |
+| `search`   | A template whose rendered text is a web search query: `rag_gemini_search` / `rag_openai_search` / `rag_anthropic_search` on the run's provider **and key**, passed as a promptmap secret (see `search.py`), or `rag_brave_search` (server `BRAVE_API_KEY`) for OpenRouter. |
 | `python`   | Runs the code its **one child** produced, in a **Modal sandbox** — not on this server. |
 | `agent`    | Its rendered text is a **task** for a coding agent (OpenCode) in a Modal sandbox, with its own tools and, optionally, an **MCP server**'s tools. Its output is `{"output", "logs", "run_time"}`. See below. |
 
