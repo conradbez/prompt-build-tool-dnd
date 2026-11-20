@@ -104,3 +104,71 @@ Read the bullet's setting first and fall back to the run's. promptmap 0.8's `con
 - No per-bullet `provider` override; the agent still uses the run's provider and key.
 - No change to `RunSettings`, `use_run` or the `AGENT_MODEL` environment override.
 - No cache-key change. `model` is in `config`, so it already counts toward the key unless the app excludes it (see #2).
+
+---
+
+## 4. Web-search RAG kinds read their key from the run's `secrets`
+
+### Feature
+`rag_gemini_search`, `rag_openai_search` and `rag_anthropic_search` look for their key in the current run's `secrets` (`async_run(secrets={"GEMINI_API_KEY": …})`) before they look in the environment. A run that passes no secrets behaves exactly as today.
+
+### Reason
+promptmap already has the right mechanism: `secrets` are run-scoped and never rendered, cached or stored. A RAG function can't reach them, though. It only receives its template arguments, so the search kinds can only read keys from the environment.
+
+The environment is process-global, so a server running several users' pipelines at once can't use it. The obvious alternative, an `api_key=` template argument, would put the key into template source and Jinja context, which is exactly what `secrets` exists to avoid.
+
+The app's workaround patches the extras from outside. It replaces the `api_key` name imported into `gemini_search` and `openai_search`, and swaps the `anthropic` module that `anthropic_search` sees for a stand-in.
+
+### Minimal change
+**promptmap**: expose the running run's secrets as a context var. It follows the model tasks automatically, as `progress_listener` already does.
+
+`promptmap/secrets.py`:
+
+```diff
++import contextvars
++
++#: The secrets of the run in progress, for code that is not handed a ModelCall
++#: (RAG kinds, template functions).  Empty outside a run.
++current: "contextvars.ContextVar[Secrets]" = contextvars.ContextVar("promptmap_secrets")
++
++
++def current_secrets() -> "Secrets":
++    return current.get(Secrets())
+```
+
+`promptmap/executor/executor.py`, in `execute_run` after `secrets` is built (line 426):
+
+```diff
+     secrets = secrets if isinstance(secrets, Secrets) else Secrets(secrets)
++    from promptmap.secrets import current as _current_secrets
++    _current_secrets.set(secrets)  # this task's context only; model tasks inherit it
+```
+
+**promptmap-extra-model-kinds**: check the run's secrets first, in the one helper the search kinds share.
+
+`_search.py`:
+
+```diff
+ def load_env(name: str) -> str | None:
+     """Environment variable *name*, falling back to a ``.env`` in the working directory or a parent."""
++    from promptmap.secrets import current_secrets
++
++    if current_secrets().get(name):
++        return current_secrets()[name]
+     if not os.environ.get(name):
+```
+
+`anthropic_search.py` reads the key through `load_env` already but then ignores the result. Pass it on instead (`None` keeps the SDK's own lookup):
+
+```diff
+-    load_env("ANTHROPIC_API_KEY")
+-    client = anthropic.Anthropic(timeout=TIMEOUT)
++    client = anthropic.Anthropic(api_key=load_env("ANTHROPIC_API_KEY"), timeout=TIMEOUT)
+```
+
+`api_key()` in `_search.py` goes through `load_env`, so `gemini_search` and `openai_search` need no change.
+
+### Not part of this request
+- No `api_key=` template argument, no new config keys, and no change to `brave_search`.
+- No change to how secrets are declared or validated (`ModelKind.secrets`, `required_secrets`).
+- Not passing secrets *into* RAG or template-function signatures. The context var leaves every existing signature alone.
