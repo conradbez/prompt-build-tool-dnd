@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PROVIDERS, runGraph, type ClassifierSettings, type Provider } from './api';
 import { RunProgress } from './RunProgress';
-import { BugButton } from './BugReport';
+import { BugButton } from './bugReport/BugButton';
 import { SettingsModal } from './SettingsModal';
 import { actions, buildNodePayloads, getState, useOutline } from './store';
 import { NAME_RE, promptVarMap, usePromptVars } from './lib/promptdata';

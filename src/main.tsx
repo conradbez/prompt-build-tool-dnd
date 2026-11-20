@@ -3,14 +3,10 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { initServerUrlFromQuery } from './api';
 import { startAutoSave, syncFromServer } from './lib/saves';
-import { startBugRecorder } from './lib/bugRecorder';
 import './index.css';
 
 // Pick up a `?server=…` URL from the page address before the app reads it.
 initServerUrlFromQuery();
-
-// Keep the last few minutes on hand for the bug button (see `lib/bugRecorder`).
-startBugRecorder();
 
 // Edits flow back into whichever save is open (see `lib/saves`).
 startAutoSave();

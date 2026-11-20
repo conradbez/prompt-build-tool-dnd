@@ -1,0 +1,10 @@
+.bug__text {
+  resize: vertical;
+  min-height: 80px;
+  font: inherit;
+}
+.bug__error {
+  margin: 0;
+  color: #c62828;
+  font-size: 12px;
+}
