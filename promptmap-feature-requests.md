@@ -4,7 +4,7 @@ These come from [prompt-build-tool-dnd](https://github.com/conradbez/prompt-buil
 
 Each request replaces a workaround in that server that reaches into promptmap internals. Line numbers are from promptmap 0.8.6 and promptmap-extra-model-kinds 0.7.19.
 
-> **Status:** all four are implemented upstream in promptmap 0.8.7 / promptmap-extra-model-kinds 0.7.20 (GitHub `65199b0`, not yet on PyPI). The app's branch `claude/zen-archimedes-4kdkhj` uses them and has dropped its workarounds.
+> **Status:** all four are implemented upstream in promptmap 0.8.7 / promptmap-extra-model-kinds 0.7.20 (on PyPI). The app's branch `claude/zen-archimedes-4kdkhj` uses them and has dropped its workarounds.
 
 ---
 

@@ -1716,7 +1716,7 @@ wheels = [
 [[package]]
 name = "promptmap"
 version = "0.8.7"
-source = { git = "https://github.com/conradbez/promptmap?rev=65199b0270839a17b5778fcb2da2604364500c03#65199b0270839a17b5778fcb2da2604364500c03" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "jinja2" },
@@ -1729,6 +1729,10 @@ dependencies = [
     { name = "rich" },
     { name = "tree-sitter-language-pack" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/99/98/3185a3b885d26c1c723907ba8c0a87dd538fb11ad60108e5f6d420d6d3a6/promptmap-0.8.7.tar.gz", hash = "sha256:c7f96876204bd6a60e9f8248e465dc7bba2888f1e6d9be33741622ed95aa6183", size = 303490, upload-time = "2026-11-20T23:40:01.035Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/ef/9ce9bff8a093d43984f8baecb49c487e9ff71747bfdd3c769b5386c3fc80/promptmap-0.8.7-py3-none-any.whl", hash = "sha256:8387b272d5af01ec72f63ce5392ff9ad5e40f0fe56251bc04d96610cd478e4ac", size = 279584, upload-time = "2026-11-20T23:39:58.928Z" },
+]
 
 [package.optional-dependencies]
 extras = [
@@ -1738,7 +1742,7 @@ extras = [
 [[package]]
 name = "promptmap-extra-model-kinds"
 version = "0.7.20"
-source = { git = "https://github.com/conradbez/promptmap?subdirectory=promptmap-extra-model-kinds&rev=65199b0270839a17b5778fcb2da2604364500c03#65199b0270839a17b5778fcb2da2604364500c03" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
     { name = "httpx" },
@@ -1746,6 +1750,10 @@ dependencies = [
     { name = "openai" },
     { name = "promptmap" },
     { name = "python-dotenv" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/31/3a/4c8cc51f3bb1654483254f21d1e91384baa133692401d25c2d635c8e8849/promptmap_extra_model_kinds-0.7.20.tar.gz", hash = "sha256:243ee662a91c931f151466fdef6674579c2dd2251d9ca3f1d32d49f44316b0a7", size = 337290, upload-time = "2026-11-20T23:40:02.196Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/aa/de/0646557b75a8ebb8d501b761346b76da1e6e4ecae1d5eb43e66547bda6fb/promptmap_extra_model_kinds-0.7.20-py3-none-any.whl", hash = "sha256:1532c5f725ba846fa10d883c45e84e7afc3f0f094ac58e4374536a4687483cea", size = 65382, upload-time = "2026-11-20T23:40:00.216Z" },
 ]
 
 [[package]]
@@ -2830,8 +2838,8 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.34" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "promptmap", extras = ["extras"], git = "https://github.com/conradbez/promptmap?rev=65199b0270839a17b5778fcb2da2604364500c03" },
-    { name = "promptmap-extra-model-kinds", git = "https://github.com/conradbez/promptmap?subdirectory=promptmap-extra-model-kinds&rev=65199b0270839a17b5778fcb2da2604364500c03" },
+    { name = "promptmap", extras = ["extras"], specifier = ">=0.8.7" },
+    { name = "promptmap-extra-model-kinds", specifier = ">=0.7.20" },
     { name = "pydantic", specifier = ">=2" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
