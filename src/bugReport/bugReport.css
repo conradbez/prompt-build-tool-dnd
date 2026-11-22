@@ -9,11 +9,12 @@
   font-size: 12px;
 }
 
-/* Unobtrusive: just the gray outline, pinned to the bottom-right corner. */
+/* Unobtrusive: just the gray outline, bottom-right just left of the help "?"
+   (.help__fab: 40px wide at 16px in), centred on it vertically. */
 .bug__fab {
   position: fixed;
-  right: 12px;
-  bottom: 12px;
+  right: calc(64px + env(safe-area-inset-right));
+  bottom: calc(22px + env(safe-area-inset-bottom));
   z-index: 50;
   display: flex;
   padding: 4px;
