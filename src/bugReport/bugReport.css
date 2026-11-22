@@ -26,3 +26,17 @@
 .bug__fab:hover {
   color: #6b7280;
 }
+
+/* No help button bottom-right — on phones it moves top-right, and on iOS it is
+   hidden — so take the corner itself, centred on the toolbar opposite (54px
+   tall at 16px in with touch-sized buttons). */
+@media (max-width: 720px) {
+  .bug__fab {
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(29px + env(safe-area-inset-bottom));
+  }
+}
+.ios .bug__fab {
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(29px + env(safe-area-inset-bottom));
+}
