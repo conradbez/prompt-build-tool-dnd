@@ -34,15 +34,6 @@ export const NAME_RE = /^[A-Za-z0-9_]+$/;
 export const varRefRe = () => /(?<![^\s([{])@([A-Za-z0-9_]+)/g;
 
 /**
- * The boilerplate for a prompt that asks a model for a script: that its answer
- * is executed rather than read, what the sandbox already has, and how to ask
- * for more (a PEP 723 header). It needs no row — the *server* writes its value
- * on the way past, because only the server knows which packages that sandbox
- * actually has. Whatever is sent under this name is replaced.
- */
-export const STANDARD_INSTRUCTIONS_VAR = 'coding_instructions';
-
-/**
  * The model this person runs with. The server reads it by name and hands it
  * to the LLM client and the agent sandbox; empty means the server's default.
  */
@@ -63,15 +54,6 @@ export interface ReservedVar {
 }
 
 export const RESERVED: ReservedVar[] = [
-  {
-    name: STANDARD_INSTRUCTIONS_VAR,
-    hint:
-      'What to tell a model being asked for a script: that its answer is run ' +
-      'rather than read, which packages the sandbox has, and how to ask for ' +
-      'more with a PEP 723 header. Left empty, the server writes it — and only ' +
-      'the server knows the real package list. Fill it in to say your own thing.',
-    placeholder: 'Left empty, the server writes this for you',
-  },
   {
     name: LLM_MODEL_VAR,
     hint:
@@ -118,16 +100,6 @@ export function withBlankRow(rows: PromptVar[]): PromptVar[] {
   return [...reserved, ...rest, { ...BLANK }];
 }
 
-/** Names these variables used to have, and what they are called now. */
-export const RENAMED: Record<string, string> = {
-  standard_coding_instructions: STANDARD_INSTRUCTIONS_VAR,
-};
-
-/** Carry a stored name across a rename. Unknown names come back unchanged. */
-export function renamed(name: string): string {
-  return RENAMED[name] ?? name;
-}
-
 function load(): PromptVar[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -137,7 +109,7 @@ function load(): PromptVar[] {
     return withBlankRow(
       parsed
         .filter((r) => r && typeof r === 'object')
-        .map((r) => ({ name: renamed(String(r.name ?? '')), value: String(r.value ?? '') })),
+        .map((r) => ({ name: String(r.name ?? ''), value: String(r.value ?? '') })),
     );
   } catch {
     return withBlankRow([]);

@@ -144,36 +144,6 @@ takes its colour:
 A test's verdict never flows onward: it is not an input to its parent or to
 anything that mentions it. Click the verdict tag to read the reason.
 
-## Python sandbox packages
-
-`•••` → *Settings…* → *Python* runs a bullet's child's script in a Modal sandbox,
-which always has `numpy`, `pandas` and `requests`. Add to it per bullet in the
-same modal's **Sandbox packages** field — comma-separated, e.g.
-`beautifulsoup4, lxml`.
-
-A script can also ask for its own, in the standard **PEP 723** block that
-`uv run` reads — declared at the top of the file, installed before it runs:
-
-```python
-# /// script
-# dependencies = ["httpx", "rich"]
-# ///
-```
-
-And **`@coding_instructions`** drops the whole convention into the
-prompt that asks for the script: that the answer is executed rather than read,
-which packages the sandbox already has, and that PEP 723 block. Its row is left
-empty by default and the server writes it at run time, so it always names the
-real sandbox — type into it to say your own thing instead.
-
-Its row is fixed: the server looks it up by name, so it cannot be renamed or
-deleted, only filled in.
-
-Note what per-bullet packages mean: anyone who can post a graph to the server
-chooses what gets installed, and `pip` runs a package's own build code.
-`MODAL_PACKAGES` on the server is the deploy-access-only version — see
-[`server/README.md`](server/README.md).
-
 ## Saving and exporting
 
 Everything lives in Settings (`⚙`), under **This map**:
@@ -226,11 +196,11 @@ server can configure.
 `•••` → **Settings…** → **Enforce JSON output** marks a bullet `JSON`. The server emits promptmap's
 `{{ config(output_format="json") }}` for it, so the answer is **parsed and
 validated**: one that is not JSON fails that bullet with its parse error instead
-of flowing downstream as prose. A prompt bullet also gets a line asking for JSON
+of flowing downstream as prose. A chat bullet also gets a line asking for JSON
 appended to its text (visible in the *Model input* column), and the provider's
 own JSON mode is switched on where it has one.
 
-It is orthogonal to the bullet's kind — a prompt, a template or a python bullet
+It is orthogonal to the bullet's kind — a chat, a template or an agent
 can each be held to JSON — so it is a chip of its own beside `TPL`/`PY` rather
 than a fourth kind. See [`server/README.md`](server/README.md) for how a JSON
 answer reaches the *next* bullet, which is not quite how it reads in the panel.

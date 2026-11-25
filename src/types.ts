@@ -2,13 +2,14 @@ import type { ModelRunStatus } from './api';
 /**
  * What a bullet *is*, which decides how the server runs it:
  *
- * - `prompt`   — sent to the LLM. The default.
+ * - `chat`     — sent to the LLM. The default. Its text is the first message —
+ *   the request — and follow-ups typed in its popup amend it. Every call sends
+ *   the request (inputs filled in fresh) and every follow-up, but not its
+ *   earlier replies; the model is told only its reply flows on, so each one is
+ *   a complete answer to the request, amended by the follow-ups.
  * - `template` — never sent: its rendered text, with every upstream output
  *   substituted in, *is* its output. Emitted to promptmap as
  *   `{{ config(model_type="template") }}`.
- * - `python`   — its text is Python, run in a Modal sandbox rather than on the
- *   server. Whatever it prints is its output, and the upstream outputs arrive
- *   as `inputs`. Emitted as `{{ config(model_type="python_modal") }}`.
  * - `agent`    — its rendered text is a *task* for a coding agent
  *   (OpenCode) working in a Modal sandbox with its own tools and, optionally, an
  *   MCP server's tools. Its output is `{output, logs, run_time}`: the answer,
@@ -18,12 +19,8 @@ import type { ModelRunStatus } from './api';
  *   (children or `@` references). The model is asked for a verdict rather than
  *   an answer, and the node shows it: see `TestStatus`. A test's output never
  *   flows onward — it checks the graph from the side.
- * - `chat`     — a prompt you can talk to in its popup, to explore and clarify.
- *   Its conversation goes along with its input on every call, but only its
- *   latest reply flows on — so the model is told to make each reply a complete
- *   answer that folds in every clarification.
  */
-export type BulletKind = 'prompt' | 'template' | 'search' | 'python' | 'agent' | 'test' | 'chat';
+export type BulletKind = 'chat' | 'template' | 'search' | 'agent' | 'test';
 
 /** One turn of a chat bullet's conversation — see `Bullet.chat`. */
 export interface ChatMessage {
@@ -53,13 +50,6 @@ export type TestStatus = 'pass' | 'fail' | 'skipped';
  *   reaches `Bullet.threshold`. Set up in Settings → Classifier.
  */
 export type TestJudge = 'llm' | 'classifier';
-
-/**
- * What a python bullet shows instead of text. It has none: it is an operator,
- * not an editor — it runs what its one child produced, so there is nothing on
- * it for a person to write.
- */
-export const PYTHON_CAPTION = 'Runs code from child';
 
 /** A file attached to a bullet, held in the server's bucket. */
 export interface FileRef {
@@ -148,12 +138,6 @@ export interface Bullet {
    */
   persistDisk: boolean;
   /**
-   * A python bullet's extra sandbox packages, comma-separated, e.g.
-   * `beautifulsoup4, scipy==1.*` — installed on top of the server's own before
-   * it runs. Empty means none. Ignored on every other kind.
-   */
-  packages: string;
-  /**
    * The model this bullet calls, e.g. `gpt-4o-mini` — for a prompt, an agent or
    * an LLM-judged test. Empty means the run's (Settings → `llm_model`, else the
    * server's default for the provider).
@@ -170,9 +154,10 @@ export interface Bullet {
   /** A classifier-judged test passes when P(yes) ≥ this, 0–1. */
   threshold: number;
   /**
-   * A chat bullet's conversation: its earlier answers and the person's
-   * follow-ups, oldest first. Sent with its input on every call; cleared from
-   * the popup to start over. Ignored on every other kind.
+   * A chat bullet's conversation after its first message (which is `text`):
+   * its replies and the person's follow-ups, oldest first. Only the follow-ups
+   * are sent; the replies are kept to show. The last reply is replaced by each
+   * new answer. Cleared from the popup to start over. Ignored on other kinds.
    */
   chat: ChatMessage[];
 }

@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Keys (providers, the S3 bucket, Modal) live in the repo-root `.env`. Loaded
-# before anything reads os.environ, and before `modal_exec` checks for tokens.
+# before anything reads os.environ, and before the agent kinds check for tokens.
 load_dotenv(pathlib.Path(__file__).resolve().parent.parent / ".env")
 
 import promptmap
@@ -39,7 +39,7 @@ from promptmap.files import contains_files, iter_files, to_jsonable
 import export as exporter
 import files as attachments
 # promptmap finds these kinds by entry point; imported here for their helpers.
-from promptmap_extra_model_kinds import agent37_exec, agent_exec, modal_exec
+from promptmap_extra_model_kinds import agent37_exec, agent_exec
 import accounts
 import bug_reports
 import search
@@ -63,7 +63,7 @@ if "playwright" not in _pip_extras.lower():
 # `browser_use` — and nothing here wants them: code runs on Modal or Agent37.
 # Plugins are loaded first so a later lookup cannot bring one back. A
 # `model_type` naming a removed kind then fails the bullet as unknown.
-ALLOWED_KINDS = {"", "template", modal_exec.MODEL_TYPE, agent_exec.MODEL_TYPE, agent37_exec.MODEL_TYPE}
+ALLOWED_KINDS = {"", "template", agent_exec.MODEL_TYPE, agent37_exec.MODEL_TYPE}
 _promptmap_kinds.load_plugins()
 for _kind_name in list(_promptmap_kinds._REGISTRY):
     if _kind_name not in ALLOWED_KINDS:
@@ -187,21 +187,24 @@ Where this sits in the larger map (each bullet is built from the ones nested und
 # A bullet with caching off: promptmap skips the cache lookup and always runs it.
 NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"
 
-# A chat bullet is a prompt you talk to: its text is your next message, its
-# earlier turns go with it, and only its latest reply flows on — never the
-# conversation — so the model is told as much and asked to make each reply
-# stand on its own.
+# A chat bullet is the one kind that asks a model for an answer. Its text is
+# the first message — the request — and stays put; follow-ups typed in its popup
+# amend it. Every call sends the request (inputs freshly filled in) and every
+# follow-up, but never an earlier reply: only the reply flows on, so each one is
+# rebuilt from the request rather than patched from a possibly stale answer.
+# This instruction is hardcoded for the kind, ahead of the request.
+# What a chat or agent bullet receives from the bullets nested under it — each
+# answer in its own `[their name]…[/their name]` tag — wrapped as one block.
+ACTORS_OPEN = "[actors below you said this]"
+ACTORS_CLOSE = "[/actors below you said this]"
+
 CHAT_INSTRUCTION = (
-    "You are in a conversation with a person who is refining your answer. Only "
-    "your latest reply is passed on to the next agent in the pipeline — not this "
-    "conversation — so every reply must stand on its own: a complete answer to "
-    "the original request that also folds in every clarification and correction "
-    "the person has made so far."
+    "Only your most recent reply is passed on to the next agent in the pipeline "
+    "— nothing else from this exchange — so it must be a complete, standalone "
+    "answer. The first message is the main request: answer it in full. Any "
+    "follow-up messages after it amend that answer, in order; where they "
+    "conflict, the later one wins."
 )
-CHAT_HISTORY = "=== Conversation so far ==="
-# Everything after this line in the prompt a chat bullet was sent is the
-# person's new message, inputs filled in — the turn the conversation keeps.
-CHAT_MESSAGE = "=== The person's new message ==="
 
 
 def _llm_model(promptdata: dict[str, str]) -> str | None:
@@ -221,7 +224,7 @@ def _model_id(value: str) -> str | None:
 
 def _calls_model(node: Node) -> bool:
     """Whether a bullet's answer comes from the LLM (or an agent driving one)."""
-    return node.kind in ("prompt", "chat", "agent") or (node.kind == "test" and not _is_classifier(node))
+    return node.kind in ("chat", "agent") or (node.kind == "test" and not _is_classifier(node))
 
 
 def _classifier_config_line(threshold: float) -> str:
@@ -252,8 +255,12 @@ _MENTION = re.compile(r"@\[\[([A-Za-z0-9_-]+)\]\]")
 # the `ref()` and `promptdata()` calls `_inline` and `_as_promptdata` put in.
 # Each takes a bare word, so neither can reach anything else.
 _ALLOWED_JINJA = re.compile(r"""\{\{ (?:ref\('\w+'\)|promptdata\("\w+"\)) \}\}""")
-# A global instruction may also wrap the prompt with `{{ prompt }}`.
-_ALLOWED_GLOBAL_JINJA = re.compile(_ALLOWED_JINJA.pattern + r"|\{\{\s*prompt\s*\}\}")
+# Where a global instruction that wraps the prompt puts it, rather than above it.
+_PROMPT_SLOT = re.compile(r"\{\{\s*prompt\s*\}\}")
+
+# The kinds a global instruction reaches: the ones that ask a model for an
+# answer. A test judges the work rather than doing it, so it is left out.
+GLOBAL_KINDS = ("chat", "agent")
 
 
 def _escape_jinja(text: str, allowed: "re.Pattern[str]" = _ALLOWED_JINJA) -> str:
@@ -309,17 +316,8 @@ _VAR_NAME = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def _clean_promptdata(promptdata: dict[str, str]) -> dict[str, str]:
-    """The variables worth passing on: usable names, values as strings.
-
-    The standard coding instructions are written here when they are left empty,
-    because only the server knows which packages *this* sandbox has — so the
-    default cannot drift from what it describes. A value typed into that row is
-    a deliberate override and is passed through untouched.
-    """
-    clean = {k: str(v) for k, v in promptdata.items() if _VAR_NAME.match(k)}
-    if not clean.get(modal_exec.INSTRUCTIONS_VAR, "").strip():
-        clean[modal_exec.INSTRUCTIONS_VAR] = modal_exec.standard_instructions()
-    return clean
+    """The variables worth passing on: usable names, values as strings."""
+    return {k: str(v) for k, v in promptdata.items() if _VAR_NAME.match(k)}
 
 
 def _as_promptdata(text: str, names: set[str]) -> str:
@@ -334,6 +332,58 @@ def _as_promptdata(text: str, names: set[str]) -> str:
         lambda m: '{{ promptdata("%s") }}' % m.group(1) if m.group(1) in names else m.group(0),
         text,
     )
+
+
+def _with_global(
+    body: str, raw: str, id_to_slug: dict[str, str], var_names: set[str], mentions_ok: bool
+) -> str:
+    """*body* with the global instruction above it — or around it, where the
+    instruction says `{{ prompt }}`.
+
+    The server applies it itself rather than handing it to promptmap, which
+    refuses `ref()` in one: an `@` mention of a bullet in the instruction is
+    that bullet's answer, `[name]` tags and all, exactly as in a bullet's text.
+    *mentions_ok* is False for a bullet a mention would make a cycle of (see
+    `_global_refs`), and its mentions then resolve to nothing.
+    """
+    text, _ = _inline(
+        _as_promptdata(raw, var_names),
+        lambda ref_id: "{{ ref('%s') }}" % id_to_slug[ref_id]
+        if mentions_ok and ref_id in id_to_slug
+        else None,
+    )
+    pieces = [_escape_jinja(p) for p in _PROMPT_SLOT.split(text)]
+    if len(pieces) > 1:
+        return body.join(pieces)
+    return pieces[0].rstrip() + "\n\n" + body if pieces[0].strip() else body
+
+
+def _global_refs(
+    nodes: list[Node], global_instruction: str
+) -> tuple[list[Node], set[str]]:
+    """The bullets with the global instruction's mentions added to their refs,
+    and the ids that must not get them.
+
+    A bullet mentioned there — and every bullet feeding it — cannot depend on
+    it without a cycle, so those get the instruction with its mentions left
+    out. Every other bullet the instruction reaches depends on each mentioned
+    one, the same way a mention in its own text would make it.
+    """
+    mentioned = [m for m in dict.fromkeys(_MENTION.findall(global_instruction))]
+    if not mentioned:
+        return nodes, set()
+    by_node = {n.id: n for n in nodes}
+    children = _children(nodes)
+    feeds = _feeding(nodes, {n.id: n.id for n in nodes})
+    mentioned = [m for m in mentioned if m in feeds]
+    blocked = _upstream(mentioned, by_node, children, feeds)
+    out = [
+        n.model_copy(update={"refs": [*n.refs, *(m for m in mentioned if m not in n.refs)]})
+        if n.kind in GLOBAL_KINDS and n.id not in blocked
+        else n
+        for n in nodes
+    ]
+    return out, blocked
 
 
 class FileRef(BaseModel):
@@ -358,32 +408,18 @@ class ChatMessage(BaseModel):
     content: str = ""
 
 
-def _transcript(messages: list[ChatMessage]) -> str:
-    """A chat bullet's conversation as plain text, one labelled turn after another."""
-    who = {"assistant": "You (previous answer)", "user": "Person"}
-    return "\n\n".join(
-        f"[{who.get(m.role, 'Person')}]\n{m.content.strip()}" for m in messages if m.content.strip()
-    )
-
-
-def _chat_head(messages: list[ChatMessage]) -> str:
-    """What comes before a chat bullet's new message: the instruction about
-    what flows on, then the conversation so far — escaped, as a person's typing."""
-    parts = [CHAT_INSTRUCTION]
-    convo = _transcript(messages)
-    if convo:
-        parts += [CHAT_HISTORY, convo]
-    return _escape_jinja("\n\n".join(parts + [CHAT_MESSAGE]))
-
-
-def _chat_reply(messages: list[ChatMessage]) -> str:
-    """A chat bullet's latest answer — what it hands on while it has nothing new to say."""
-    return next((m.content for m in reversed(messages) if m.role == "assistant"), "")
-
-
-def _chat_message(rendered: str) -> str:
-    """The person's new message, inputs filled in, out of the prompt a chat bullet was sent."""
-    return rendered.rsplit(CHAT_MESSAGE, 1)[-1].strip()
+def _follow_ups(messages: list[ChatMessage], replace, var_names: set[str]) -> tuple[str, set[str]]:
+    """A chat bullet's follow-ups, each in its own numbered block, and the ids
+    their `@` mentions placed — inlined by *replace* as in the bullet's text.
+    Its earlier replies are kept for the popup only: they are never sent (see
+    `CHAT_INSTRUCTION`)."""
+    blocks, used = [], set()
+    said = [m.content.strip() for m in messages if m.role == "user" and m.content.strip()]
+    for i, raw in enumerate(said, 1):
+        text, placed = _inline(_as_promptdata(raw, var_names), replace)
+        used |= placed
+        blocks.append(f"[follow-up {i}]\n{_escape_jinja(text)}\n[/follow-up {i}]")
+    return "\n\n".join(blocks), used
 
 
 class Node(BaseModel):
@@ -396,9 +432,9 @@ class Node(BaseModel):
     files: list[FileRef] = []
     parentId: Optional[str] = None
     refs: list[str] = []
-    # "prompt" | "template" | "search" | "python" | "agent" | "test" — see `_build_source`.
-    # Else treated as a prompt rather than rejected: a bullet is not worth a 422.
-    kind: str = "prompt"
+    # "chat" | "template" | "search" | "agent" | "test" — see `_build_source`.
+    # Else treated as a chat rather than rejected: a bullet is not worth a 422.
+    kind: str = "chat"
     # An agent bullet's MCP server: the command that starts it over stdio, e.g.
     # `uvx some-mcp-server`. Empty means the agent has bash alone.
     mcpServer: str = ""
@@ -417,9 +453,6 @@ class Node(BaseModel):
     # its conversation and folder outlive the run — see `agent37_exec`. Overrides every other agent option
     # but the step limit and producing files.
     persistDisk: bool = False
-    # A python bullet's extra sandbox packages, comma-separated — see
-    # `modal_exec.config_line`. Ignored on every other kind.
-    packages: str = ""
     # Hold this bullet's answer to JSON — promptmap's `output_format="json"`.
     jsonOutput: bool = False
     # Reuse promptmap's cached answer. Off, it gets promptmap's `config(cache=False)`.
@@ -434,8 +467,8 @@ class Node(BaseModel):
     # A prompt or agent bullet told where it sits in the map: promptmap's
     # `org_outline()` renders the bullets around it as a tree below its text.
     outline: bool = False
-    # A chat bullet's conversation so far — see `_chat_head`. Ignored on
-    # every other kind.
+    # A chat bullet's follow-ups and the replies to them — see `_follow_ups`.
+    # Ignored on every other kind.
     chat: list[ChatMessage] = []
 
 
@@ -455,7 +488,7 @@ class RunRequest(BaseModel):
     # Files are namespaced per browser session; see `files.py`.
     sessionId: str = ""
     # Settings → "global instruction": prompt text promptmap renders into every
-    # bullet's prompt (templates and python bullets opt out). Empty means none.
+    # bullet's prompt (templates, searches and tests opt out). Empty means none.
     globalInstruction: str = ""
     # Settings → run variables, name → value. A bullet writes `@name`; promptmap is
     # handed the map and renders `{{ promptdata("name") }}` from it.
@@ -533,6 +566,8 @@ def _build_source(
     var_names: set[str] | None = None,
     file_sources: set[str] | None = None,
     provider: str = "gemini",
+    global_instruction: str = "",
+    global_ok: bool = True,
 ) -> str:
     """Compose a bullet's promptmap prompt.
 
@@ -552,8 +587,7 @@ def _build_source(
     line — promptmap's built-in passthrough kind: no LLM call, the rendered text
     is the output. A search node is a template whose text becomes a query.
 
-    A python node gets the `python_modal` config line instead, and its refs go
-    into a Jinja *comment* — see `_python_source`. An agent node keeps the
+    An agent node keeps the
     ordinary shape — its rendered text is the agent's task — plus the `agent_modal` config line naming its MCP server, if
     any (see `agent_exec.py`).
 
@@ -566,7 +600,10 @@ def _build_source(
     A bullet with a model of its own carries it as `config(model=…)`; one set to
     know its place gets promptmap's `org_outline()` after its text.
     """
-    source = _compose_source(node, child_ids, id_to_slug, session_id, var_names, file_sources, provider)
+    source = _compose_source(
+        node, child_ids, id_to_slug, session_id, var_names, file_sources, provider,
+        global_instruction, global_ok,
+    )
     own_model = _model_id(node.model)
     if own_model and _calls_model(node):
         source = '{{ config(%s="%s") }}\n' % (MODEL_KEY, own_model) + source
@@ -581,11 +618,10 @@ def _compose_source(
     var_names: set[str] | None,
     file_sources: set[str] | None,
     provider: str,
+    global_instruction: str = "",
+    global_ok: bool = True,
 ) -> str:
     dep_ids = _deps(node, child_ids, id_to_slug)
-    dep_slugs = [id_to_slug[d] for d in dep_ids]
-    if node.kind == "python":
-        return _python_source(node, dep_slugs, node.packages)
 
     if node.kind == "test":
         # The assertion, then the verdict it wants, then what it is about. A
@@ -598,33 +634,44 @@ def _compose_source(
                 [_classifier_config_line(_threshold(node)), text, CLASSIFIER_SEPARATOR, *ref_lines]
             )
         return "\n".join([TEST_CONFIG_LINE, text, TEST_INSTRUCTION, TEST_MATERIAL, *ref_lines])
-    if node.kind == "chat" and node.chat and not node.text.strip():
-        # No new message: hand on the latest answer as it stands, no model call.
-        return TEMPLATE_CONFIG_LINE + "\n" + _escape_jinja(_chat_reply(node.chat))
-    if node.kind == "chat" and node.chat:
-        # The first turn already carried its inputs; a reply only fills in the
-        # ones it mentions.
-        dep_ids = []
-    text, inlined = _inline(
-        _as_promptdata(node.text.strip(), var_names or set()),
-        lambda ref_id: "{{ ref('%s') }}" % id_to_slug[ref_id] if ref_id in id_to_slug else None,
-    )
+    def as_ref(ref_id: str) -> str | None:
+        return "{{ ref('%s') }}" % id_to_slug[ref_id] if ref_id in id_to_slug else None
+
+    text, inlined = _inline(_as_promptdata(node.text.strip(), var_names or set()), as_ref)
+    follow_ups = ""
+    if node.kind == "chat":
+        follow_ups, placed = _follow_ups(node.chat, as_ref, var_names or set())
+        inlined |= placed
     prompt = _json_body(node, _escape_jinja(text))
     # Only what has nowhere else to be: a reference already standing in the
     # sentence must not also be pasted underneath it.
+    if node.kind in GLOBAL_KINDS and global_ok:
+        # Placed by the global instruction already — see `_with_global`.
+        inlined |= set(_MENTION.findall(global_instruction))
     ref_lines = ["{{ ref('%s') }}" % id_to_slug[d] for d in dep_ids if d not in inlined]
-    source = "\n".join([prompt, *ref_lines]) if ref_lines else prompt
+    if node.kind in ("chat", "agent"):
+        # Its text, then what the bullets below it said; its name goes on top
+        # further down, once the chat instruction is in.
+        actors = "\n".join([ACTORS_OPEN, *ref_lines, ACTORS_CLOSE]) if ref_lines else ""
+        source = "\n\n".join(p for p in (prompt, actors) if p)
+    else:
+        source = "\n".join([prompt, *ref_lines]) if ref_lines else prompt
     if node.kind == "search":
         return "\n".join([TEMPLATE_CONFIG_LINE, SEARCH_OPEN + source + _search_close(provider)])
-    if node.outline and node.kind in ("prompt", "chat", "agent"):
+    if node.outline and node.kind in ("chat", "agent"):
         source += OUTLINE_BLOCK
     if node.kind == "chat":
-        source = _chat_head(node.chat) + "\n" + source
+        source = "\n\n".join(p for p in (CHAT_INSTRUCTION, source, follow_ups) if p)
+    if node.kind in ("chat", "agent") and node.title.strip():
+        # The bullet's name heads it — so a bullet with only a name still asks something.
+        source = _escape_jinja(node.title.strip()) + "\n\n" + source
+    if node.kind in GLOBAL_KINDS and global_instruction:
+        source = _with_global(source, global_instruction, id_to_slug, var_names or set(), global_ok)
     if node.jsonOutput:
         source = JSON_CONFIG_LINE + "\n" + source
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
-    if not node.cache and node.kind in ("prompt", "chat", "agent"):
+    if not node.cache and node.kind in ("chat", "agent"):
         source = NO_CACHE_CONFIG_LINE + "\n" + source
     if node.kind == "agent" and node.persistDisk:
         if node.publicUrl:
@@ -650,8 +697,8 @@ def _compose_source(
             + source
         )
     keys = _node_file_keys(node, session_id)
-    if node.kind in ("prompt", "chat"):
-        # Only a prompt reaches a model that can look at them; a template
+    if node.kind == "chat":
+        # Only a chat reaches a model that can look at them; a template
         # passes text through, and promptmap fails a bullet that asks for files from
         # one that produced none — hence only those set to produce them.
         keys += [id_to_slug[d] for d in dep_ids if d in (file_sources or set())]
@@ -693,14 +740,19 @@ def _models(
     session_id: str,
     promptdata: dict[str, str],
     provider: str = "gemini",
+    global_instruction: str = "",
+    global_blocked: set[str] | None = None,
 ) -> dict[str, str]:
     """Every bullet's promptmap source, keyed by its model name — for a run and an
-    export alike."""
+    export alike. *nodes* have been through `_global_refs` already, which says
+    which bullets are *global_blocked*."""
     feeds = _feeding(nodes, names)
     producers = {n.id for n in nodes if n.kind == "agent" and n.producesFiles}
+    blocked = global_blocked or set()
     return {
         names[n.id]: _build_source(
-            n, children[n.id], feeds, session_id, set(promptdata), producers, provider
+            n, children[n.id], feeds, session_id, set(promptdata), producers, provider,
+            global_instruction, n.id not in blocked,
         )
         for n in nodes
     }
@@ -729,13 +781,12 @@ def _threshold(node: Node) -> float:
 def _json_body(node: Node, text: str) -> str:
     """A JSON bullet's text, with the instruction that goes with the rule.
 
-    Only a *prompt* or an agent's task asks a model for anything: a template's
+    Only a chat or an agent's task asks a model for anything: a template's
     rendered text is its own output, so an instruction appended to one would
-    come out in the answer, and a python bullet's text never runs at all. Both
-    still carry the config line — the validation applies to whatever they
-    produce.
+    come out in the answer. It still carries the config line — the validation
+    applies to whatever it produces.
     """
-    if not node.jsonOutput or node.kind not in ("prompt", "agent"):
+    if not node.jsonOutput or node.kind not in ("chat", "agent"):
         return text
     return "\n".join([text, JSON_INSTRUCTION]) if text else JSON_INSTRUCTION
 
@@ -773,34 +824,6 @@ def _upstream(
     return seen
 
 
-def _python_source(node: Node, dep_slugs: list[str], packages: str = "") -> str:
-    """A python bullet's source: its dependency, and nothing else.
-
-    A python bullet holds no code of its own — it runs what its one child
-    produced. So its own text never reaches the sandbox, and this source
-    carries only the two directives promptmap needs.
-
-    The refs go inside a Jinja *comment* rather than on their own lines the way
-    a prompt bullet's do. `extract_dependencies` scans the raw source with a
-    regex, so the ordering and the parallelism still come out right, while the
-    comment renders to nothing — leaving no upstream text pasted into what is
-    about to be compiled as Python. The outputs reach the sandbox as `inputs`,
-    injected by the `python_modal` model kind in dependency order (see
-    `modal_exec.py`).
-
-    Attachments are deliberately not declared here: the sandbox is a different
-    machine and never sees them, so there is nothing to fetch from the bucket.
-
-    The bullet's own packages (set in its settings) ride along in the config
-    line — see `modal_exec.config_line`.
-    """
-    lines = [modal_exec.config_line(packages)]
-    if dep_slugs:
-        refs = " ".join("ref('%s')" % slug for slug in dep_slugs)
-        lines.append("{# inputs in order: %s #}" % refs)
-    return "\n".join(lines)
-
-
 def _runnable(nodes: list[Node]) -> list[Node]:
     """The bullets worth running: everything except wholly empty subtrees.
 
@@ -826,11 +849,10 @@ def _runnable(nodes: list[Node]) -> list[Node]:
             return False
         below = seen | {node_id}
         node = by_id[node_id]
-        # A python bullet's own text never runs, so it cannot be what makes a
-        # branch worth running — only the children it would execute can.
-        own = bool(node.text.strip()) and node.kind != "python"
-        # A chat with a conversation has an answer to hand on, message or not.
-        own = own or (node.kind == "chat" and bool(node.chat))
+        own = bool(node.text.strip())
+        # A chat or agent with only a name runs on its name — see `_compose_source`.
+        own = own or (node.kind in ("chat", "agent") and bool(node.title.strip()))
+        own = own or (node.kind == "chat" and any(m.role == "user" for m in node.chat))
         if own or any(fills(c, below) for c in children[node_id]):
             filled.add(node_id)
             return True
@@ -839,62 +861,20 @@ def _runnable(nodes: list[Node]) -> list[Node]:
     return [n for n in nodes if fills(n.id, frozenset())]
 
 
-def _overfull_python(nodes: list[Node]) -> list[str]:
-    """Ids of python bullets fed by more than one upstream bullet.
-
-    A python bullet's child output *is* its program, so a second input would
-    mean two scripts concatenated into one file. One child, one program. `@`
-    references count too — they reach the sandbox by the same route, and the
-    editor cannot produce one on a python bullet, so anything arriving here
-    with them came from elsewhere.
-    """
-    known = {n.id for n in nodes}
-    counts: dict[str, int] = {}
-    for n in nodes:
-        if n.parentId in known:
-            counts[n.parentId] = counts.get(n.parentId, 0) + 1
-    return [
-        n.id
-        for n in nodes
-        if n.kind == "python"
-        and counts.get(n.id, 0) + len([r for r in n.refs if r in known]) > 1
-    ]
-
-
-def _prompt_shown(node: Node, rendered: str, dep_ids: list[str], live: dict[str, str]) -> str:
-    """What the "Model input" column shows for a bullet that ran.
-
-    promptmap's own `prompt_rendered` — exactly what was sent, global
-    instruction, variables and `[ref]` tags included, and filled in for a
-    cached answer too. A python bullet is the exception: its prompt is only its
-    config line, and what runs is the code extracted from its child.
-    """
-    if node.kind == "python":
-        return modal_exec._inherited_code([live[d] for d in dep_ids if d in live])
-    return rendered.strip()
-
-
 def _prompt_unsent(node: Node, status: str) -> str:
     """The "Model input" column for a bullet with no rendered prompt to show."""
     note = SKIPPED_NOTE if status == "skipped" else FAILED_NOTE
-    text = node.text.strip() if node.kind != "python" else ""
+    text = node.text.strip()
     return note + ("\n\n" + text if text else "")
 
 
-def _json_forms(text: str) -> tuple[str, str]:
-    """A JSON answer's two forms: ``(what a person reads, what promptmap rendered)``.
-
-    `output_format="json"` makes promptmap hand the *parsed* value downstream, and
-    Jinja writes a parsed value into the next prompt with `str()` — a
-    Python-style mapping, single quotes and all. So the answer panel and the
-    "Model input" column genuinely differ here, and pretending otherwise would
-    make the column say something that never reached a model.
-    """
+def _pretty_json(text: str) -> str:
+    """A JSON answer pretty-printed for a person to read; anything else as it is."""
     try:
         value = json.loads(text)
     except ValueError:
-        return text, text  # not parseable here means it was never parsed there
-    return json.dumps(value, indent=2, ensure_ascii=False), str(value)
+        return text
+    return json.dumps(value, indent=2, ensure_ascii=False)
 
 
 def _verdict(output: str) -> str:
@@ -927,8 +907,6 @@ def _title(node: Node, others: dict[str, Node] | None = None) -> str:
     for the run and the wrong one for the sentence a person reads.
     """
     line = node.title.strip()
-    if node.kind == "python" and not line:
-        return "the python bullet"
     return f"“{line[:40]}…”" if len(line) > 40 else f"“{line}”" if line else "an empty bullet"
 
 
@@ -1031,25 +1009,9 @@ def files_enabled() -> dict:
     return {"enabled": attachments.enabled()}
 
 
-@app.get("/python/enabled")
-def python_enabled() -> dict:
-    """Whether Modal is configured, and what its sandbox has installed.
-
-    The packages are chosen on the server (see `modal_exec`), but the prompt
-    that writes the script is written in the browser — so the browser has to be
-    able to say what is available, or a person is guessing at the one thing
-    their script may not do without.
-    """
-    return {
-        "enabled": modal_exec.enabled(),
-        "packages": modal_exec.packages(),
-        "rejected": modal_exec.rejected(),
-    }
-
-
 @app.get("/agent/enabled")
 def agent_enabled() -> dict:
-    """Whether agent bullets can run here — they need Modal, as python does —
+    """Whether agent bullets can run here — they need Modal or Agent37 —
     and the step limits a run may choose between."""
     return {
         "enabled": agent_exec.enabled(),
@@ -1125,6 +1087,8 @@ def export(req: ExportRequest) -> ExportResponse:
         return ExportResponse(errors=["Nothing to export — every bullet is empty."])
 
     promptdata = _clean_promptdata(req.promptdata)
+    global_instruction = req.globalInstruction.strip()
+    nodes, global_blocked = _global_refs(nodes, global_instruction)
     # The same readable names a run uses: file names and `ref('…')` calls that
     # a person is going to read and edit.
     id_to_name = exporter.model_names(nodes)
@@ -1140,7 +1104,8 @@ def export(req: ExportRequest) -> ExportResponse:
     models = {
         name: src
         for name, src in _models(
-            nodes, children, id_to_name, req.sessionId, promptdata, req.provider
+            nodes, children, id_to_name, req.sessionId, promptdata, req.provider,
+            global_instruction, global_blocked,
         ).items()
         if name not in tests
     }
@@ -1158,7 +1123,8 @@ def export(req: ExportRequest) -> ExportResponse:
             tests,
             req.provider,
             model,
-            req.globalInstruction.strip(),
+            # Already written into each model's source — see `_with_global`.
+            "",
             promptdata,
             notes,
         ),
@@ -1221,7 +1187,6 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
     # The variables the run may use. `@name`s in the bullets are rewritten
     # against these names, and promptmap is handed the values.
     promptdata = _clean_promptdata(req.promptdata)
-    var_names = set(promptdata)
 
     nodes = _runnable(req.nodes)
     if not nodes:
@@ -1235,27 +1200,22 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
     if not nodes:
         return RunResponse(errors=["No non-empty bullets to run."])
 
-    # The editor keeps a python bullet to one child, but the editor is not the
-    # only thing that can post here.
-    crowded = _overfull_python(nodes)
-    if crowded:
-        plural = "one bullet has" if len(crowded) == 1 else f"{len(crowded)} bullets have"
-        return RunResponse(
-            errors=[
-                f"A python bullet runs the code from a single child, but "
-                f"{plural} more than one input."
-            ]
-        )
+    # The global instruction's `@` mentions become dependencies, like a bullet's own.
+    nodes, global_blocked = _global_refs(nodes, global_instruction)
 
     # Models are named after their bullets' titles — readable in a `[ref]` tag,
     # an error message and `org_outline()` — and unique within the run.
     id_to_slug = exporter.model_names(nodes)
     slug_to_id = {v: k for k, v in id_to_slug.items()}
+    ref_names = {slug: by_id_title or slug for slug, by_id_title in ((id_to_slug[n.id], n.title.strip()) for n in nodes)}
     by_node = {n.id: n for n in nodes}
     titles = {n.id: _title(n, by_node) for n in nodes}
 
     children = _children(nodes)
-    models = _models(nodes, children, id_to_slug, req.sessionId, promptdata, req.provider)
+    models = _models(
+        nodes, children, id_to_slug, req.sessionId, promptdata, req.provider,
+        global_instruction, global_blocked,
+    )
     feeds = _feeding(nodes, id_to_slug)
     llm_model = _llm_model(promptdata)
 
@@ -1273,7 +1233,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
     promptfiles: dict[str, Any] = {}
     try:
         for n in planned:
-            if n.kind in ("python", "agent", "test"):
+            if n.kind in ("agent", "test"):
                 continue  # a sandbox never sees attachments — don't fetch them
             for key in _node_file_keys(n, req.sessionId):
                 if key not in promptfiles:
@@ -1283,9 +1243,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
 
     emit({"type": "plan", "models": [{"id": n.id, "title": titles[n.id]} for n in planned]})
 
-    # Gathered as each bullet lands. `live_rendered` is what downstream prompts
-    # rendered for it — a python bullet's input is read from there.
-    live_rendered: dict[str, str] = {}
+    # Gathered as each bullet lands.
     prompts: dict[str, str] = {}
     tests: dict[str, str] = {}
     files: dict[str, list[dict]] = {}
@@ -1317,26 +1275,19 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             value = result.value if result.value is not None else result.llm_output
             rest, made = _split_files(value)
             text = _text(rest).strip()
-            shown, rendered = text, text
+            shown = text
             if node.jsonOutput or node.kind in ("agent", "test"):
-                shown, rendered = _json_forms(text)
+                shown = _pretty_json(text)
             if made:
-                # What promptmap put in a downstream prompt: the whole value, each
-                # file as its one-line handle.
-                rendered = str(value)
                 files[node_id] = [_file_info(f, req.sessionId, node_id, stored) for f in made]
                 event["files"] = files[node_id]
-            live_rendered[node_id] = rendered
-            deps = _deps(node, children[node_id], feeds)
-            prompts[node_id] = _prompt_shown(node, result.prompt_rendered, deps, live_rendered)
+            # promptmap's own rendered prompt — exactly what was sent, global
+            # instruction, variables and `[ref]` tags included.
+            prompts[node_id] = result.prompt_rendered.strip()
             event["output"] = shown
             event["prompt"] = prompts[node_id]
             if node.kind == "test":
                 tests[node_id] = event["test"] = _verdict(shown)
-            if node.kind == "chat" and node.text.strip():
-                # A message was sent: the turn it made, for the editor to add to
-                # the conversation (and clear the message box).
-                event["chatTurn"] = {"user": _chat_message(prompts[node_id]), "assistant": shown}
         elif node:
             prompts[node_id] = event["prompt"] = _prompt_unsent(node, result.status)
             if node.kind == "test" and result.status == "skipped":
@@ -1374,16 +1325,13 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             llm_call=llm,
             promptfiles=promptfiles or None,
             promptdata=promptdata or None,
-            # `ref()` is refused inside a global instruction — promptmap says as much
-            # and points at promptdata — but a variable is exactly what belongs
-            # there, so `@name` is rewritten here too.
-            global_instruction=_escape_jinja(
-                _as_promptdata(global_instruction, var_names), _ALLOWED_GLOBAL_JINJA
-            ) or None,
+            # No `global_instruction`: the server writes it into each bullet's
+            # source itself, so it may mention other bullets — see `_with_global`.
             select=[id_to_slug[i] for i in select] or None,
             verbose=False,
-            # Tag each `ref()` with its bullet's name so the LLM can tell inputs apart.
-            wrap_refs=True,
+            # Tag each `ref()` with its bullet's name — as the person wrote it,
+            # not the model's slug — so the LLM can tell inputs apart.
+            wrap_refs=lambda name, is_open: "[%s%s]" % ("" if is_open else "/", ref_names.get(name, name)),
             max_parallel=_parallel(req.maxParallel),
             # The run's key as a promptmap secret — never rendered, cached or
             # stored — under the name the search kinds read it by, so search
@@ -1399,10 +1347,10 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
         outputs, {id_to_slug[n.id]: titles[n.id] for n in nodes}
     )
     by_id = {slug_to_id.get(name, name): value for name, value in results.items()}
-    # Anything structured is shown pretty-printed — see `_json_forms`.
+    # Anything structured is shown pretty-printed — see `_pretty_json`.
     for n in nodes:
         if (n.jsonOutput or n.kind in ("agent", "test")) and n.id in by_id:
-            by_id[n.id] = _json_forms(by_id[n.id])[0]
+            by_id[n.id] = _pretty_json(by_id[n.id])
     # A test that errored itself never said it passed.
     for n in planned:
         if n.kind == "test":

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AccountSection } from './Account';
+import { MentionTextarea } from './outline/mentionAutocomplete';
 import { Info } from './Info';
 import { useAccount } from './lib/account';
 import { PROVIDERS, agentInfo, exportGraph, type ClassifierSettings, type ExportTarget, type Provider } from './api';
@@ -8,6 +9,7 @@ import {
   promptVarMap,
   reservedVar,
   setPromptVars,
+  usePromptVarMap,
   usePromptVars,
   type PromptVar,
 } from './lib/promptdata';
@@ -30,6 +32,8 @@ import {
   docJson,
   getState,
   parseDoc,
+  titleMap,
+  useOutline,
   type Doc,
 } from './store';
 
@@ -224,21 +228,37 @@ export function SettingsModal({
             <h3 className="res-col__head">
               Global instruction
               <Info>
-                Prepended to every LLM call in a run. Template and python bullets are left alone —
-                only prompts get it.
+                Prepended to every chat and agent bullet in a run; templates, searches and tests are
+                left alone. Type @ to put another bullet&rsquo;s response here, in a [its name] …
+                [/its name] block — that bullet, and everything feeding it, gets the instruction
+                without it. Write {'{{ prompt }}'} to wrap the bullet&rsquo;s prompt instead of
+                going above it.
               </Info>
             </h3>
-            <textarea
-              className="res-col__edit"
-              value={value}
-              spellCheck={false}
-              placeholder="e.g. Answer in British English, and keep it under 200 words."
-              onChange={(e) => onChange(e.target.value)}
-            />
+            <GlobalInstruction value={value} onChange={onChange} />
           </section>
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The global instruction's editor: `@` completes bullets and variables, the
+ * way it does in a bullet. Re-renders with the document so a renamed bullet's
+ * mention reads by its new name.
+ */
+function GlobalInstruction({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const doc = useOutline();
+  return (
+    <MentionTextarea
+      className="res-col__edit"
+      value={value}
+      onChange={onChange}
+      titles={titleMap(doc)}
+      vars={usePromptVarMap()}
+      placeholder="e.g. Answer in British English. Follow the style guide in @Style guide."
+    />
   );
 }
 
@@ -387,8 +407,7 @@ function VarTable() {
           that used the old name.
           <br />
           The first is the server&rsquo;s own: it reads it by name, so it cannot be renamed or
-          removed — only filled in. Hover it for what it does. Python packages are set per
-          bullet, in its ••• → Settings….
+          removed — only filled in. Hover it for what it does.
         </Info>
       </h3>
       <div className="res-col__body pd-body">

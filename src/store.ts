@@ -3,7 +3,6 @@ import { nanoid } from 'nanoid';
 import type { RunEvent } from './api';
 import type { Bullet, BulletKind, ChatMessage, Field, FileRef, Focus, OutlineState, FlatBullet, RunFile, TestJudge, TestStatus } from './types';
 import { mentionIds, mentionToken, stripMention } from './lib/mentions';
-import { RENAMED } from './lib/promptdata';
 
 /**
  * A tiny external store shared by the outline (right) and the mind map (left).
@@ -21,7 +20,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     refs: [],
     files: [],
     pos: null,
-    kind: 'prompt',
+    kind: 'chat',
     jsonOutput: false,
     cache: true,
     mcpServer: '',
@@ -31,7 +30,6 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     remoteBrowser: false,
     publicUrl: false,
     persistDisk: false,
-    packages: '',
     model: '',
     outline: false,
     judge: 'llm',
@@ -100,14 +98,14 @@ export function parseDoc(value: unknown): Doc | null {
       bullets[id] = makeBullet({
         id,
         title: typeof b.title === 'string' ? b.title : '',
-        text: typeof b.text === 'string' ? renameVars(b.text) : '',
+        text: typeof b.text === 'string' ? b.text : '',
         children: Array.isArray(b.children) ? (b.children as string[]) : [],
         parentId: typeof b.parentId === 'string' ? b.parentId : null,
         collapsed: !!b.collapsed,
         refs: Array.isArray(b.refs) ? (b.refs as string[]) : [],
         files: Array.isArray(b.files) ? (b.files as FileRef[]) : [],
         pos: isPos(b.pos) ? b.pos : null,
-        kind: isKind(b.kind) ? b.kind : 'prompt',
+        kind: isKind(b.kind) ? b.kind : 'chat',
         jsonOutput: !!b.jsonOutput,
         cache: b.cache !== false,
         mcpServer: typeof b.mcpServer === 'string' ? b.mcpServer : '',
@@ -117,7 +115,6 @@ export function parseDoc(value: unknown): Doc | null {
         remoteBrowser: !!b.remoteBrowser,
         publicUrl: !!b.publicUrl,
         persistDisk: !!b.persistDisk,
-        packages: typeof b.packages === 'string' ? b.packages : '',
         model: typeof b.model === 'string' ? b.model : '',
         outline: !!b.outline,
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
@@ -144,21 +141,6 @@ export function clampThreshold(v: number): number {
   return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5;
 }
 
-/**
- * Carry a bullet's `@name`s across a variable rename.
- *
- * A one-time rewrite, not a migration: the old names resolve to nothing now, so
- * a bullet still carrying one would quietly go back to being prose — the kind
- * of breakage you find out about from a prompt that read differently than you
- * thought it did.
- */
-function renameVars(text: string): string {
-  return Object.entries(RENAMED).reduce(
-    (out, [from, to]) => out.replace(new RegExp(`@${from}\\b`, 'g'), `@${to}`),
-    text,
-  );
-}
-
 /** Load the live document from localStorage; null if none or invalid. */
 function loadDoc(): Doc | null {
   try {
@@ -170,7 +152,7 @@ function loadDoc(): Doc | null {
 }
 
 function isKind(v: unknown): v is BulletKind {
-  return v === 'prompt' || v === 'template' || v === 'search' || v === 'python' || v === 'agent' || v === 'test' || v === 'chat';
+  return v === 'chat' || v === 'template' || v === 'search' || v === 'agent' || v === 'test';
 }
 
 function isChatMessage(v: unknown): v is ChatMessage {
@@ -384,7 +366,6 @@ export function buildNodePayloads(s: OutlineState = state) {
     remoteBrowser: b.remoteBrowser,
     publicUrl: b.publicUrl,
     persistDisk: b.persistDisk,
-    packages: b.packages,
     model: b.model,
     outline: b.outline,
     judge: b.judge,
@@ -407,36 +388,26 @@ export function currentDoc(s: OutlineState = state): Doc {
 export function titleMap(s: OutlineState = state): Record<string, string> {
   const out: Record<string, string> = {};
   for (const b of Object.values(s.bullets)) {
-    // An untitled python bullet is still a legitimate `@` target — the thing
-    // its script printed — so it is named for what it is, not "@Untitled".
-    out[b.id] = b.title.trim() || (b.kind === 'python' ? 'Python' : '');
+    out[b.id] = b.title.trim();
   }
   return out;
 }
 
-/**
- * Whether `parentId` may take `movingId` as a child.
- *
- * A python bullet runs *one* program, and its child's output is that program.
- * Two children would mean two scripts concatenated into one file, which is
- * nobody's intent — so it holds exactly one child, and every path that could
- * give it a second is turned away here rather than in six separate places.
- * Passing `movingId` lets a bullet already sitting there be reordered.
- */
-export function canTakeChild(
-  s: OutlineState,
-  parentId: string | null,
-  movingId?: string,
-): boolean {
-  if (!parentId) return true; // top level is unbounded
-  const parent = s.bullets[parentId];
-  if (!parent || parent.kind !== 'python') return true;
-  return parent.children.filter((c) => c !== movingId).length === 0;
-}
 
 /** The bullets a bullet mentions, read straight out of its text. */
 function refsFromText(b: Bullet, selfId: string): string[] {
-  return mentionIds(b.text).filter((r, i, all) => r !== selfId && all.indexOf(r) === i);
+  // A chat's follow-ups may mention bullets too — they feed it the same way.
+  const followUps = b.kind === 'chat' ? b.chat.filter((m) => m.role === 'user').map((m) => m.content) : [];
+  return [b.text, ...followUps]
+    .flatMap(mentionIds)
+    .filter((r, i, all) => r !== selfId && all.indexOf(r) === i);
+}
+
+/** A chat's follow-ups with every mention of `ids` taken out, like its text. */
+function stripChat(chat: ChatMessage[], ids: string[]): ChatMessage[] {
+  return chat.map((m) =>
+    m.role === 'user' ? { ...m, content: ids.reduce((t, r) => stripMention(t, r), m.content) } : m,
+  );
 }
 
 /** Keep the caret on `id`, in whichever of its lines it was (used when reordering). */
@@ -559,14 +530,14 @@ export const actions = {
       while (stack.length > 1 && stack[stack.length - 1].depth > line.depth) stack.pop();
       const top = stack[stack.length - 1];
       let nb: Bullet | null = null;
-      if (line.depth > top.depth && canTakeChild(next, top.id)) {
+      if (line.depth > top.depth) {
         // Deeper: the first child of the line above.
         const parent = next.bullets[top.id];
         nb = makeBullet({ id: nanoid(), parentId: top.id, title: line.title });
         next.bullets[nb.id] = nb;
         next.bullets[top.id] = { ...parent, collapsed: false, children: [nb.id, ...parent.children] };
         stack.push({ depth: line.depth, id: nb.id });
-      } else if (canTakeChild(next, next.bullets[top.id].parentId)) {
+      } else {
         // Same depth (or nowhere to nest): a sibling right after the line above.
         const { list, index, parentId } = siblingsOf(next, top.id);
         nb = makeBullet({ id: nanoid(), parentId, title: line.title });
@@ -590,7 +561,7 @@ export const actions = {
    */
   splitTitle(id: string, at: number) {
     const b = state.bullets[id];
-    if (!b || !canTakeChild(state, b.parentId)) return;
+    if (!b) return;
     const next = clone(state);
     const { list, index, parentId } = siblingsOf(next, id);
     const nb = makeBullet({ id: nanoid(), parentId, title: b.title.slice(at).trimStart() });
@@ -615,47 +586,47 @@ export const actions = {
     emit(next);
   },
 
-  /** Make a bullet a prompt, a template, python or an agent — see `BulletKind`. */
+  /** Make a bullet a chat, a template, a search, an agent or a test — see `BulletKind`. */
   setKind(id: string, kind: BulletKind) {
     const b = state.bullets[id];
     if (!b || b.kind === kind) return;
     const next = clone(state);
-    // A python bullet runs its children's code and never its own text, so any
-    // text it is carrying is dead weight the moment it becomes one. Dropping
-    // it here is what keeps the row honest: what you see is what runs.
-    next.bullets[id] = kind === 'python' ? { ...b, kind, text: '', refs: [] } : { ...b, kind };
-    if (kind === 'chat') {
-      // A chat answers in prose, so it is not held to JSON. A prompt that has
-      // answered carries that exchange in as the opening turn — what it was
-      // sent and what it said — and its text box empties for your reply.
-      const last = state.results[id]?.trim();
-      next.bullets[id] = { ...next.bullets[id], jsonOutput: false };
-      if (last && !b.chat.length) {
-        next.bullets[id] = {
-          ...next.bullets[id],
-          text: '',
-          refs: [],
-          chat: [
-            { role: 'user', content: state.prompts[id]?.trim() || b.text },
-            { role: 'assistant', content: last },
-          ],
-        };
-      }
-    }
+    next.bullets[id] = { ...b, kind };
     emit(next);
   },
 
   /**
-   * Forget a chat bullet's conversation. An empty message box gets the opening
-   * message back, so the next run starts the conversation over.
+   * Forget a chat bullet's follow-ups and replies. Its first message — its
+   * text — stays, so the next run answers that alone.
    */
   clearChat(id: string) {
     const b = state.bullets[id];
     if (!b || !b.chat.length) return;
     const next = clone(state);
-    const first = b.chat.find((m) => m.role === 'user')?.content ?? '';
-    next.bullets[id] = { ...b, chat: [], text: b.text.trim() ? b.text : first };
+    const cleared = { ...b, chat: [] };
+    next.bullets[id] = { ...cleared, refs: refsFromText(cleared, id) };
     emit(next);
+  },
+
+  /**
+   * Send from a chat bullet's popup. With no first message yet, the draft
+   * becomes it (the bullet's text); after that it is a follow-up. Either way
+   * the bullet runs: the answer is rebuilt from its first message with every
+   * follow-up applied (see `Bullet.chat`). An empty draft just runs it again.
+   */
+  sendChat(id: string, content: string) {
+    const b = state.bullets[id];
+    if (!b || b.kind !== 'chat' || state.running) return;
+    const text = content.trim();
+    if (text) {
+      const next = clone(state);
+      const updated = b.text.trim()
+        ? { ...b, chat: [...b.chat, { role: 'user' as const, content: text }] }
+        : { ...b, text };
+      next.bullets[id] = { ...updated, refs: refsFromText(updated, id) };
+      emit(next);
+    }
+    runner?.(id);
   },
 
   /**
@@ -798,14 +769,6 @@ export const actions = {
     emit(next);
   },
 
-  /** Set a python bullet's extra sandbox packages — see `Bullet.packages`. */
-  setPackages(id: string, packages: string) {
-    const b = state.bullets[id];
-    if (!b || b.packages === packages) return;
-    const next = clone(state);
-    next.bullets[id] = { ...b, packages };
-    emit(next);
-  },
 
   /** Set the model one bullet calls — see `Bullet.model`. Empty for the run's. */
   setModel(id: string, model: string) {
@@ -855,7 +818,6 @@ export const actions = {
       collectDescendants(state, id, desc);
       if (desc.includes(newParentId)) return; // can't drop inside itself
     }
-    if (!canTakeChild(state, newParentId, id)) return;
     const next = clone(state);
     const { list: oldList, index: oldIndex } = siblingsOf(next, id);
     const sameParent = b.parentId === newParentId;
@@ -933,6 +895,7 @@ export const actions = {
     next.bullets[sourceId] = {
       ...b,
       text: stripMention(b.text, targetId),
+      chat: stripChat(b.chat, [targetId]),
       refs: b.refs.filter((r) => r !== targetId),
     };
     emit(next);
@@ -942,7 +905,6 @@ export const actions = {
   addChild(parentId: string): string {
     const parent = state.bullets[parentId];
     if (!parent) return '';
-    if (!canTakeChild(state, parentId)) return '';
     const next = clone(state);
     const nb = makeBullet({ id: nanoid(), parentId });
     next.bullets[nb.id] = nb;
@@ -1002,7 +964,6 @@ export const actions = {
     } else if (b.parentId) {
       const parent = next.bullets[b.parentId];
       const grandId = parent.parentId;
-      if (!canTakeChild(state, grandId, id)) return;
       setChildren(next, parent.id, parent.children.filter((x) => x !== id));
       const gList = grandId ? next.bullets[grandId].children : next.rootIds;
       const pIndex = gList.indexOf(parent.id);
@@ -1031,7 +992,6 @@ export const actions = {
     } else if (b.parentId) {
       const parent = next.bullets[b.parentId];
       const grandId = parent.parentId;
-      if (!canTakeChild(state, grandId, id)) return;
       setChildren(next, parent.id, parent.children.filter((x) => x !== id));
       const gList = grandId ? next.bullets[grandId].children : next.rootIds;
       const pIndex = gList.indexOf(parent.id);
@@ -1062,7 +1022,6 @@ export const actions = {
    * goes is the only way to know where it went.
    */
   addSiblingBefore(id: string): string {
-    if (!canTakeChild(state, state.bullets[id]?.parentId ?? null)) return '';
     const next = clone(state);
     const { list, index, parentId } = siblingsOf(next, id);
     const nb = makeBullet({ id: nanoid(), parentId });
@@ -1078,7 +1037,6 @@ export const actions = {
 
   /** Create a new empty sibling directly after `id`; focus it. */
   addSiblingAfter(id: string): string {
-    if (!canTakeChild(state, state.bullets[id]?.parentId ?? null)) return '';
     const next = clone(state);
     const { list, index, parentId } = siblingsOf(next, id);
     const nb = makeBullet({ id: nanoid(), parentId });
@@ -1096,7 +1054,6 @@ export const actions = {
   indent(id: string) {
     const { list, index } = siblingsOf(state, id);
     if (index <= 0) return; // no previous sibling to nest under
-    if (!canTakeChild(state, list[index - 1])) return;
     const next = clone(state);
     const prevId = list[index - 1];
     const b = next.bullets[id];
@@ -1148,6 +1105,7 @@ export const actions = {
         next.bullets[other.id] = {
           ...other,
           text: stripMention(other.text, id),
+          chat: stripChat(other.chat, [id]),
           refs: other.refs.filter((r) => r !== id),
         };
       }
@@ -1192,6 +1150,7 @@ export const actions = {
       next.bullets[other.id] = {
         ...other,
         text: dead.reduce((t, r) => stripMention(t, r), other.text),
+        chat: stripChat(other.chat, dead),
         refs: other.refs.filter((r) => !gone.has(r)),
       };
     }
@@ -1292,14 +1251,14 @@ export const actions = {
       if (event.prompt !== undefined) next.prompts = { ...state.prompts, [event.id]: event.prompt };
       if (event.test) next.tests = { ...state.tests, [event.id]: event.test };
       const b = state.bullets[event.id];
-      if (event.chatTurn && b) {
-        // A chat bullet's message was sent: the exchange joins its
-        // conversation, and the message box empties for the next reply.
-        const turn: ChatMessage[] = [
-          { role: 'user', content: event.chatTurn.user },
-          { role: 'assistant', content: event.chatTurn.assistant },
-        ];
-        next.bullets = { ...state.bullets, [b.id]: { ...b, chat: [...b.chat, ...turn], text: '', refs: [] } };
+      if (b?.kind === 'chat' && event.status === 'success' && event.output !== undefined) {
+        // A chat's conversation ends on its current answer: a reply to a new
+        // follow-up is added; otherwise the last reply is replaced, since it
+        // was rebuilt from the same messages.
+        const reply: ChatMessage = { role: 'assistant', content: event.output };
+        const last = b.chat[b.chat.length - 1];
+        const chat = last?.role === 'assistant' ? [...b.chat.slice(0, -1), reply] : [...b.chat, reply];
+        next.bullets = { ...state.bullets, [b.id]: { ...b, chat } };
       }
       if (event.status === 'success') {
         // Its files are replaced along with its answer, or dropped if it made none this time.
@@ -1376,7 +1335,6 @@ export const actions = {
       collectDescendants(state, id, desc);
       if (desc.includes(newParentId)) return;
     }
-    if (!canTakeChild(state, newParentId, id)) return;
     const next = clone(state);
     const { list } = siblingsOf(next, id);
     setChildren(next, b.parentId, list.filter((x) => x !== id));

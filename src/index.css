@@ -1162,13 +1162,6 @@ body,
   font-weight: 700;
 }
 
-/* Code font is for a python body; its name stays in the body font. */
-.ol-row--python .ol-text.ol-title {
-  font-family: inherit;
-  font-size: 14px;
-  white-space: normal;
-}
-
 /* ------------------------------------------------------------- markdown */
 
 /* The read view of a bullet — the same box as the editor, so switching
@@ -1803,12 +1796,6 @@ body,
   z-index: 2;
 }
 
-/* Python bullets hold code, not prose — say so in the chip's colour. */
-.tpl-chip--python {
-  color: #2d5f8a;
-  background: #d8ecfb;
-}
-
 /* A search reaches outside the map — teal, apart from the kinds that stay in it. */
 .tpl-chip--search {
   color: #1f6b62;
@@ -1822,12 +1809,6 @@ body,
   background: #ece3fa;
 }
 
-/* A chat is a prompt with a person in the loop — green, for a conversation. */
-.tpl-chip--chat {
-  color: #276749;
-  background: #dcf5e3;
-}
-
 /* JSON is a constraint on the answer, not a kind of bullet, so it wears the
    amber of a rule being enforced rather than either kind's colour. */
 .tpl-chip--json {
@@ -1836,9 +1817,7 @@ body,
 }
 
 .ol-row--template .ol-text,
-.ol-row--template .ol-md,
-.ol-row--python .ol-text,
-.ol-row--python .ol-md {
+.ol-row--template .ol-md {
   padding-right: 38px;
   color: #3e4c59;
 }
@@ -1850,29 +1829,13 @@ body,
   padding-right: 72px;
 }
 
-/* Code reads badly in the body font, so the row and the node both switch. */
-.ol-row--python .ol-text,
-.ol-row--python .ol-md,
-.mm-node--python .mm-node__md {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  white-space: pre-wrap;
-}
-
-.mm-node--template,
-.mm-node--python {
+.mm-node--template {
   border-style: dashed;
   border-color: #cbd2d9;
   background: #f5f7fa;
 }
 
-.mm-node--python {
-  border-color: #a9cbe6;
-  background: #f2f8fd;
-}
-
-.mm-node--template .mm-node__md,
-.mm-node--python .mm-node__md {
+.mm-node--template .mm-node__md {
   color: #3e4c59;
 }
 
@@ -3287,15 +3250,61 @@ button.rf-file__dl:disabled {
   100% { opacity: 0; transform: translate(-50%, 0); }
 }
 
-/* ---- Chat bullet: its conversation, read-only, above its message box
-   (`outline/ChatPanel.tsx`) ---- */
+/* ---- Chat bullet: its follow-ups and replies below its first message, with
+   a box for the next follow-up (`outline/ChatPanel.tsx`) ---- */
 .chat {
   flex: 0 1 auto;
   min-height: 0;
   max-height: 60%;
   display: flex;
   flex-direction: column;
+  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+}
+
+/* The chat is the whole column: the conversation takes the room, the box sits under it. */
+.chat--full {
+  flex: 1 1 auto;
+  max-height: none;
+  border-top: none;
+}
+
+.chat--full .chat__list {
+  flex: 1 1 auto;
+}
+
+.chat__hint {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chat__compose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 8px;
+}
+
+.chat__input {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--bg, #fff);
+}
+
+.chat__msg--old .chat__bubble {
+  opacity: 0.6;
+}
+
+.chat__tag--old {
+  color: var(--muted);
 }
 
 .chat__list {
@@ -3367,7 +3376,8 @@ button.rf-file__dl:disabled {
 .chat__bar {
   display: flex;
   justify-content: flex-end;
-  padding: 0 14px 8px;
+  align-items: center;
+  gap: 12px;
 }
 
 .chat__clear {
@@ -3384,10 +3394,3 @@ button.rf-file__dl:disabled {
   text-decoration: underline;
 }
 
-.chat__hint {
-  margin: 0;
-  padding: 10px 14px;
-  font-size: 12px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
-}

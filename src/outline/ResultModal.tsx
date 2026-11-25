@@ -4,14 +4,14 @@ import { renderMarkdown } from '../lib/markdown';
 import { displayToRaw, toDisplay } from '../lib/mentions';
 import { usePromptVarMap, type PromptVarMap } from '../lib/promptdata';
 import { actions, getState, titleMap, useOutline } from '../store';
-import { PYTHON_CAPTION, type Bullet } from '../types';
+import type { Bullet } from '../types';
 import { NodeSettings } from '../NodeSettings';
 import { JsonChip, KindChip } from '../mindmap/BulletNode';
 import { AgentLinks, agentLinks } from '../AgentLinks';
 import { Attachments } from './BulletRow';
 import { useFileDrop } from './fileDrop';
 import { ChatHistory } from './ChatPanel';
-import { MentionDropdown, useMentionAutocomplete } from './mentionAutocomplete';
+import { MentionDropdown, bulletSource, useMentionAutocomplete } from './mentionAutocomplete';
 
 interface Props {
   bullet: Bullet;
@@ -37,7 +37,7 @@ interface Props {
  * having to close the modal to act on that is the wrong shape.
  *
  * Above the columns sits the bullet's settings, folded away behind an
- * expander: what a bullet *is* — template, python, agent, held to JSON — is half
+ * expander: what a bullet *is* — template, search, agent, held to JSON — is half
  * the answer to "why did it say that", and changing it is the other half.
  * Neither should need the modal closed first. Opened via "Settings…" in the
  * outline, it starts expanded.
@@ -73,6 +73,9 @@ export function ResultModal({ bullet, prompt, result }: Props) {
   // response column starts hidden there; the header button brings it back.
   const [hideOutput, setHideOutput] = useState(bullet.kind === 'chat');
   const soloLeft = hideOutput && !full;
+  // A chat's next message — sent by the header's Send button. See `ChatHistory`.
+  const [draft, setDraft] = useState('');
+  const isChat = bullet.kind === 'chat';
 
   const { running, runLog } = useOutline();
   // An agent's log lines, for the links it posted — see `AgentLinks`.
@@ -118,10 +121,19 @@ export function ResultModal({ bullet, prompt, result }: Props) {
           <button
             className="res-modal__run"
             disabled={running}
-            title="Runs this bullet and every bullet it depends on, using promptmap’s select. Everything else keeps its last answer."
-            onClick={() => actions.runNode(bullet.id)}
+            title={
+              isChat
+                ? 'Sends your message — the request, or a follow-up once there is one — and runs this bullet and everything it depends on. With nothing typed, runs it again.'
+                : 'Runs this bullet and every bullet it depends on, using promptmap’s select. Everything else keeps its last answer.'
+            }
+            onClick={() => {
+              if (isChat) {
+                actions.sendChat(bullet.id, draft);
+                setDraft('');
+              } else actions.runNode(bullet.id);
+            }}
           >
-            {running ? 'Running…' : bullet.kind === 'chat' ? 'Send' : 'Run node'}
+            {running ? 'Running…' : isChat ? 'Send' : 'Run node'}
           </button>
           <button className="res-modal__close" onClick={close} aria-label="Close">
             ✕
@@ -164,13 +176,10 @@ export function ResultModal({ bullet, prompt, result }: Props) {
                     )
                   }
                 >
-                  {bullet.kind === 'chat' ? 'Chat' : 'Your prompt'}
+                  {isChat ? 'Chat' : 'Your prompt'}
                 </ColHead>
-                {bullet.kind === 'chat' && <ChatHistory bullet={bullet} titles={titles} vars={vars} />}
-                {bullet.kind === 'python' ? (
-                  // A python bullet has no text of its own, and typing on one is
-                  // refused everywhere else — so it is not an editor here either.
-                  <p className="res-col__empty">{PYTHON_CAPTION}</p>
+                {isChat ? (
+                  <ChatHistory bullet={bullet} titles={titles} vars={vars} draft={draft} setDraft={setDraft} />
                 ) : (
                   <Editor bullet={bullet} titles={titles} vars={vars} />
                 )}
@@ -283,7 +292,7 @@ function Editor({ bullet, titles, vars }: { bullet: Bullet; titles: Record<strin
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const display = toDisplay(bullet.text, titles);
   // `@` links another bullet (or a run variable) here too, for every kind.
-  const mention = useMentionAutocomplete(bullet, titles, vars, () => ref.current);
+  const mention = useMentionAutocomplete(bulletSource(bullet), titles, vars, () => ref.current);
 
   // Grow to fit, so the whole prompt is visible without a nested scrollbar
   // until it is genuinely taller than the column.
@@ -301,14 +310,9 @@ function Editor({ bullet, titles, vars }: { bullet: Bullet; titles: Record<strin
       className="res-col__edit"
       value={display}
       spellCheck={false}
-      placeholder={bullet.kind === 'chat' ? (bullet.chat.length ? 'Your reply… (⌘/Ctrl+Enter sends)' : 'Your message… (⌘/Ctrl+Enter sends)') : 'Empty'}
+      placeholder="Empty"
       onKeyDown={(e) => {
-        if (mention.onKeyDown(e)) return;
-        // A chat's text is a message: send it the way a chat box would.
-        if (bullet.kind === 'chat' && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
-          actions.runNode(bullet.id);
-        }
+        mention.onKeyDown(e);
       }}
       onKeyUp={mention.onKeyUp}
       onBlur={mention.close}

@@ -78,12 +78,6 @@ def warnings(nodes: list["Node"], provider: str = "gemini") -> list[str]:
             "exported project has no way to fetch them. The `promptfiles` config "
             "line is kept, so pass the files yourself when you run it."
         )
-    if any(n.kind == "python" for n in nodes):
-        out.append(
-            "Python bullets need the `python_modal` model kind from the "
-            "`promptmap-extra-model-kinds` package, not promptmap. Install it alongside "
-            "promptmap, or those bullets will fail as an unknown model type."
-        )
     if any(n.kind == "agent" for n in nodes):
         out.append(
             "Agent bullets need the `agent_modal` model kind from the "
@@ -155,7 +149,7 @@ def _install(models: dict[str, str]) -> str:
     extras = _searches(models) or any(
         f'model_type="{kind}"' in src
         for src in models.values()
-        for kind in ("python_modal", "agent_modal", "agent37")
+        for kind in ("agent_modal", "agent37")
     )
     return "  pip install " + ('"promptmap[extras]"' if extras else "promptmap")
 

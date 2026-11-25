@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Info } from './Info';
-import { agentEnabled, pythonInfo } from './api';
+import { agentEnabled } from './api';
 import { useAgent37Key } from './lib/agent37Key';
 import { matchMcpServers } from './lib/mcpServers';
 import { actions } from './store';
@@ -12,14 +12,9 @@ interface Props {
 
 const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
   {
-    kind: 'prompt',
-    label: 'Prompt',
-    desc: 'Its text, with its inputs filled in, is sent to the LLM.',
-  },
-  {
     kind: 'chat',
     label: 'Chat',
-    desc: 'A prompt you talk to, to explore and clarify: its text is your next message, and Send (Run node) sends it with the conversation so far. Only the latest reply flows on, so each reply is a complete answer that folds in every clarification. With no new message, it hands on its last reply without calling the model.',
+    desc: 'Its text, with its inputs filled in, is sent to the LLM as the first message. Follow-ups typed in this popup amend the answer; each run sends the first message and every follow-up (not earlier replies), and only the latest reply flows on.',
   },
   {
     kind: 'template',
@@ -30,11 +25,6 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
     kind: 'search',
     label: 'Search',
     desc: 'Its text, with every reference filled in, is a web search query — run through your provider’s own web search on your key (Brave, for OpenRouter) — and the findings are the output.',
-  },
-  {
-    kind: 'python',
-    label: 'Python',
-    desc: 'Takes no text of its own: runs the code its one child produced in a Modal sandbox, and whatever that prints is the output.',
   },
   {
     kind: 'agent',
@@ -50,7 +40,7 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
 
 /**
  * One bullet's settings: what it is, and everything that only makes sense for
- * that kind — JSON enforcement, a python bullet's sandbox packages, an agent's
+ * that kind — JSON enforcement, a test's judge, an agent's
  * MCP server. Shown in the node modal's expander above its text, input and
  * response. Saves as you type and has no buttons.
  *
@@ -61,16 +51,11 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
 export function NodeSettings({ bullet }: Props) {
   // Blank means preserve-disk runs land on the shared machine — warned below.
   const agent37Key = useAgent37Key();
-  const [python, setPython] = useState({
-    enabled: true,
-    packages: [] as string[],
-  });
   const [agent, setAgent] = useState(true);
   const { id, kind } = bullet;
 
   useEffect(() => {
     let live = true;
-    pythonInfo().then((info) => live && setPython(info));
     agentEnabled().then((yes) => live && setAgent(yes));
     return () => {
       live = false;
@@ -79,7 +64,7 @@ export function NodeSettings({ bullet }: Props) {
 
   const current = KINDS.find((k) => k.kind === kind)!;
   const notReady =
-    (kind === 'python' && !python.enabled) || (kind === 'agent' && !agent && !bullet.persistDisk)
+    kind === 'agent' && !agent && !bullet.persistDisk
       ? 'This server has not reported Modal as configured — running it will say what is missing.'
       : '';
 
@@ -93,11 +78,7 @@ export function NodeSettings({ bullet }: Props) {
               role="radio"
               aria-checked={kind === k.kind}
               className={`ns-seg__opt ${kind === k.kind ? 'ns-seg__opt--on' : ''}`}
-              title={
-                k.kind === 'python' && bullet.text.trim()
-                  ? `${k.desc} Its current text will be cleared.`
-                  : k.desc
-              }
+              title={k.desc}
               onClick={() => actions.setKind(id, k.kind)}
             >
               {k.label}
@@ -109,7 +90,7 @@ export function NodeSettings({ bullet }: Props) {
       </div>
 
       <div className="ns-rows">
-        {kind !== 'test' && kind !== 'chat' && (
+        {kind !== 'test' && (
           <Row
             label="Output"
             info={
@@ -130,7 +111,7 @@ export function NodeSettings({ bullet }: Props) {
           </Row>
         )}
 
-        {(kind === 'prompt' || kind === 'chat' || kind === 'agent') && (
+        {(kind === 'chat' || kind === 'agent') && (
           <Row
             label="Cache"
             info="Ticked, a run with the same prompt and settings as an earlier one reuses that answer instantly instead of calling the model again. Unticked, this bullet runs fresh every time — for an agent whose job has side effects, or an answer you want redone."
@@ -146,7 +127,7 @@ export function NodeSettings({ bullet }: Props) {
           </Row>
         )}
 
-        {(kind === 'prompt' || kind === 'chat' || kind === 'agent') && (
+        {(kind === 'chat' || kind === 'agent') && (
           <Row
             label="Context"
             info="Ticked, the bullets around this one — what it is built from, what it feeds, and the map’s final outputs — are listed after its text as a tree, with this bullet marked. Lets it fit in: “match your siblings’ tone”, “leave out what the section above covers”."
@@ -162,7 +143,7 @@ export function NodeSettings({ bullet }: Props) {
           </Row>
         )}
 
-        {(kind === 'prompt' || kind === 'chat' || kind === 'agent' || (kind === 'test' && bullet.judge === 'llm')) && (
+        {(kind === 'chat' || kind === 'agent' || (kind === 'test' && bullet.judge === 'llm')) && (
           <Row
             label="Model"
             info="The model this bullet calls, as the provider names it — e.g. gpt-4o-mini, gemini-2.5-pro, claude-sonnet-4-5. Blank uses the run’s: llm_model in Settings, else the server’s default for the provider. Changing it keeps a cached answer — untick Cache for a fresh one from the new model."
@@ -213,30 +194,6 @@ export function NodeSettings({ bullet }: Props) {
               step={0.05}
               value={bullet.threshold}
               onChange={(e) => actions.setThreshold(id, e.target.valueAsNumber)}
-            />
-          </Row>
-        )}
-
-        {kind === 'python' && (
-          <Row
-            label="Sandbox packages"
-            info={
-              <>
-                Comma-separated, installed before this bullet runs
-                {python.packages.length
-                  ? ` on top of what the sandbox has: ${python.packages.join(', ')}.`
-                  : '.'}{' '}
-                A script can also ask for its own with a PEP 723 header.
-              </>
-            }
-          >
-            <input
-              className="pd-input"
-              value={bullet.packages}
-              placeholder="beautifulsoup4, lxml, scipy==1.*"
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => actions.setPackages(id, e.target.value)}
             />
           </Row>
         )}

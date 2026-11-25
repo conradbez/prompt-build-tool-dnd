@@ -1,7 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { actions, getState } from '../store';
-import type { Bullet } from '../types';
-import { applyMention, applyVar, detectMention, type TitleMap } from '../lib/mentions';
+import { applyMention, applyVar, detectMention, displayToRaw, toDisplay, type TitleMap } from '../lib/mentions';
 import type { PromptVarMap } from '../lib/promptdata';
 
 /**
@@ -27,20 +26,36 @@ export interface AutocompleteState {
 const MAX_MATCHES = 8;
 
 /**
- * The `@` autocomplete for one bullet's text, shared by every editor of it —
- * the outline row and the node popup — so a mention can be added from either,
- * whatever the bullet's kind.
+ * Raw text holding `@` mentions, and where it is written back: a bullet's own
+ * text, or the global instruction in Settings. `id` is the bullet that owns
+ * it, left out of the completions — a bullet cannot feed itself.
+ */
+export interface MentionSource {
+  id?: string;
+  text: string;
+  setText: (raw: string) => void;
+}
+
+/** A bullet's text, as a `MentionSource`. */
+export function bulletSource(bullet: { id: string; text: string }): MentionSource {
+  return { id: bullet.id, text: bullet.text, setText: (raw) => actions.setText(bullet.id, raw) };
+}
+
+/**
+ * The `@` autocomplete for one piece of text, shared by every editor of it —
+ * the outline row, the node popup, the global instruction — so a mention can
+ * be added from any of them.
  *
  * `getEl` returns the textarea being typed in; it holds the display form.
  */
 export function useMentionAutocomplete(
-  bullet: Bullet,
+  source: MentionSource,
   titles: TitleMap,
   vars: PromptVarMap,
   getEl: () => HTMLTextAreaElement | null,
 ) {
   const [ac, setAc] = useState<AutocompleteState | null>(null);
-  const { id } = bullet;
+  const { id } = source;
 
   function findMatches(query: string): Match[] {
     // Variables lead: there are a handful of them against every bullet in the
@@ -68,16 +83,16 @@ export function useMentionAutocomplete(
     // the `@name` you see: its name is its identity.
     const { raw, caret } =
       match.kind === 'var'
-        ? applyVar(el.value, bullet.text, ac.start, el.selectionStart, match.id, titles)
+        ? applyVar(el.value, source.text, ac.start, el.selectionStart, match.id, titles)
         : applyMention(
             el.value,
-            bullet.text,
+            source.text,
             ac.start,
             el.selectionStart,
             { id: match.id, title: titles[match.id] ?? '' },
             titles,
           );
-    actions.setText(id, raw);
+    source.setText(raw);
     setAc(null);
     requestAnimationFrame(() => {
       const el2 = getEl();
@@ -139,5 +154,50 @@ export function MentionDropdown({ ac, onPick }: { ac: AutocompleteState; onPick:
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * A textarea for raw text with `@` mentions that is not a bullet's — the
+ * global instruction. Mentions show as short labels and are stored as id
+ * tokens, the same as in a bullet; variables complete here too.
+ */
+export function MentionTextarea({
+  value,
+  onChange,
+  titles,
+  vars,
+  className,
+  placeholder,
+}: {
+  value: string;
+  onChange: (raw: string) => void;
+  titles: TitleMap;
+  vars: PromptVarMap;
+  className?: string;
+  placeholder?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  const mention = useMentionAutocomplete({ text: value, setText: onChange }, titles, vars, () => ref.current);
+  return (
+    <div className="res-col__edit-wrap">
+      <textarea
+        ref={ref}
+        className={className}
+        value={toDisplay(value, titles)}
+        spellCheck={false}
+        placeholder={placeholder}
+        onKeyDown={(e) => {
+          mention.onKeyDown(e);
+        }}
+        onKeyUp={mention.onKeyUp}
+        onBlur={mention.close}
+        onChange={(e) => {
+          onChange(displayToRaw(e.target.value, value, titles));
+          mention.refresh(e.currentTarget);
+        }}
+      />
+      {mention.ac && <MentionDropdown ac={mention.ac} onPick={mention.accept} />}
+    </div>
   );
 }

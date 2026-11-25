@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Bullet } from '../types';
-import { actions, canTakeChild, getState } from '../store';
+import { actions } from '../store';
 import { filesEnabled, uploadFile } from '../api';
 import { ROW_KEYS, SETTINGS_HINT } from '../lib/shortcuts';
 import { showHint } from '../lib/hint';
@@ -112,7 +112,7 @@ export function BulletMenu({ bullet, shortcuts = false }: Props) {
           <li>
             <button
               role="menuitem"
-              title="Node type, JSON output, and what that type needs — python packages, an agent's MCP server."
+              title="Node type, JSON output, and what that type needs — a test's judge, an agent's MCP server."
               onClick={() => run(() => {
                   actions.openSettings(id);
                   showHint(SETTINGS_HINT, 'opens settings');
@@ -134,21 +134,17 @@ export function BulletMenu({ bullet, shortcuts = false }: Props) {
               </button>
             </li>
           )}
-          {canTakeChild(getState(), id) && (
-            <li>
-              <button role="menuitem" onClick={() => run(() => focusNew(actions.addChild(id)))}>
-                Add child
-              </button>
-            </li>
-          )}
-          {canTakeChild(getState(), bullet.parentId) && (
-            <li>
-              <button role="menuitem" onClick={() => run(() => focusNew(actions.addSiblingAfter(id)), [ROW_KEYS.addBelow, 'adds a bullet below'])}>
-                Add bullet below
-                {key('addBelow')}
-              </button>
-            </li>
-          )}
+          <li>
+            <button role="menuitem" onClick={() => run(() => focusNew(actions.addChild(id)))}>
+              Add child
+            </button>
+          </li>
+          <li>
+            <button role="menuitem" onClick={() => run(() => focusNew(actions.addSiblingAfter(id)), [ROW_KEYS.addBelow, 'adds a bullet below'])}>
+              Add bullet below
+              {key('addBelow')}
+            </button>
+          </li>
           <li>
             <button role="menuitem" onClick={() => run(() => focusNew(actions.addParent(id)), [ROW_KEYS.addParent, 'adds a parent'])}>
               Add parent

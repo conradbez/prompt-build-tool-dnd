@@ -26,7 +26,7 @@ export interface NodePayload {
   text: string;
   parentId: string | null;
   refs: string[];
-  /** Prompt, template, python, agent or test — decides how the server runs it. */
+  /** Chat, template, search, agent or test — decides how the server runs it. */
   kind: BulletKind;
   /** An agent bullet's MCP server command; empty for none. */
   mcpServer: string;
@@ -42,8 +42,6 @@ export interface NodePayload {
   publicUrl: boolean;
   /** An agent bullet whose disk outlives the run — see `Bullet.persistDisk`. */
   persistDisk: boolean;
-  /** A python bullet's extra sandbox packages, comma-separated; empty for none. */
-  packages: string;
   /** The model this bullet calls — see `Bullet.model`. Empty for the run's. */
   model: string;
   /** Tell it where it sits in the map — see `Bullet.outline`. */
@@ -110,34 +108,8 @@ export function getServerUrl(): string {
   return (saved || envUrl || fallback).replace(/\/+$/, '');
 }
 
-export interface PythonInfo {
-  /** Whether the server can run `python` bullets at all (Modal configured). */
-  enabled: boolean;
-  /** What the sandbox image installs — chosen on the server, shown here so the
-   *  prompt that writes the script can be written against it. */
-  packages: string[];
-  /** Entries in the server's `MODAL_PACKAGES` that are not requirements. */
-  rejected: string[];
-}
-
-export async function pythonInfo(): Promise<PythonInfo> {
-  const none: PythonInfo = { enabled: false, packages: [], rejected: [] };
-  try {
-    const res = await fetch(`${getServerUrl()}/python/enabled`);
-    if (!res.ok) return none;
-    const data = await res.json();
-    return {
-      enabled: !!data.enabled,
-      packages: Array.isArray(data.packages) ? data.packages : [],
-      rejected: Array.isArray(data.rejected) ? data.rejected : [],
-    };
-  } catch {
-    return none;
-  }
-}
-
 export interface AgentInfo {
-  /** Whether the server can run `agent` bullets (Modal configured, as for python). */
+  /** Whether the server can run `agent` bullets (Modal configured). */
   enabled: boolean;
   /** The step limit a run gets when Settings leaves it blank, and the most it may ask for. */
   defaultSteps: number;
@@ -311,9 +283,6 @@ export type RunEvent =
       prompt?: string;
       test?: TestStatus;
       files?: RunFile[];
-      /** A chat bullet that was sent a message: the turn it made — the
-       *  message as sent, inputs filled in, and the reply. */
-      chatTurn?: { user: string; assistant: string };
     }
   | ({ type: 'final' } & RunResponse);
 

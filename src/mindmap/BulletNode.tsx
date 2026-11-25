@@ -1,15 +1,13 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelRunStatus } from '../api';
 import { actions } from '../store';
-import { PYTHON_CAPTION, type BulletKind, type TestStatus } from '../types';
+import type { BulletKind, TestStatus } from '../types';
 
 export interface BulletNodeData {
   /** The bullet's markdown, already rendered (mentions included). */
   /** The node's name — all a node shows of its bullet. */
   title: string;
   hasChildren: boolean;
-  /** False on a python node that already holds its one child. */
-  canAddChild: boolean;
   collapsed: boolean;
   kind: BulletKind;
   /** An agent node's MCP server command, named in its chip's tooltip. */
@@ -35,7 +33,7 @@ export function BulletNode({ id, data, selected }: NodeProps) {
   const d = data as BulletNodeData;
   return (
     <div
-      className={`mm-node ${selected ? 'mm-node--selected' : ''} ${d.kind !== 'prompt' ? `mm-node--${d.kind}` : ''} ${
+      className={`mm-node ${selected ? 'mm-node--selected' : ''} ${d.kind !== 'chat' ? `mm-node--${d.kind}` : ''} ${
         d.kind === 'test' ? `mm-node--test-${d.test ?? 'idle'}` : ''
       } ${d.runStatus ? `mm-node--run-${d.runStatus}` : ''}`}
     >
@@ -52,26 +50,22 @@ export function BulletNode({ id, data, selected }: NodeProps) {
         type="target"
         position={Position.Bottom}
         className="mm-handle mm-handle--start"
-        title={
-          d.canAddChild
-            ? 'Drag to link, click to add a child'
-            : 'A python node runs one child, and already has it'
-        }
+        title="Drag to link, click to add a child"
         onClick={(e) => {
           e.stopPropagation();
           actions.addChild(id);
         }}
       >
-        {d.canAddChild && <span className="mm-handle__plus">＋</span>}
+        <span className="mm-handle__plus">＋</span>
       </Handle>
       {/* Name on the left, what kind of node it is on the right. */}
       <div className="mm-node__top">
       <div className={`mm-node__title${d.title ? '' : ' mm-node__empty'}`}>
-        {d.title || (d.kind === 'python' ? PYTHON_CAPTION : 'Untitled')}
+        {d.title || 'Untitled'}
       </div>
-      {(d.kind !== 'prompt' || d.jsonOutput || d.fileCount > 0) && (
+      {(d.kind !== 'chat' || d.jsonOutput || d.fileCount > 0) && (
         <div className="mm-node__flags">
-          {d.kind !== 'prompt' && <KindChip kind={d.kind} mcpServer={d.mcpServer} test={d.test} />}
+          {d.kind !== 'chat' && <KindChip kind={d.kind} mcpServer={d.mcpServer} test={d.test} />}
           {d.jsonOutput && <JsonChip />}
           {d.fileCount > 0 && (
             <span className="mm-node__files" title={`${d.fileCount} attached file(s)`}>
@@ -177,8 +171,8 @@ function TestTag({ id, status }: { id: string; status?: TestStatus }) {
 }
 
 /**
- * The `JSON` badge. Orthogonal to the kind — a prompt, a template or a python
- * bullet can each be held to JSON — so it is its own chip beside that one.
+ * The `JSON` badge. Orthogonal to the kind — a chat, a template or an agent
+ * can each be held to JSON — so it is its own chip beside that one.
  */
 export function JsonChip({ className = '' }: { className?: string }) {
   return (
@@ -207,7 +201,7 @@ export function KindChip({
   test?: TestStatus;
   className?: string;
 }) {
-  if (kind === 'prompt') return null;
+  if (kind === 'chat') return null;
   if (kind === 'test') {
     const [label, title] = TEST_LABELS[test ?? 'idle'];
     return (
@@ -222,8 +216,6 @@ export function KindChip({
   const [label, title] =
     kind === 'template'
       ? ['TPL', 'Not sent to the LLM — its text, with refs filled in, is its output']
-      : kind === 'chat'
-        ? ['CHAT', 'A prompt you can talk to in its popup — only its latest reply flows on']
       : kind === 'search'
         ? ['WEB', 'Its text, with refs filled in, is searched on the web through your provider — the findings are its output']
       : kind === 'agent'

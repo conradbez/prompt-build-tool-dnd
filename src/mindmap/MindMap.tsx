@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { actions, canTakeChild, getState, useOutline } from '../store';
+import { actions, getState, useOutline } from '../store';
 import { layout, snapToGrid, NODE_WIDTH, NODE_HEIGHT } from './layout';
 import { BulletNode, type BulletNodeData } from './BulletNode';
 
@@ -113,7 +113,6 @@ export function MindMap() {
         // A node shows its name only; the body is read in the outline.
         title: b.title.trim(),
         hasChildren: b.children.length > 0,
-        canAddChild: canTakeChild(state, b.id),
         collapsed: b.collapsed,
         kind: b.kind,
         mcpServer: b.mcpServer,

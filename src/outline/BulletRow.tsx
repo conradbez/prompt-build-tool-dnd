@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { PYTHON_CAPTION, type Bullet, type Field, type RunFile, type TestStatus } from '../types';
+import { type Bullet, type Field, type RunFile, type TestStatus } from '../types';
 import { FileThumbs } from '../RunFiles';
 import { actions, flatten, getState, titleMap } from '../store';
 import { register, getEditor } from './focusRegistry';
@@ -18,7 +18,7 @@ import { deleteFile, fileLink, type ModelRunStatus } from '../api';
 import { INDENT } from './dragDrop';
 import { useFileDrop } from './fileDrop';
 import { caretAtStart, caretOnFirstLine, caretOnLastLine } from '../lib/caret';
-import { MentionDropdown, useMentionAutocomplete } from './mentionAutocomplete';
+import { MentionDropdown, bulletSource, useMentionAutocomplete } from './mentionAutocomplete';
 
 /** Full text of a hovered mention, pinned to the pointer. */
 interface Tip {
@@ -99,7 +99,7 @@ export function BulletRow({
   // Only the body has a read view to swap out; the title is always its editor.
   const editing = focus?.id === id && focus.field === 'body';
 
-  const mention = useMentionAutocomplete(bullet, titles, vars, () => getEditor(id, 'body') ?? null);
+  const mention = useMentionAutocomplete(bulletSource(bullet), titles, vars, () => getEditor(id, 'body') ?? null);
   const { ac, accept } = mention;
 
   function onChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -276,15 +276,11 @@ export function BulletRow({
   // glyphs off in favour of the coloured mirror behind it.
   const segments = toSegments(bullet.text, titles, vars);
   const hasHighlight = segments.some((sg) => sg.id || sg.name);
-  // A python bullet takes no typing — it runs what its children wrote. The
-  // editor still mounts (focus and arrow-key navigation run through it), it
-  // just refuses input and reads out what the bullet does instead.
-  const isPython = bullet.kind === 'python';
   const drop = useFileDrop(id);
 
   return (
     <div
-      className={`ol-row ${bullet.kind !== 'prompt' ? `ol-row--${bullet.kind}` : ''} ${dragging ? 'ol-row--dragging' : ''} ${inBlock ? 'ol-row--block' : ''} ${drop.over ? 'ol-row--filedrop' : ''}`}
+      className={`ol-row ${bullet.kind !== 'chat' ? `ol-row--${bullet.kind}` : ''} ${dragging ? 'ol-row--dragging' : ''} ${inBlock ? 'ol-row--block' : ''} ${drop.over ? 'ol-row--filedrop' : ''}`}
       data-row={id}
       {...drop.handlers}
       style={{ marginLeft: depth * INDENT }}
@@ -359,9 +355,7 @@ export function BulletRow({
             <AutoTextarea
               id={id}
               field="body"
-              value={isPython ? '' : display}
-              readOnly={isPython}
-              placeholder={isPython ? PYTHON_CAPTION : 'Empty'}
+              value={display}
               onChange={onChange}
               onKeyDown={onKeyDown}
               onKeyUp={onKeyUp}
@@ -479,10 +473,7 @@ function Rendered({
   titles: TitleMap;
   vars: PromptVarMap;
 }) {
-  const html =
-    bullet.kind === 'python'
-      ? `<p class="ol-md__empty">${PYTHON_CAPTION}</p>`
-      : renderMarkdown(bullet.text, titles, vars);
+  const html = renderMarkdown(bullet.text, titles, vars);
   return (
     <div
       className="ol-md"
@@ -546,10 +537,8 @@ interface AutoProps {
   field: Field;
   value: string;
   className?: string;
-  /** Shown when the value is empty — a python bullet says what it does here. */
+  /** Shown when the value is empty. */
   placeholder?: string;
-  /** Python bullets take no typing; the editor mounts only to carry focus. */
-  readOnly?: boolean;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onKeyUp: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
