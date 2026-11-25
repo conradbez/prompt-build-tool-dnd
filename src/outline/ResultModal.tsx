@@ -69,6 +69,10 @@ export function ResultModal({ bullet, prompt, result }: Props) {
   const [split, startDrag, resetSplit] = useSplit();
   const cols = useRef<HTMLDivElement | null>(null);
   const [showInput, setShowInput] = useState(false);
+  // A chat's replies are already in its conversation on the left, so the
+  // response column starts hidden there; the header button brings it back.
+  const [hideOutput, setHideOutput] = useState(bullet.kind === 'chat');
+  const soloLeft = hideOutput && !full;
 
   const { running, runLog } = useOutline();
   // An agent's log lines, for the links it posted — see `AgentLinks`.
@@ -140,13 +144,28 @@ export function ResultModal({ bullet, prompt, result }: Props) {
 
         <div
           ref={cols}
-          className={`res-modal__cols res-split${full ? ' res-modal__cols--solo' : ''}`}
+          className={`res-modal__cols res-split${full ? ' res-modal__cols--solo' : ''}${soloLeft ? ' res-modal__cols--left' : ''}`}
           style={{ '--split': `${split}%` } as React.CSSProperties}
         >
           <section className={`res-col res-left${full === 'text' || full === 'input' ? ' res-col--full' : ''}`}>
             {full !== 'input' && (
               <>
-                <ColHead {...fullProps('text')}>{bullet.kind === 'chat' ? 'Chat' : 'Your prompt'}</ColHead>
+                <ColHead
+                  {...fullProps('text')}
+                  tools={
+                    bullet.kind === 'chat' && (
+                      <button
+                        className="res-col__toggle"
+                        onClick={() => setHideOutput((v) => !v)}
+                        aria-pressed={!hideOutput}
+                      >
+                        {hideOutput ? 'Show model response' : 'Hide model response'}
+                      </button>
+                    )
+                  }
+                >
+                  {bullet.kind === 'chat' ? 'Chat' : 'Your prompt'}
+                </ColHead>
                 {bullet.kind === 'chat' && <ChatHistory bullet={bullet} titles={titles} vars={vars} />}
                 {bullet.kind === 'python' ? (
                   // A python bullet has no text of its own, and typing on one is
@@ -465,10 +484,11 @@ interface FullProps {
 }
 
 /** A column's heading, with the button top right that blows it up to full screen. */
-function ColHead({ full, onFull, children }: FullProps & { children: ReactNode }) {
+function ColHead({ full, onFull, children, tools }: FullProps & { children: ReactNode; tools?: ReactNode }) {
   return (
     <h3 className="res-col__head res-col__head--tools">
       <span className="res-col__title">{children}</span>
+      {tools}
       <button
         className="res-col__full"
         onClick={onFull}

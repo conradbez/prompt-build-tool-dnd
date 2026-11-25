@@ -42,7 +42,7 @@ export function ChatHistory({ bullet, titles, vars }: Props) {
           <div key={i} className={`chat__msg chat__msg--${m.role}`}>
             {i === last && (
               <span className="chat__tag" title="This bullet's answer — what the next bullet receives">
-                Passed on
+                Node response (model result passed on)
               </span>
             )}
             <div

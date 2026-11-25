@@ -817,6 +817,23 @@ body,
   min-width: 0;
 }
 
+.res-col__toggle {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--muted);
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+}
+
+.res-col__toggle:hover {
+  color: var(--text);
+}
+
 .res-col__full {
   flex: 0 0 auto;
   width: 24px;
@@ -854,6 +871,16 @@ body,
 
 .res-split.res-modal__cols--solo {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.res-split.res-modal__cols--left {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A chat with its response column hidden: the conversation alone. */
+.res-modal__cols--left > .res-split__bar,
+.res-modal__cols--left > .res-col:not(.res-left) {
+  display: none;
 }
 
 .res-split.res-modal__cols--solo > .res-split__bar {
