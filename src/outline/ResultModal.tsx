@@ -11,6 +11,7 @@ import { AgentLinks, agentLinks } from '../AgentLinks';
 import { Attachments } from './BulletRow';
 import { useFileDrop } from './fileDrop';
 import { ChatHistory } from './ChatPanel';
+import { MentionDropdown, useMentionAutocomplete } from './mentionAutocomplete';
 
 interface Props {
   bullet: Bullet;
@@ -152,7 +153,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
                   // refused everywhere else — so it is not an editor here either.
                   <p className="res-col__empty">{PYTHON_CAPTION}</p>
                 ) : (
-                  <Editor bullet={bullet} titles={titles} />
+                  <Editor bullet={bullet} titles={titles} vars={vars} />
                 )}
                 <Attachments bullet={bullet} />
               </>
@@ -259,9 +260,11 @@ function LiveLog({
  * Mentions are shown in the same short-label form the outline uses, and
  * converted back to id tokens on the way in.
  */
-function Editor({ bullet, titles }: { bullet: Bullet; titles: Record<string, string> }) {
+function Editor({ bullet, titles, vars }: { bullet: Bullet; titles: Record<string, string>; vars: PromptVarMap }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const display = toDisplay(bullet.text, titles);
+  // `@` links another bullet (or a run variable) here too, for every kind.
+  const mention = useMentionAutocomplete(bullet, titles, vars, () => ref.current);
 
   // Grow to fit, so the whole prompt is visible without a nested scrollbar
   // until it is genuinely taller than the column.
@@ -273,6 +276,7 @@ function Editor({ bullet, titles }: { bullet: Bullet; titles: Record<string, str
   }, [display]);
 
   return (
+    <div className="res-col__edit-wrap">
     <textarea
       ref={ref}
       className="res-col__edit"
@@ -280,14 +284,22 @@ function Editor({ bullet, titles }: { bullet: Bullet; titles: Record<string, str
       spellCheck={false}
       placeholder={bullet.kind === 'chat' ? (bullet.chat.length ? 'Your reply… (⌘/Ctrl+Enter sends)' : 'Your message… (⌘/Ctrl+Enter sends)') : 'Empty'}
       onKeyDown={(e) => {
+        if (mention.onKeyDown(e)) return;
         // A chat's text is a message: send it the way a chat box would.
         if (bullet.kind === 'chat' && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           actions.runNode(bullet.id);
         }
       }}
-      onChange={(e) => actions.setText(bullet.id, displayToRaw(e.target.value, bullet.text, titles))}
+      onKeyUp={mention.onKeyUp}
+      onBlur={mention.close}
+      onChange={(e) => {
+        actions.setText(bullet.id, displayToRaw(e.target.value, bullet.text, titles));
+        mention.refresh(e.currentTarget);
+      }}
     />
+    {mention.ac && <MentionDropdown ac={mention.ac} onPick={mention.accept} />}
+    </div>
   );
 }
 

@@ -28,7 +28,7 @@ export function ChatHistory({ bullet, titles, vars }: Props) {
   if (!turns.length) {
     return (
       <p className="chat__hint">
-        Write a message below and press <b>Send</b>. Each reply is what flows on to the next bullet; reply
+        Write a message below and press <b>Send</b> (top right). Each reply is what flows on to the next bullet; reply
         again to refine it.
       </p>
     );

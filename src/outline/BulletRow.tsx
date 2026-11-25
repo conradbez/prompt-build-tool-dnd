@@ -6,9 +6,6 @@ import { register, getEditor } from './focusRegistry';
 import { BulletMenu } from './BulletMenu';
 import { JsonChip, KindChip } from '../mindmap/BulletNode';
 import {
-  detectMention,
-  applyMention,
-  applyVar,
   toDisplay,
   displayToRaw,
   toSegments,
@@ -21,26 +18,7 @@ import { deleteFile, fileLink, type ModelRunStatus } from '../api';
 import { INDENT } from './dragDrop';
 import { useFileDrop } from './fileDrop';
 import { caretAtStart, caretOnFirstLine, caretOnLastLine } from '../lib/caret';
-
-/**
- * A completion offered under an `@`: either another bullet, whose output flows
- * into this one, or a run variable from Settings, which is substituted in.
- * They share the trigger because they read the same way in a sentence; the
- * dropdown and the text colour them apart.
- */
-interface Match {
-  kind: 'bullet' | 'var';
-  /** The bullet's id, or the variable's name. */
-  id: string;
-  /** Shown in the dropdown. */
-  title: string;
-}
-
-interface AutocompleteState {
-  start: number;
-  index: number;
-  matches: Match[];
-}
+import { MentionDropdown, useMentionAutocomplete } from './mentionAutocomplete';
 
 /** Full text of a hovered mention, pinned to the pointer. */
 interface Tip {
@@ -73,8 +51,6 @@ interface Props {
   /** Open the full answer in a modal — the one-line preview is only a handle. */
   onExpand: (id: string) => void;
 }
-
-const MAX_MATCHES = 8;
 
 const STATUS_LABEL: Record<ModelRunStatus, string> = {
   queued: 'waiting',
@@ -111,7 +87,6 @@ export function BulletRow({
   files,
   onExpand,
 }: Props) {
-  const [ac, setAc] = useState<AutocompleteState | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   const { id } = bullet;
 
@@ -124,65 +99,13 @@ export function BulletRow({
   // Only the body has a read view to swap out; the title is always its editor.
   const editing = focus?.id === id && focus.field === 'body';
 
-  function findMatches(query: string): Match[] {
-    const s = getState();
-    // Variables lead: there are a handful of them against every bullet in the
-    // document, and an exact name is what someone typing `@tone` meant.
-    const varMatches: Match[] = Object.keys(vars)
-      .filter((n) => n.toLowerCase().includes(query))
-      .map((n): Match => ({ kind: 'var', id: n, title: n }));
-    const bullets: Match[] = Object.values(s.bullets)
-      .filter((b) => b.id !== id && (titles[b.id] || '').toLowerCase().includes(query))
-      .map((b): Match => ({ kind: 'bullet', id: b.id, title: titles[b.id] || 'Untitled' }));
-    return [...varMatches, ...bullets].slice(0, MAX_MATCHES);
-  }
-
-  function refreshMention(el: HTMLTextAreaElement) {
-    const m = detectMention(el.value, el.selectionStart);
-    if (!m) {
-      setAc(null);
-      return;
-    }
-    const matches = findMatches(m.query);
-    if (matches.length === 0) {
-      setAc(null);
-      return;
-    }
-    setAc({ start: m.start, index: 0, matches });
-  }
-
-  function accept(match: Match) {
-    const el = getEditor(id, 'body');
-    if (!el || !ac) return;
-    // For a bullet the id — not the text — is what gets stored, so editing the
-    // target later just changes how the mention reads. A variable is stored as
-    // the `@name` you see: its name is its identity.
-    const { raw, caret } =
-      match.kind === 'var'
-        ? applyVar(el.value, bullet.text, ac.start, el.selectionStart, match.id, titles)
-        : applyMention(
-            el.value,
-            bullet.text,
-            ac.start,
-            el.selectionStart,
-            { id: match.id, title: titles[match.id] ?? '' },
-            titles,
-          );
-    actions.setText(id, raw);
-    setAc(null);
-    requestAnimationFrame(() => {
-      const el2 = getEditor(id, 'body');
-      if (el2) {
-        el2.focus();
-        el2.setSelectionRange(caret, caret);
-      }
-    });
-  }
+  const mention = useMentionAutocomplete(bullet, titles, vars, () => getEditor(id, 'body') ?? null);
+  const { ac, accept } = mention;
 
   function onChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     // Back to the stored form (labels → id tokens) before anything is saved.
     actions.setText(id, displayToRaw(e.currentTarget.value, bullet.text, titles));
-    refreshMention(e.currentTarget);
+    mention.refresh(e.currentTarget);
   }
 
   /**
@@ -290,29 +213,7 @@ export function BulletRow({
     const el = e.currentTarget;
 
     // ---- Autocomplete has priority while it is open ----
-    if (ac && ac.matches.length > 0) {
-      const n = ac.matches.length;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setAc({ ...ac, index: (ac.index + 1) % n });
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setAc({ ...ac, index: (ac.index - 1 + n) % n });
-        return;
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        accept(ac.matches[ac.index]);
-        return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setAc(null);
-        return;
-      }
-    }
+    if (mention.onKeyDown(e)) return;
 
     if (structuralKey(e, 'body')) return;
 
@@ -336,11 +237,7 @@ export function BulletRow({
     }
   }
 
-  function onKeyUp(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-      refreshMention(e.currentTarget);
-    }
-  }
+  const onKeyUp = mention.onKeyUp;
 
   /**
    * Which mention is under the pointer. While editing, the textarea covers the
@@ -470,7 +367,7 @@ export function BulletRow({
               onKeyUp={onKeyUp}
               onFocus={() => noteFocus('body')}
             />
-            {editing && ac && <Dropdown ac={ac} onPick={accept} />}
+            {editing && ac && <MentionDropdown ac={ac} onPick={accept} />}
           </div>
 
           <Attachments bullet={bullet} />
@@ -640,28 +537,6 @@ function MentionTip({ tip }: { tip: Tip }) {
     <div className="ol-tip" style={{ left: x, top: tip.y - 10 }} role="tooltip">
       {tip.text}
     </div>
-  );
-}
-
-function Dropdown({ ac, onPick }: { ac: AutocompleteState; onPick: (m: Match) => void }) {
-  return (
-    <ul className="ol-ac">
-      {ac.matches.map((m, i) => (
-        <li
-          key={`${m.kind}:${m.id}`}
-          className={`ol-ac__item ol-ac__item--${m.kind} ${
-            i === ac.index ? 'ol-ac__item--active' : ''
-          }`}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            onPick(m);
-          }}
-        >
-          @{m.title}
-          {m.kind === 'var' && <span className="ol-ac__tag">variable</span>}
-        </li>
-      ))}
-    </ul>
   );
 }
 

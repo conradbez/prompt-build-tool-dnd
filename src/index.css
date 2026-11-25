@@ -887,7 +887,7 @@ body,
 
 /* Your prompt over the folded model input, which takes the lower part of the
    column once opened. */
-.res-left > .res-col__edit,
+.res-left > .res-col__edit-wrap,
 .res-left > .res-col__empty {
   flex: 1 1 auto;
 }
@@ -985,6 +985,21 @@ body,
 /* The editable column. Styled to sit flush with the rendered ones beside it,
    so the modal reads as three views of one thing rather than a form bolted to
    two panes. */
+.res-col__edit-wrap {
+  /* Holds the prompt box and its `@` dropdown, which hangs off its bottom. */
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.res-col__edit-wrap > .ol-ac {
+  top: auto;
+  bottom: 8px;
+  left: 14px;
+}
+
 .res-col__edit {
   flex: 1 1 auto;
   min-height: 0;
