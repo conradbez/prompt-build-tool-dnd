@@ -61,42 +61,6 @@ export interface NodePayload {
   chat: ChatMessage[];
 }
 
-/**
- * Where a chat bullet's own input ends in the prompt it was sent: the server
- * puts this instruction (`main.CHAT_INSTRUCTION`) after the input. Keep in step.
- */
-const CHAT_INSTRUCTION_START = 'You are in a conversation with a person who is refining your answer';
-
-/** A chat bullet's input — its text with the upstream answers filled in —
- *  cut out of the prompt it was last sent. */
-export function chatInput(prompt: string): string {
-  const at = prompt.indexOf(CHAT_INSTRUCTION_START);
-  return (at >= 0 ? prompt.slice(0, at) : prompt).trim();
-}
-
-/** Ask a chat bullet's model for its next reply (`POST /chat`). */
-export async function chatTurn(req: {
-  provider: Provider;
-  apiKey: string | undefined;
-  input: string;
-  messages: ChatMessage[];
-  model: string;
-  globalInstruction?: string;
-}): Promise<{ reply?: string; error?: string; needsKey?: boolean }> {
-  const url = `${getServerUrl()}/chat`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...req, apiKey: req.apiKey || undefined, globalInstruction: req.globalInstruction || '' }),
-    });
-    if (!res.ok) return { error: `Server ${res.status} ${res.statusText} at ${url}` };
-    return await res.json();
-  } catch (err) {
-    return { error: `Could not reach the server at ${url} (${err instanceof Error ? err.message : String(err)}).` };
-  }
-}
-
 export interface RunResponse {
   /** The run never started: no key for this provider, here or on the server. */
   needsKey?: boolean;
@@ -347,6 +311,9 @@ export type RunEvent =
       prompt?: string;
       test?: TestStatus;
       files?: RunFile[];
+      /** A chat bullet that was sent a message: the turn it made — the
+       *  message as sent, inputs filled in, and the reply. */
+      chatTurn?: { user: string; assistant: string };
     }
   | ({ type: 'final' } & RunResponse);
 

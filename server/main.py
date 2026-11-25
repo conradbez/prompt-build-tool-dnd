@@ -187,27 +187,21 @@ Where this sits in the larger map (each bullet is built from the ones nested und
 # A bullet with caching off: promptmap skips the cache lookup and always runs it.
 NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"
 
-# A chat bullet is a prompt a person can talk to in its popup. Only its latest
-# reply flows on — never the conversation — so the model is told as much and
-# asked to make each reply stand on its own.
+# A chat bullet is a prompt you talk to: its text is your next message, its
+# earlier turns go with it, and only its latest reply flows on — never the
+# conversation — so the model is told as much and asked to make each reply
+# stand on its own.
 CHAT_INSTRUCTION = (
-    "You are in a conversation with a person who is refining your answer to the "
-    "request above. Only your latest reply is passed on to the next agent in the "
-    "pipeline — not this conversation — so every reply must stand on its own: a "
-    "complete answer to the original request that also folds in every "
-    "clarification and correction the person has made so far."
+    "You are in a conversation with a person who is refining your answer. Only "
+    "your latest reply is passed on to the next agent in the pipeline — not this "
+    "conversation — so every reply must stand on its own: a complete answer to "
+    "the original request that also folds in every clarification and correction "
+    "the person has made so far."
 )
-# Where a chat bullet's own input ends and its conversation begins, in the
-# prompt it was sent. The editor cuts the prompt here to chat on top of it.
-CHAT_MARKER = "=== Conversation so far ==="
-CHAT_RUN_CLOSE = (
-    "Write your updated answer to the original request now, taking the whole "
-    "conversation into account."
-)
-CHAT_REPLY_CLOSE = (
-    "Reply to the person's latest message. Remember: your reply replaces your "
-    "previous answer and is all the next agent will see."
-)
+CHAT_HISTORY = "=== Conversation so far ==="
+# Everything after this line in the prompt a chat bullet was sent is the
+# person's new message, inputs filled in — the turn the conversation keeps.
+CHAT_MESSAGE = "=== The person's new message ==="
 
 
 def _llm_model(promptdata: dict[str, str]) -> str | None:
@@ -372,14 +366,24 @@ def _transcript(messages: list[ChatMessage]) -> str:
     )
 
 
-def _chat_prompt(input_text: str, messages: list[ChatMessage], close: str) -> str:
-    """The request, the instruction about what flows on, then the conversation."""
-    parts = [input_text.strip(), CHAT_INSTRUCTION]
+def _chat_head(messages: list[ChatMessage]) -> str:
+    """What comes before a chat bullet's new message: the instruction about
+    what flows on, then the conversation so far — escaped, as a person's typing."""
+    parts = [CHAT_INSTRUCTION]
     convo = _transcript(messages)
     if convo:
-        parts += [CHAT_MARKER, convo]
-    parts.append(close)
-    return "\n\n".join(p for p in parts if p)
+        parts += [CHAT_HISTORY, convo]
+    return _escape_jinja("\n\n".join(parts + [CHAT_MESSAGE]))
+
+
+def _chat_reply(messages: list[ChatMessage]) -> str:
+    """A chat bullet's latest answer — what it hands on while it has nothing new to say."""
+    return next((m.content for m in reversed(messages) if m.role == "assistant"), "")
+
+
+def _chat_message(rendered: str) -> str:
+    """The person's new message, inputs filled in, out of the prompt a chat bullet was sent."""
+    return rendered.rsplit(CHAT_MESSAGE, 1)[-1].strip()
 
 
 class Node(BaseModel):
@@ -430,7 +434,7 @@ class Node(BaseModel):
     # A prompt or agent bullet told where it sits in the map: promptmap's
     # `org_outline()` renders the bullets around it as a tree below its text.
     outline: bool = False
-    # A chat bullet's conversation so far — see `_chat_prompt`. Ignored on
+    # A chat bullet's conversation so far — see `_chat_head`. Ignored on
     # every other kind.
     chat: list[ChatMessage] = []
 
@@ -594,6 +598,13 @@ def _compose_source(
                 [_classifier_config_line(_threshold(node)), text, CLASSIFIER_SEPARATOR, *ref_lines]
             )
         return "\n".join([TEST_CONFIG_LINE, text, TEST_INSTRUCTION, TEST_MATERIAL, *ref_lines])
+    if node.kind == "chat" and node.chat and not node.text.strip():
+        # No new message: hand on the latest answer as it stands, no model call.
+        return TEMPLATE_CONFIG_LINE + "\n" + _escape_jinja(_chat_reply(node.chat))
+    if node.kind == "chat" and node.chat:
+        # The first turn already carried its inputs; a reply only fills in the
+        # ones it mentions.
+        dep_ids = []
     text, inlined = _inline(
         _as_promptdata(node.text.strip(), var_names or set()),
         lambda ref_id: "{{ ref('%s') }}" % id_to_slug[ref_id] if ref_id in id_to_slug else None,
@@ -608,8 +619,7 @@ def _compose_source(
     if node.outline and node.kind in ("prompt", "chat", "agent"):
         source += OUTLINE_BLOCK
     if node.kind == "chat":
-        # The conversation is a person's typing: escaped like the rest of it.
-        source += "\n\n" + _escape_jinja(_chat_prompt("", node.chat, CHAT_RUN_CLOSE))
+        source = _chat_head(node.chat) + "\n" + source
     if node.jsonOutput:
         source = JSON_CONFIG_LINE + "\n" + source
     if node.kind == "template":
@@ -819,6 +829,8 @@ def _runnable(nodes: list[Node]) -> list[Node]:
         # A python bullet's own text never runs, so it cannot be what makes a
         # branch worth running — only the children it would execute can.
         own = bool(node.text.strip()) and node.kind != "python"
+        # A chat with a conversation has an answer to hand on, message or not.
+        own = own or (node.kind == "chat" and bool(node.chat))
         if own or any(fills(c, below) for c in children[node_id]):
             filled.add(node_id)
             return True
@@ -1198,53 +1210,6 @@ async def run(req: RunRequest, authorization: Optional[str] = Header(None)) -> S
     return StreamingResponse(lines(), media_type="application/x-ndjson")
 
 
-class ChatRequest(BaseModel):
-    """One more turn of a chat bullet's conversation, from its popup."""
-
-    provider: str = "gemini"
-    apiKey: Optional[str] = None
-    # The bullet's own input as it was last sent — text and upstream answers
-    # filled in — or its raw text if it has not run yet.
-    input: str = ""
-    # The conversation so far, ending with the person's new message.
-    messages: list[ChatMessage] = []
-    # The bullet's own model, else the run's (Settings → `llm_model`).
-    model: str = ""
-    globalInstruction: str = ""
-
-
-@app.post("/chat")
-async def chat(req: ChatRequest) -> dict:
-    """Answer the latest message in a chat bullet's conversation.
-
-    Not a promptmap run: the conversation is between a person and one bullet,
-    and only the reply it ends on is kept as the bullet's output. It is one
-    plain LLM call on the key the request carried, like every other.
-    """
-    if req.provider not in PROVIDERS:
-        return {"error": f"Unsupported provider: {req.provider}"}
-    if not _has_key(req.provider, req.apiKey):
-        return {"needsKey": True, "error": "Enter an API key to chat."}
-    if not req.messages or req.messages[-1].role != "user":
-        return {"error": "Nothing to reply to."}
-    prompt = _chat_prompt(req.input, req.messages, CHAT_REPLY_CLOSE)
-    instruction = req.globalInstruction.strip()
-    if instruction:
-        # The same `{{ prompt }}` wrapper a run's global instruction may use.
-        wrapper = re.compile(r"\{\{\s*prompt\s*\}\}")
-        if wrapper.search(instruction):
-            prompt = wrapper.sub(lambda _m: prompt, instruction)
-        else:
-            prompt = instruction + "\n\n" + prompt
-    model = _model_id(req.model)
-    llm = make_llm_call(api_key=req.apiKey, provider=req.provider, model=model)
-    try:
-        value = await asyncio.to_thread(llm, prompt, None, {MODEL_KEY: model} if model else {})
-    except Exception as exc:  # noqa: BLE001 — the popup shows the message
-        return {"error": str(exc)}
-    return {"reply": _text(value).strip()}
-
-
 async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") -> RunResponse:
     if req.provider not in PROVIDERS:
         return RunResponse(errors=[f"Unsupported provider: {req.provider}"])
@@ -1368,6 +1333,10 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
             event["prompt"] = prompts[node_id]
             if node.kind == "test":
                 tests[node_id] = event["test"] = _verdict(shown)
+            if node.kind == "chat" and node.text.strip():
+                # A message was sent: the turn it made, for the editor to add to
+                # the conversation (and clear the message box).
+                event["chatTurn"] = {"user": _chat_message(prompts[node_id]), "assistant": shown}
         elif node:
             prompts[node_id] = event["prompt"] = _prompt_unsent(node, result.status)
             if node.kind == "test" and result.status == "skipped":

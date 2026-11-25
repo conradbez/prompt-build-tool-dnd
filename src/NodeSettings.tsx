@@ -19,7 +19,7 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
   {
     kind: 'chat',
     label: 'Chat',
-    desc: 'A prompt you can talk to in this popup, to explore and clarify. Only its latest reply flows on to the next bullet, so each reply is a complete answer that folds in the whole conversation.',
+    desc: 'A prompt you talk to, to explore and clarify: its text is your next message, and Send (Run node) sends it with the conversation so far. Only the latest reply flows on, so each reply is a complete answer that folds in every clarification. With no new message, it hands on its last reply without calling the model.',
   },
   {
     kind: 'template',

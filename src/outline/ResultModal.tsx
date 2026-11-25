@@ -10,7 +10,7 @@ import { JsonChip, KindChip } from '../mindmap/BulletNode';
 import { AgentLinks, agentLinks } from '../AgentLinks';
 import { Attachments } from './BulletRow';
 import { useFileDrop } from './fileDrop';
-import { ChatPanel } from './ChatPanel';
+import { ChatHistory } from './ChatPanel';
 
 interface Props {
   bullet: Bullet;
@@ -116,7 +116,7 @@ export function ResultModal({ bullet, prompt, result }: Props) {
             title="Runs this bullet and every bullet it depends on, using promptmap’s select. Everything else keeps its last answer."
             onClick={() => actions.runNode(bullet.id)}
           >
-            {running ? 'Running…' : 'Run node'}
+            {running ? 'Running…' : bullet.kind === 'chat' ? 'Send' : 'Run node'}
           </button>
           <button className="res-modal__close" onClick={close} aria-label="Close">
             ✕
@@ -145,7 +145,8 @@ export function ResultModal({ bullet, prompt, result }: Props) {
           <section className={`res-col res-left${full === 'text' || full === 'input' ? ' res-col--full' : ''}`}>
             {full !== 'input' && (
               <>
-                <ColHead {...fullProps('text')}>Your prompt</ColHead>
+                <ColHead {...fullProps('text')}>{bullet.kind === 'chat' ? 'Chat' : 'Your prompt'}</ColHead>
+                {bullet.kind === 'chat' && <ChatHistory bullet={bullet} titles={titles} vars={vars} />}
                 {bullet.kind === 'python' ? (
                   // A python bullet has no text of its own, and typing on one is
                   // refused everywhere else — so it is not an editor here either.
@@ -180,21 +181,6 @@ export function ResultModal({ bullet, prompt, result }: Props) {
 
           {bullet.kind === 'agent' && (status === 'running' || status === 'queued') ? (
             <LiveLog id={bullet.id} waiting={status === 'queued'} links={links} {...fullProps('output')} />
-          ) : bullet.kind === 'chat' && status !== 'skipped' ? (
-            <ChatPanel
-              bullet={bullet}
-              prompt={prompt}
-              result={status === 'error' ? undefined : result}
-              titles={titles}
-              vars={vars}
-              className={full === 'output' ? 'res-col--full' : ''}
-              head={
-                <>
-                  <ColHead {...fullProps('output')}>Chat</ColHead>
-                  {status === 'error' && <pre className="res-col__error">{failure || 'No message was given.'}</pre>}
-                </>
-              }
-            />
           ) : status === 'error' || status === 'skipped' ? (
             <section className={`res-col${full === 'output' ? ' res-col--full' : ''}`}>
               <ColHead {...fullProps('output')}>{status === 'error' ? 'Error' : 'Skipped'}</ColHead>
@@ -292,7 +278,14 @@ function Editor({ bullet, titles }: { bullet: Bullet; titles: Record<string, str
       className="res-col__edit"
       value={display}
       spellCheck={false}
-      placeholder="Empty"
+      placeholder={bullet.kind === 'chat' ? (bullet.chat.length ? 'Your reply… (⌘/Ctrl+Enter sends)' : 'Your message… (⌘/Ctrl+Enter sends)') : 'Empty'}
+      onKeyDown={(e) => {
+        // A chat's text is a message: send it the way a chat box would.
+        if (bullet.kind === 'chat' && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          actions.runNode(bullet.id);
+        }
+      }}
       onChange={(e) => actions.setText(bullet.id, displayToRaw(e.target.value, bullet.text, titles))}
     />
   );

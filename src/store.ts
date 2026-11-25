@@ -223,13 +223,6 @@ let runTitles: Record<string, string> = {};
 // over how to run; a bullet's settings call it through `actions.runNode`.
 let runner: ((id: string) => void) | null = null;
 
-export interface ChatReply {
-  reply?: string;
-  error?: string;
-  needsKey?: boolean;
-}
-type Chatter = (req: { input: string; messages: ChatMessage[]; model: string }) => Promise<ChatReply>;
-let chatter: Chatter | null = null;
 const listeners = new Set<() => void>();
 
 /**
@@ -632,39 +625,37 @@ export const actions = {
     // it here is what keeps the row honest: what you see is what runs.
     next.bullets[id] = kind === 'python' ? { ...b, kind, text: '', refs: [] } : { ...b, kind };
     if (kind === 'chat') {
-      // A prompt turned into a chat carries its last answer in as the opening
-      // turn, so the conversation picks up from what it already said. A chat
-      // answers in prose, so it is not held to JSON.
+      // A chat answers in prose, so it is not held to JSON. A prompt that has
+      // answered carries that exchange in as the opening turn — what it was
+      // sent and what it said — and its text box empties for your reply.
       const last = state.results[id]?.trim();
-      const chat = b.chat.length || !last ? b.chat : [{ role: 'assistant' as const, content: last }];
-      next.bullets[id] = { ...next.bullets[id], chat, jsonOutput: false };
+      next.bullets[id] = { ...next.bullets[id], jsonOutput: false };
+      if (last && !b.chat.length) {
+        next.bullets[id] = {
+          ...next.bullets[id],
+          text: '',
+          refs: [],
+          chat: [
+            { role: 'user', content: state.prompts[id]?.trim() || b.text },
+            { role: 'assistant', content: last },
+          ],
+        };
+      }
     }
     emit(next);
   },
 
   /**
-   * Replace a chat bullet's conversation. With `reply`, that reply is also the
-   * bullet's answer from now on — what flows into the bullets it feeds.
+   * Forget a chat bullet's conversation. An empty message box gets the opening
+   * message back, so the next run starts the conversation over.
    */
-  setChat(id: string, chat: ChatMessage[], reply?: string) {
+  clearChat(id: string) {
     const b = state.bullets[id];
-    if (!b) return;
+    if (!b || !b.chat.length) return;
     const next = clone(state);
-    next.bullets[id] = { ...b, chat };
-    if (reply !== undefined) next.results = { ...state.results, [id]: reply };
+    const first = b.chat.find((m) => m.role === 'user')?.content ?? '';
+    next.bullets[id] = { ...b, chat: [], text: b.text.trim() ? b.text : first };
     emit(next);
-  },
-
-  /** Lets a chat bullet's popup ask the model, with the run's settings — see `Toolbar`. */
-  setChatter(fn: Chatter) {
-    chatter = fn;
-  },
-
-  /** One more turn of a chat bullet's conversation; resolves to the reply. */
-  chat(id: string, input: string, messages: ChatMessage[]): Promise<ChatReply> {
-    const b = state.bullets[id];
-    if (!chatter || !b) return Promise.resolve({ error: 'Not ready to chat yet.' });
-    return chatter({ input, messages, model: b.model });
   },
 
   /**
@@ -1300,6 +1291,16 @@ export const actions = {
       if (event.output !== undefined) next.results = { ...state.results, [event.id]: event.output };
       if (event.prompt !== undefined) next.prompts = { ...state.prompts, [event.id]: event.prompt };
       if (event.test) next.tests = { ...state.tests, [event.id]: event.test };
+      const b = state.bullets[event.id];
+      if (event.chatTurn && b) {
+        // A chat bullet's message was sent: the exchange joins its
+        // conversation, and the message box empties for the next reply.
+        const turn: ChatMessage[] = [
+          { role: 'user', content: event.chatTurn.user },
+          { role: 'assistant', content: event.chatTurn.assistant },
+        ];
+        next.bullets = { ...state.bullets, [b.id]: { ...b, chat: [...b.chat, ...turn], text: '', refs: [] } };
+      }
       if (event.status === 'success') {
         // Its files are replaced along with its answer, or dropped if it made none this time.
         const { [event.id]: _old, ...rest } = state.files;
