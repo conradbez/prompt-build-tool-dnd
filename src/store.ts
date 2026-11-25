@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { nanoid } from 'nanoid';
 import type { RunEvent } from './api';
-import type { Bullet, BulletKind, Field, FileRef, Focus, OutlineState, FlatBullet, RunFile, TestJudge, TestStatus } from './types';
+import type { Bullet, BulletKind, ChatMessage, Field, FileRef, Focus, OutlineState, FlatBullet, RunFile, TestJudge, TestStatus } from './types';
 import { mentionIds, mentionToken, stripMention } from './lib/mentions';
 import { RENAMED } from './lib/promptdata';
 
@@ -36,6 +36,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     outline: false,
     judge: 'llm',
     threshold: 0.5,
+    chat: [],
     ...partial,
   };
 }
@@ -121,6 +122,7 @@ export function parseDoc(value: unknown): Doc | null {
         outline: !!b.outline,
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
         threshold: typeof b.threshold === 'number' ? clampThreshold(b.threshold) : 0.5,
+        chat: Array.isArray(b.chat) ? (b.chat as unknown[]).filter(isChatMessage) : [],
       });
     }
     // A child naming a parent that did not come with it would strand it, so
@@ -168,7 +170,12 @@ function loadDoc(): Doc | null {
 }
 
 function isKind(v: unknown): v is BulletKind {
-  return v === 'prompt' || v === 'template' || v === 'search' || v === 'python' || v === 'agent' || v === 'test';
+  return v === 'prompt' || v === 'template' || v === 'search' || v === 'python' || v === 'agent' || v === 'test' || v === 'chat';
+}
+
+function isChatMessage(v: unknown): v is ChatMessage {
+  const m = v as ChatMessage | null;
+  return !!m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string';
 }
 
 function isPos(v: unknown): v is { x: number; y: number } {
@@ -215,6 +222,14 @@ let runTitles: Record<string, string> = {};
 // The toolbar owns the provider, key and settings a run needs, so it hands
 // over how to run; a bullet's settings call it through `actions.runNode`.
 let runner: ((id: string) => void) | null = null;
+
+export interface ChatReply {
+  reply?: string;
+  error?: string;
+  needsKey?: boolean;
+}
+type Chatter = (req: { input: string; messages: ChatMessage[]; model: string }) => Promise<ChatReply>;
+let chatter: Chatter | null = null;
 const listeners = new Set<() => void>();
 
 /**
@@ -381,6 +396,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     outline: b.outline,
     judge: b.judge,
     threshold: b.threshold,
+    chat: b.kind === 'chat' ? b.chat : [],
   }));
 }
 
@@ -615,7 +631,40 @@ export const actions = {
     // text it is carrying is dead weight the moment it becomes one. Dropping
     // it here is what keeps the row honest: what you see is what runs.
     next.bullets[id] = kind === 'python' ? { ...b, kind, text: '', refs: [] } : { ...b, kind };
+    if (kind === 'chat') {
+      // A prompt turned into a chat carries its last answer in as the opening
+      // turn, so the conversation picks up from what it already said. A chat
+      // answers in prose, so it is not held to JSON.
+      const last = state.results[id]?.trim();
+      const chat = b.chat.length || !last ? b.chat : [{ role: 'assistant' as const, content: last }];
+      next.bullets[id] = { ...next.bullets[id], chat, jsonOutput: false };
+    }
     emit(next);
+  },
+
+  /**
+   * Replace a chat bullet's conversation. With `reply`, that reply is also the
+   * bullet's answer from now on — what flows into the bullets it feeds.
+   */
+  setChat(id: string, chat: ChatMessage[], reply?: string) {
+    const b = state.bullets[id];
+    if (!b) return;
+    const next = clone(state);
+    next.bullets[id] = { ...b, chat };
+    if (reply !== undefined) next.results = { ...state.results, [id]: reply };
+    emit(next);
+  },
+
+  /** Lets a chat bullet's popup ask the model, with the run's settings — see `Toolbar`. */
+  setChatter(fn: Chatter) {
+    chatter = fn;
+  },
+
+  /** One more turn of a chat bullet's conversation; resolves to the reply. */
+  chat(id: string, input: string, messages: ChatMessage[]): Promise<ChatReply> {
+    const b = state.bullets[id];
+    if (!chatter || !b) return Promise.resolve({ error: 'Not ready to chat yet.' });
+    return chatter({ input, messages, model: b.model });
   },
 
   /**

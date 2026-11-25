@@ -10,6 +10,7 @@ import { JsonChip, KindChip } from '../mindmap/BulletNode';
 import { AgentLinks, agentLinks } from '../AgentLinks';
 import { Attachments } from './BulletRow';
 import { useFileDrop } from './fileDrop';
+import { ChatPanel } from './ChatPanel';
 
 interface Props {
   bullet: Bullet;
@@ -179,6 +180,21 @@ export function ResultModal({ bullet, prompt, result }: Props) {
 
           {bullet.kind === 'agent' && (status === 'running' || status === 'queued') ? (
             <LiveLog id={bullet.id} waiting={status === 'queued'} links={links} {...fullProps('output')} />
+          ) : bullet.kind === 'chat' && status !== 'skipped' ? (
+            <ChatPanel
+              bullet={bullet}
+              prompt={prompt}
+              result={status === 'error' ? undefined : result}
+              titles={titles}
+              vars={vars}
+              className={full === 'output' ? 'res-col--full' : ''}
+              head={
+                <>
+                  <ColHead {...fullProps('output')}>Chat</ColHead>
+                  {status === 'error' && <pre className="res-col__error">{failure || 'No message was given.'}</pre>}
+                </>
+              }
+            />
           ) : status === 'error' || status === 'skipped' ? (
             <section className={`res-col${full === 'output' ? ' res-col--full' : ''}`}>
               <ColHead {...fullProps('output')}>{status === 'error' ? 'Error' : 'Skipped'}</ColHead>

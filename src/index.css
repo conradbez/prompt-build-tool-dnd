@@ -1780,6 +1780,12 @@ body,
   background: #ece3fa;
 }
 
+/* A chat is a prompt with a person in the loop — green, for a conversation. */
+.tpl-chip--chat {
+  color: #276749;
+  background: #dcf5e3;
+}
+
 /* JSON is a constraint on the answer, not a kind of bullet, so it wears the
    amber of a rule being enforced rather than either kind's colour. */
 .tpl-chip--json {
@@ -3237,4 +3243,159 @@ button.rf-file__dl:disabled {
   0% { opacity: 0; transform: translate(-50%, 4px); }
   8%, 85% { opacity: 1; transform: translate(-50%, 0); }
   100% { opacity: 0; transform: translate(-50%, 0); }
+}
+
+/* ---- Chat bullet: the conversation in its popup (`outline/ChatPanel.tsx`) ---- */
+.chat__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat__msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 88%;
+}
+
+.chat__msg--user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.chat__msg--assistant {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.chat__bubble {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat__msg--assistant .chat__bubble {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.chat__msg--user .chat__bubble {
+  background: var(--accent-soft);
+  border: 1px solid #c7d2fe;
+  border-bottom-right-radius: 4px;
+}
+
+.chat__bubble > :first-child {
+  margin-top: 0;
+}
+
+.chat__bubble > :last-child {
+  margin-bottom: 0;
+}
+
+.chat__tag {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #276749;
+  margin: 0 0 3px 4px;
+}
+
+.chat__bubble--typing {
+  display: flex;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.chat__bubble--typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: chat-dot 1.2s infinite ease-in-out;
+}
+
+.chat__bubble--typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat__bubble--typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-dot {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+
+.chat__error {
+  margin: 0;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: #991b1b;
+  background: #fef2f2;
+  border-top: 1px solid #fecaca;
+}
+
+.chat__compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.chat__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--bg);
+  outline: none;
+}
+
+.chat__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.chat__send,
+.chat__clear {
+  flex: none;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.chat__send {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.chat__send:disabled,
+.chat__clear:disabled {
+  opacity: 0.45;
+  cursor: default;
 }

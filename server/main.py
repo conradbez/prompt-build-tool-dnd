@@ -187,6 +187,28 @@ Where this sits in the larger map (each bullet is built from the ones nested und
 # A bullet with caching off: promptmap skips the cache lookup and always runs it.
 NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"
 
+# A chat bullet is a prompt a person can talk to in its popup. Only its latest
+# reply flows on — never the conversation — so the model is told as much and
+# asked to make each reply stand on its own.
+CHAT_INSTRUCTION = (
+    "You are in a conversation with a person who is refining your answer to the "
+    "request above. Only your latest reply is passed on to the next agent in the "
+    "pipeline — not this conversation — so every reply must stand on its own: a "
+    "complete answer to the original request that also folds in every "
+    "clarification and correction the person has made so far."
+)
+# Where a chat bullet's own input ends and its conversation begins, in the
+# prompt it was sent. The editor cuts the prompt here to chat on top of it.
+CHAT_MARKER = "=== Conversation so far ==="
+CHAT_RUN_CLOSE = (
+    "Write your updated answer to the original request now, taking the whole "
+    "conversation into account."
+)
+CHAT_REPLY_CLOSE = (
+    "Reply to the person's latest message. Remember: your reply replaces your "
+    "previous answer and is all the next agent will see."
+)
+
 
 def _llm_model(promptdata: dict[str, str]) -> str | None:
     """The model this person chose, or None for the server's default."""
@@ -205,7 +227,7 @@ def _model_id(value: str) -> str | None:
 
 def _calls_model(node: Node) -> bool:
     """Whether a bullet's answer comes from the LLM (or an agent driving one)."""
-    return node.kind in ("prompt", "agent") or (node.kind == "test" and not _is_classifier(node))
+    return node.kind in ("prompt", "chat", "agent") or (node.kind == "test" and not _is_classifier(node))
 
 
 def _classifier_config_line(threshold: float) -> str:
@@ -335,6 +357,31 @@ class FileRequest(BaseModel):
     sessionId: str = ""
 
 
+class ChatMessage(BaseModel):
+    """One turn of a chat bullet's conversation."""
+
+    role: str = "user"  # "user" | "assistant"
+    content: str = ""
+
+
+def _transcript(messages: list[ChatMessage]) -> str:
+    """A chat bullet's conversation as plain text, one labelled turn after another."""
+    who = {"assistant": "You (previous answer)", "user": "Person"}
+    return "\n\n".join(
+        f"[{who.get(m.role, 'Person')}]\n{m.content.strip()}" for m in messages if m.content.strip()
+    )
+
+
+def _chat_prompt(input_text: str, messages: list[ChatMessage], close: str) -> str:
+    """The request, the instruction about what flows on, then the conversation."""
+    parts = [input_text.strip(), CHAT_INSTRUCTION]
+    convo = _transcript(messages)
+    if convo:
+        parts += [CHAT_MARKER, convo]
+    parts.append(close)
+    return "\n\n".join(p for p in parts if p)
+
+
 class Node(BaseModel):
     id: str
     # The bullet's name — its top line. Not sent to the model: it names the
@@ -383,6 +430,9 @@ class Node(BaseModel):
     # A prompt or agent bullet told where it sits in the map: promptmap's
     # `org_outline()` renders the bullets around it as a tree below its text.
     outline: bool = False
+    # A chat bullet's conversation so far — see `_chat_prompt`. Ignored on
+    # every other kind.
+    chat: list[ChatMessage] = []
 
 
 class ClassifierSettings(BaseModel):
@@ -555,13 +605,16 @@ def _compose_source(
     source = "\n".join([prompt, *ref_lines]) if ref_lines else prompt
     if node.kind == "search":
         return "\n".join([TEMPLATE_CONFIG_LINE, SEARCH_OPEN + source + _search_close(provider)])
-    if node.outline and node.kind in ("prompt", "agent"):
+    if node.outline and node.kind in ("prompt", "chat", "agent"):
         source += OUTLINE_BLOCK
+    if node.kind == "chat":
+        # The conversation is a person's typing: escaped like the rest of it.
+        source += "\n\n" + _escape_jinja(_chat_prompt("", node.chat, CHAT_RUN_CLOSE))
     if node.jsonOutput:
         source = JSON_CONFIG_LINE + "\n" + source
     if node.kind == "template":
         source = TEMPLATE_CONFIG_LINE + "\n" + source
-    if not node.cache and node.kind in ("prompt", "agent"):
+    if not node.cache and node.kind in ("prompt", "chat", "agent"):
         source = NO_CACHE_CONFIG_LINE + "\n" + source
     if node.kind == "agent" and node.persistDisk:
         if node.publicUrl:
@@ -587,7 +640,7 @@ def _compose_source(
             + source
         )
     keys = _node_file_keys(node, session_id)
-    if node.kind == "prompt":
+    if node.kind in ("prompt", "chat"):
         # Only a prompt reaches a model that can look at them; a template
         # passes text through, and promptmap fails a bullet that asks for files from
         # one that produced none — hence only those set to produce them.
@@ -1143,6 +1196,53 @@ async def run(req: RunRequest, authorization: Optional[str] = Header(None)) -> S
             task.cancel()  # the browser went away: stop spending on its run
 
     return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+
+class ChatRequest(BaseModel):
+    """One more turn of a chat bullet's conversation, from its popup."""
+
+    provider: str = "gemini"
+    apiKey: Optional[str] = None
+    # The bullet's own input as it was last sent — text and upstream answers
+    # filled in — or its raw text if it has not run yet.
+    input: str = ""
+    # The conversation so far, ending with the person's new message.
+    messages: list[ChatMessage] = []
+    # The bullet's own model, else the run's (Settings → `llm_model`).
+    model: str = ""
+    globalInstruction: str = ""
+
+
+@app.post("/chat")
+async def chat(req: ChatRequest) -> dict:
+    """Answer the latest message in a chat bullet's conversation.
+
+    Not a promptmap run: the conversation is between a person and one bullet,
+    and only the reply it ends on is kept as the bullet's output. It is one
+    plain LLM call on the key the request carried, like every other.
+    """
+    if req.provider not in PROVIDERS:
+        return {"error": f"Unsupported provider: {req.provider}"}
+    if not _has_key(req.provider, req.apiKey):
+        return {"needsKey": True, "error": "Enter an API key to chat."}
+    if not req.messages or req.messages[-1].role != "user":
+        return {"error": "Nothing to reply to."}
+    prompt = _chat_prompt(req.input, req.messages, CHAT_REPLY_CLOSE)
+    instruction = req.globalInstruction.strip()
+    if instruction:
+        # The same `{{ prompt }}` wrapper a run's global instruction may use.
+        wrapper = re.compile(r"\{\{\s*prompt\s*\}\}")
+        if wrapper.search(instruction):
+            prompt = wrapper.sub(lambda _m: prompt, instruction)
+        else:
+            prompt = instruction + "\n\n" + prompt
+    model = _model_id(req.model)
+    llm = make_llm_call(api_key=req.apiKey, provider=req.provider, model=model)
+    try:
+        value = await asyncio.to_thread(llm, prompt, None, {MODEL_KEY: model} if model else {})
+    except Exception as exc:  # noqa: BLE001 — the popup shows the message
+        return {"error": str(exc)}
+    return {"reply": _text(value).strip()}
 
 
 async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") -> RunResponse:

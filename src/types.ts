@@ -18,8 +18,18 @@ import type { ModelRunStatus } from './api';
  *   (children or `@` references). The model is asked for a verdict rather than
  *   an answer, and the node shows it: see `TestStatus`. A test's output never
  *   flows onward — it checks the graph from the side.
+ * - `chat`     — a prompt you can talk to in its popup, to explore and clarify.
+ *   Its conversation goes along with its input on every call, but only its
+ *   latest reply flows on — so the model is told to make each reply a complete
+ *   answer that folds in every clarification.
  */
-export type BulletKind = 'prompt' | 'template' | 'search' | 'python' | 'agent' | 'test';
+export type BulletKind = 'prompt' | 'template' | 'search' | 'python' | 'agent' | 'test' | 'chat';
+
+/** One turn of a chat bullet's conversation — see `Bullet.chat`. */
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 /**
  * Where a test bullet stands after the latest run:
@@ -159,6 +169,12 @@ export interface Bullet {
   judge: TestJudge;
   /** A classifier-judged test passes when P(yes) ≥ this, 0–1. */
   threshold: number;
+  /**
+   * A chat bullet's conversation: its earlier answers and the person's
+   * follow-ups, oldest first. Sent with its input on every call; cleared from
+   * the popup to start over. Ignored on every other kind.
+   */
+  chat: ChatMessage[];
 }
 
 /** Which of a bullet's two lines an editor is. */

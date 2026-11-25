@@ -17,6 +17,11 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
     desc: 'Its text, with its inputs filled in, is sent to the LLM.',
   },
   {
+    kind: 'chat',
+    label: 'Chat',
+    desc: 'A prompt you can talk to in this popup, to explore and clarify. Only its latest reply flows on to the next bullet, so each reply is a complete answer that folds in the whole conversation.',
+  },
+  {
     kind: 'template',
     label: 'Template',
     desc: 'Never sent to the LLM — its text, with every reference filled in, is the output.',
@@ -104,7 +109,7 @@ export function NodeSettings({ bullet }: Props) {
       </div>
 
       <div className="ns-rows">
-        {kind !== 'test' && (
+        {kind !== 'test' && kind !== 'chat' && (
           <Row
             label="Output"
             info={
@@ -125,7 +130,7 @@ export function NodeSettings({ bullet }: Props) {
           </Row>
         )}
 
-        {(kind === 'prompt' || kind === 'agent') && (
+        {(kind === 'prompt' || kind === 'chat' || kind === 'agent') && (
           <Row
             label="Cache"
             info="Ticked, a run with the same prompt and settings as an earlier one reuses that answer instantly instead of calling the model again. Unticked, this bullet runs fresh every time — for an agent whose job has side effects, or an answer you want redone."
@@ -141,7 +146,7 @@ export function NodeSettings({ bullet }: Props) {
           </Row>
         )}
 
-        {(kind === 'prompt' || kind === 'agent') && (
+        {(kind === 'prompt' || kind === 'chat' || kind === 'agent') && (
           <Row
             label="Context"
             info="Ticked, the bullets around this one — what it is built from, what it feeds, and the map’s final outputs — are listed after its text as a tree, with this bullet marked. Lets it fit in: “match your siblings’ tone”, “leave out what the section above covers”."
@@ -157,7 +162,7 @@ export function NodeSettings({ bullet }: Props) {
           </Row>
         )}
 
-        {(kind === 'prompt' || kind === 'agent' || (kind === 'test' && bullet.judge === 'llm')) && (
+        {(kind === 'prompt' || kind === 'chat' || kind === 'agent' || (kind === 'test' && bullet.judge === 'llm')) && (
           <Row
             label="Model"
             info="The model this bullet calls, as the provider names it — e.g. gpt-4o-mini, gemini-2.5-pro, claude-sonnet-4-5. Blank uses the run’s: llm_model in Settings, else the server’s default for the provider. Changing it keeps a cached answer — untick Cache for a fresh one from the new model."

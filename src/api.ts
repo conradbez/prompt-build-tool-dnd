@@ -12,7 +12,7 @@ export const PROVIDERS: { id: Provider; label: string }[] = [
   { id: 'openrouter', label: 'OpenRouter' },
 ];
 
-import type { BulletKind, FileRef, RunFile, TestJudge, TestStatus } from './types';
+import type { BulletKind, ChatMessage, FileRef, RunFile, TestJudge, TestStatus } from './types';
 import { getAccount } from './lib/account';
 import { getSessionId } from './lib/session';
 
@@ -57,6 +57,44 @@ export interface NodePayload {
   threshold: number;
   /** Attachments, sent to the model along with this bullet's prompt. */
   files: FileRef[];
+  /** A chat bullet's conversation so far — see `Bullet.chat`. */
+  chat: ChatMessage[];
+}
+
+/**
+ * Where a chat bullet's own input ends in the prompt it was sent: the server
+ * puts this instruction (`main.CHAT_INSTRUCTION`) after the input. Keep in step.
+ */
+const CHAT_INSTRUCTION_START = 'You are in a conversation with a person who is refining your answer';
+
+/** A chat bullet's input — its text with the upstream answers filled in —
+ *  cut out of the prompt it was last sent. */
+export function chatInput(prompt: string): string {
+  const at = prompt.indexOf(CHAT_INSTRUCTION_START);
+  return (at >= 0 ? prompt.slice(0, at) : prompt).trim();
+}
+
+/** Ask a chat bullet's model for its next reply (`POST /chat`). */
+export async function chatTurn(req: {
+  provider: Provider;
+  apiKey: string | undefined;
+  input: string;
+  messages: ChatMessage[];
+  model: string;
+  globalInstruction?: string;
+}): Promise<{ reply?: string; error?: string; needsKey?: boolean }> {
+  const url = `${getServerUrl()}/chat`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...req, apiKey: req.apiKey || undefined, globalInstruction: req.globalInstruction || '' }),
+    });
+    if (!res.ok) return { error: `Server ${res.status} ${res.statusText} at ${url}` };
+    return await res.json();
+  } catch (err) {
+    return { error: `Could not reach the server at ${url} (${err instanceof Error ? err.message : String(err)}).` };
+  }
 }
 
 export interface RunResponse {

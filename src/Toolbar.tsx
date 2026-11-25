@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { PROVIDERS, runGraph, type ClassifierSettings, type Provider } from './api';
+import { PROVIDERS, chatTurn, runGraph, type ClassifierSettings, type Provider } from './api';
 import { RunProgress } from './RunProgress';
 import { BugButton } from './bugReport/BugButton';
 import { SettingsModal } from './SettingsModal';
@@ -130,6 +130,20 @@ export function Toolbar() {
 
   // Lets a bullet's settings run just that bullet (see `actions.runNode`).
   useEffect(() => actions.setRunner((id) => run([id])));
+  // …and a chat bullet's popup talk to its model with the same provider, key,
+  // model and global instruction a run would use.
+  useEffect(() =>
+    actions.setChatter(({ input, messages, model }) =>
+      chatTurn({
+        provider,
+        apiKey,
+        input,
+        messages,
+        model: model.trim() || vars.llm_model || '',
+        globalInstruction,
+      }),
+    ),
+  );
 
   const statuses = Object.values(state.runStatus);
   const progress = {
