@@ -12,7 +12,7 @@ export const PROVIDERS: { id: Provider; label: string }[] = [
   { id: 'openrouter', label: 'OpenRouter' },
 ];
 
-import type { BulletKind, ChatMessage, FileRef, RunFile, TestJudge, TestStatus } from './types';
+import type { BulletKind, FileRef, RunFile, TestJudge, TestStatus } from './types';
 import { getAccount } from './lib/account';
 import { getSessionId } from './lib/session';
 
@@ -55,8 +55,8 @@ export interface NodePayload {
   threshold: number;
   /** Attachments, sent to the model along with this bullet's prompt. */
   files: FileRef[];
-  /** A chat bullet's conversation so far — see `Bullet.chat`. */
-  chat: ChatMessage[];
+  /** A chat bullet's follow-ups, oldest first — see `Bullet.chat`. */
+  followUps: string[];
   /** Changed when the conversation is cleared — see `Bullet.chatEpoch`. */
   chatEpoch: string;
 }

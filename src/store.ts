@@ -372,7 +372,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     outline: b.outline,
     judge: b.judge,
     threshold: b.threshold,
-    chat: b.kind === 'chat' ? b.chat : [],
+    followUps: b.kind === 'chat' ? b.chat.filter((m) => m.role === 'user').map((m) => m.content) : [],
     chatEpoch: b.kind === 'chat' ? b.chatEpoch : '',
   }));
 }
@@ -615,8 +615,8 @@ export const actions = {
   /**
    * Send from a chat bullet's popup. With no first message yet, the draft
    * becomes it (the bullet's text); after that it is a follow-up. Either way
-   * the bullet runs: the answer is rebuilt from its first message with every
-   * follow-up applied (see `Bullet.chat`). An empty draft just runs it again.
+   * the bullet runs, on its first message and the conversation so far (see
+   * `Bullet.chat`). An empty draft just runs it again.
    */
   sendChat(id: string, content: string) {
     const b = state.bullets[id];

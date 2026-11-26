@@ -411,22 +411,14 @@ class FileRequest(BaseModel):
     sessionId: str = ""
 
 
-class ChatMessage(BaseModel):
-    """One turn of a chat bullet's conversation."""
-
-    role: str = "user"  # "user" | "assistant"
-    content: str = ""
-
-
-def _follow_ups(messages: list[ChatMessage], replace, var_names: set[str]) -> tuple[list[str], set[str]]:
+def _follow_ups(messages: list[str], replace, var_names: set[str]) -> tuple[list[str], set[str]]:
     """A chat bullet's follow-ups, oldest first and escaped for Jinja, and the
     ids their `@` mentions placed — inlined by *replace* as in the bullet's
-    text. The replies in *messages* are only there for the popup to show: the
-    ones sent come from promptmap (see `_chat_transcript`)."""
+    text. The replies between them come from promptmap (see `_chat_transcript`)."""
     said, used = [], set()
-    for m in messages:
-        if m.role == "user" and m.content.strip():
-            text, placed = _inline(_as_promptdata(m.content.strip(), var_names), replace)
+    for raw in messages:
+        if raw.strip():
+            text, placed = _inline(_as_promptdata(raw.strip(), var_names), replace)
             used |= placed
             said.append(_escape_jinja(text))
     return said, used
@@ -526,9 +518,9 @@ class Node(BaseModel):
     # A prompt or agent bullet told where it sits in the map: promptmap's
     # `org_outline()` renders the bullets around it as a tree below its text.
     outline: bool = False
-    # A chat bullet's follow-ups and the replies to them — see `_follow_ups`.
-    # Ignored on every other kind.
-    chat: list[ChatMessage] = []
+    # A chat bullet's follow-ups, oldest first — see `_follow_ups`. Ignored on
+    # every other kind.
+    followUps: list[str] = []
     # Changed by the popup's "clear", so the conversation starts over — see
     # `_chat_transcript`.
     chatEpoch: str = ""
@@ -702,7 +694,7 @@ def _compose_source(
     text, inlined = _inline(_as_promptdata(node.text.strip(), var_names or set()), as_ref)
     follow_ups = ""
     if node.kind == "chat":
-        said, placed = _follow_ups(node.chat, as_ref, var_names or set())
+        said, placed = _follow_ups(node.followUps, as_ref, var_names or set())
         follow_ups = _chat_transcript(said, node.chatEpoch, node.jsonOutput)
         inlined |= placed
     prompt = _json_body(node, _escape_jinja(text))
@@ -915,7 +907,7 @@ def _runnable(nodes: list[Node]) -> list[Node]:
         own = bool(node.text.strip())
         # A chat or agent with only a name runs on its name — see `_compose_source`.
         own = own or (node.kind in ("chat", "agent") and bool(node.title.strip()))
-        own = own or (node.kind == "chat" and any(m.role == "user" for m in node.chat))
+        own = own or (node.kind == "chat" and any(f.strip() for f in node.followUps))
         if own or any(fills(c, below) for c in children[node_id]):
             filled.add(node_id)
             return True

@@ -3299,14 +3299,6 @@ button.rf-file__dl:disabled {
   background: var(--bg, #fff);
 }
 
-.chat__msg--old .chat__bubble {
-  opacity: 0.6;
-}
-
-.chat__tag--old {
-  color: var(--muted);
-}
-
 .chat__list {
   min-height: 0;
   overflow: auto;

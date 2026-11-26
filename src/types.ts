@@ -156,10 +156,10 @@ export interface Bullet {
   threshold: number;
   /**
    * A chat bullet's conversation after its first message (which is `text`):
-   * its replies and the person's follow-ups, oldest first. The follow-ups are
-   * sent; the replies are kept to show, since the server takes the ones the
-   * model sees from its own run history. The last reply is replaced by each
-   * new answer. Cleared from the popup to start over. Ignored on other kinds.
+   * its replies and the person's follow-ups, oldest first. Only the follow-ups
+   * are sent: the server takes the replies the model sees from its own run
+   * history, so these are for the popup to show. The last reply is replaced by
+   * each new answer. Cleared from the popup to start over. Ignored on other kinds.
    */
   chat: ChatMessage[];
   /**

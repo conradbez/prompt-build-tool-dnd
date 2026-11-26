@@ -14,7 +14,7 @@ const KINDS: { kind: BulletKind; label: string; desc: string }[] = [
   {
     kind: 'chat',
     label: 'Chat',
-    desc: 'Its text, with its inputs filled in, is sent to the LLM as the first message. Follow-ups typed in this popup amend the answer; each run sends the first message and every follow-up (not earlier replies), and only the latest reply flows on.',
+    desc: 'Its text, with its inputs filled in, is sent to the LLM as the first message. Follow-ups typed in this popup amend the answer; each run sends the first message, then the conversation so far — earlier replies and follow-ups — and only the latest reply flows on.',
   },
   {
     kind: 'template',

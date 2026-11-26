@@ -21,9 +21,8 @@ interface Props {
  * it — see `actions.sendChat`.
  *
  * The first message is the bullet's text — the request, also editable in the
- * outline. Every later one is a follow-up. Each run sends the first message and
- * every follow-up, never earlier replies; earlier replies stay here to read,
- * marked as not sent.
+ * outline. Every later one is a follow-up. Each run sends the first message,
+ * then the conversation so far; the newest reply is the one passed on.
  */
 export function ChatHistory({ bullet, titles, vars, draft, setDraft }: Props) {
   const list = useRef<HTMLDivElement | null>(null);
@@ -49,7 +48,7 @@ export function ChatHistory({ bullet, titles, vars, draft, setDraft }: Props) {
               content={m.content}
               titles={titles}
               vars={vars}
-              tag={m.role === 'assistant' ? (i === last ? 'current' : 'old') : undefined}
+              current={i === last}
             />
           ))}
         </div>
@@ -102,27 +101,19 @@ function Bubble({
   content,
   titles,
   vars,
-  tag,
+  current,
 }: {
   role: 'user' | 'assistant';
   content: string;
   titles: Record<string, string>;
   vars: PromptVarMap;
-  tag?: 'current' | 'old';
+  current?: boolean;
 }) {
   return (
-    <div className={`chat__msg chat__msg--${role}${tag === 'old' ? ' chat__msg--old' : ''}`}>
-      {tag === 'current' && (
+    <div className={`chat__msg chat__msg--${role}`}>
+      {current && (
         <span className="chat__tag" title="This bullet's answer — what the next bullet receives">
           Node response (passed on)
-        </span>
-      )}
-      {tag === 'old' && (
-        <span
-          className="chat__tag chat__tag--old"
-          title="Kept to read. The model is sent the first message and every follow-up, not its earlier replies."
-        >
-          Earlier reply (not sent)
         </span>
       )}
       <div className="chat__bubble" dangerouslySetInnerHTML={{ __html: renderMarkdown(content, titles, vars) }} />
