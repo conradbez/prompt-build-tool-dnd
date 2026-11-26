@@ -1,8 +1,14 @@
 # Visual Prompt Map runner (FastAPI + promptmap)
 
-A tiny, **stateless** server with one meaningful endpoint. It receives the
+A small server with one meaningful endpoint. It receives the
 bullet graph as JSON and returns each bullet's result after flowing through
 [promptmap](https://github.com/conradbez/promptmap).
+
+Each person's promptmap run history (the cache, and `{{ previous }}`, which is
+how a chat bullet remembers its conversation) lives in its own SQLite file
+under `runs/`, next to the accounts database (`DB_PATH`, the Railway volume
+when one is attached). The file is keyed by the signed-in email, else the
+browser's session id. See `run_store.py`.
 
 ## Endpoint
 

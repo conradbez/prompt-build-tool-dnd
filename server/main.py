@@ -1,10 +1,13 @@
 """
-Simple, stateless FastAPI server for Visual Prompt Map.
+FastAPI server for Visual Prompt Map.
 
 One meaningful endpoint — ``POST /run`` — receives the bullet graph as JSON and
 streams each bullet's progress and result as it flows through
 promptmap (formerly prompt-build-tool).
-No sessions, no file storage, no database: every request is self-contained.
+A run's graph arrives whole with each request. What persists is each person's
+promptmap run database (cache and `{{ previous }}`, see `run_store.py`),
+accounts and saved maps (`accounts.py`), and attachments in the bucket
+(`files.py`).
 
 Each bullet becomes a promptmap model. A bullet's `@` references become promptmap
 `{{ ref('...') }}` dependencies, so an upstream bullet's output flows into the
@@ -42,6 +45,7 @@ import files as attachments
 from promptmap_extra_model_kinds import agent37_exec, agent_exec
 import accounts
 import bug_reports
+import run_store
 import search
 from llm import make_llm_call
 from promptmap_extra_model_kinds.models import model_name
@@ -187,12 +191,17 @@ Where this sits in the larger map (each bullet is built from the ones nested und
 # A bullet with caching off: promptmap skips the cache lookup and always runs it.
 NO_CACHE_CONFIG_LINE = "{{ config(cache=False) }}"
 
+# A chat bullet's conversation comes from its latest run, even when that run
+# had different follow-ups (a different template) — see `_chat_transcript`.
+WARM_START_CONFIG_LINE = "{{ config(warm_start=True) }}"
+
 # A chat bullet is the one kind that asks a model for an answer. Its text is
 # the first message — the request — and stays put; follow-ups typed in its popup
-# amend it. Every call sends the request (inputs freshly filled in) and every
-# follow-up, but never an earlier reply: only the reply flows on, so each one is
-# rebuilt from the request rather than patched from a possibly stale answer.
-# This instruction is hardcoded for the kind, ahead of the request.
+# amend it. Every call sends the request, with its inputs filled in fresh, and
+# then the conversation so far: earlier replies and the follow-ups after them,
+# carried from run to run by promptmap's `{{ previous }}` (see
+# `_chat_transcript`). Only the newest reply flows on. This instruction is
+# hardcoded for the kind, ahead of the request.
 # What a chat or agent bullet receives from the bullets nested under it — each
 # answer in its own `[their name]…[/their name]` tag — wrapped as one block.
 ACTORS_OPEN = "[actors below you said this]"
@@ -201,9 +210,10 @@ ACTORS_CLOSE = "[/actors below you said this]"
 CHAT_INSTRUCTION = (
     "Only your most recent reply is passed on to the next agent in the pipeline "
     "— nothing else from this exchange — so it must be a complete, standalone "
-    "answer. The first message is the main request: answer it in full. Any "
-    "follow-up messages after it amend that answer, in order; where they "
-    "conflict, the later one wins."
+    "answer. The first message is the main request: answer it in full. The "
+    "conversation after it holds your earlier replies and the follow-ups that "
+    "came after them; each follow-up amends your answer, in order, and where "
+    "they conflict, the later one wins."
 )
 
 
@@ -408,18 +418,67 @@ class ChatMessage(BaseModel):
     content: str = ""
 
 
-def _follow_ups(messages: list[ChatMessage], replace, var_names: set[str]) -> tuple[str, set[str]]:
-    """A chat bullet's follow-ups, each in its own numbered block, and the ids
-    their `@` mentions placed — inlined by *replace* as in the bullet's text.
-    Its earlier replies are kept for the popup only: they are never sent (see
-    `CHAT_INSTRUCTION`)."""
-    blocks, used = [], set()
-    said = [m.content.strip() for m in messages if m.role == "user" and m.content.strip()]
-    for i, raw in enumerate(said, 1):
-        text, placed = _inline(_as_promptdata(raw, var_names), replace)
-        used |= placed
-        blocks.append(f"[follow-up {i}]\n{_escape_jinja(text)}\n[/follow-up {i}]")
-    return "\n\n".join(blocks), used
+def _follow_ups(messages: list[ChatMessage], replace, var_names: set[str]) -> tuple[list[str], set[str]]:
+    """A chat bullet's follow-ups, oldest first and escaped for Jinja, and the
+    ids their `@` mentions placed — inlined by *replace* as in the bullet's
+    text. The replies in *messages* are only there for the popup to show: the
+    ones sent come from promptmap (see `_chat_transcript`)."""
+    said, used = [], set()
+    for m in messages:
+        if m.role == "user" and m.content.strip():
+            text, placed = _inline(_as_promptdata(m.content.strip(), var_names), replace)
+            used |= placed
+            said.append(_escape_jinja(text))
+    return said, used
+
+
+def _chat_transcript(follow_ups: list[str], epoch: str, json_output: bool) -> str:
+    """A chat bullet's conversation, as Jinja that rebuilds it from the
+    bullet's own last run.
+
+    The prompt promptmap sent last time (`previous.prompt`) holds the
+    conversation between this block's markers, and its answer
+    (`previous.output`) is the reply that came after it. Each run:
+
+    - copies the old conversation across, then the last reply and any
+      follow-ups that came after it, numbered so a rerun with no new follow-up
+      (an upstream bullet changed, say) adds nothing and only redoes the last
+      reply. With nothing else changed the prompt is the same, so the cache
+      answers it;
+    - starts fresh when *epoch* changes: the popup's "clear" sets a new one, so
+      the old markers no longer match. It also starts fresh when there is no
+      previous run, or the browser holds fewer follow-ups than the history does.
+      The follow-ups it has go in on their own then;
+    - puts the request and its inputs outside the conversation, filled in fresh
+      each run, so an old copy of an input never comes back.
+
+    The conversation needs `warm_start`. Every follow-up changes the template,
+    and without it `previous` is only offered from a run of the same template.
+    """
+    epoch = re.sub(r"[^A-Za-z0-9_-]", "", epoch)[:32]
+    open_, close = f"[conversation {epoch}]".replace(" ]", "]"), "[/conversation]"
+    reply = "previous.output | tojson" if json_output else "previous.output"
+    n = len(follow_ups)
+    lines = [
+        WARM_START_CONFIG_LINE,
+        "{%% set _h = previous.prompt.split('%s') if previous else [] %%}" % open_,
+        "{% set _seen = _h | length == 2 %}",
+        "{%% set _hist = (_h[1].split('%s')[0] | trim) if _seen else '' %%}" % close,
+        "{% set _last = (_hist.rsplit('[follow-up ', 1)[1].split(']')[0] | int)"
+        " if '[follow-up ' in _hist else 0 %}",
+        "{%% if _last > %d %%}{%% set _seen, _hist, _last = false, '', 0 %%}{%% endif %%}" % n,
+        open_,
+        "{% if _seen and _hist %}{{ _hist }}",
+        "{% endif %}",
+        "{%% if _seen and _last < %d %%}[your earlier reply]" % n,
+        "{{ %s }}" % reply,
+        "[/your earlier reply]",
+        "{% endif %}",
+    ]
+    for i, text in enumerate(follow_ups, 1):
+        lines += ["{%% if _last < %d %%}[follow-up %d]" % (i, i), text, f"[/follow-up {i}]", "{% endif %}"]
+    lines.append(close)
+    return "\n".join(lines)
 
 
 class Node(BaseModel):
@@ -470,6 +529,9 @@ class Node(BaseModel):
     # A chat bullet's follow-ups and the replies to them — see `_follow_ups`.
     # Ignored on every other kind.
     chat: list[ChatMessage] = []
+    # Changed by the popup's "clear", so the conversation starts over — see
+    # `_chat_transcript`.
+    chatEpoch: str = ""
 
 
 class ClassifierSettings(BaseModel):
@@ -640,7 +702,8 @@ def _compose_source(
     text, inlined = _inline(_as_promptdata(node.text.strip(), var_names or set()), as_ref)
     follow_ups = ""
     if node.kind == "chat":
-        follow_ups, placed = _follow_ups(node.chat, as_ref, var_names or set())
+        said, placed = _follow_ups(node.chat, as_ref, var_names or set())
+        follow_ups = _chat_transcript(said, node.chatEpoch, node.jsonOutput)
         inlined |= placed
     prompt = _json_body(node, _escape_jinja(text))
     # Only what has nowhere else to be: a reference already standing in the
@@ -1314,6 +1377,10 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
         )
     )
     try:
+        # This person's run history, with each bullet's moved to the name it
+        # runs under now — see `run_store`.
+        storage = run_store.storage_for(user)
+        await asyncio.to_thread(run_store.follow_names, storage, id_to_slug)
         llm = make_llm_call(
             api_key=req.apiKey,
             provider=req.provider,
@@ -1322,6 +1389,7 @@ async def _run(req: RunRequest, emit: Callable[[dict], None], user: str = "") ->
         )
         outputs = await promptmap.async_run(
             models_from_dict=models,
+            storage_backend=storage,
             llm_call=llm,
             promptfiles=promptfiles or None,
             promptdata=promptdata or None,

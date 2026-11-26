@@ -91,7 +91,7 @@ reference from the source bullet's text.
 
 Top-left there's a small toolbar: pick a **provider** (Gemini / OpenAI /
 Anthropic), paste an **API key**, and hit **Run**. The bullet graph is sent to a
-tiny stateless FastAPI server (`server/`) that flows it through
+small FastAPI server (`server/`) that flows it through
 [promptmap](https://github.com/conradbez/promptmap) and returns
 each bullet's result, which is shown under its node on the mind map.
 

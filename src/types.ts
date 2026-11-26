@@ -4,9 +4,10 @@ import type { ModelRunStatus } from './api';
  *
  * - `chat`     — sent to the LLM. The default. Its text is the first message —
  *   the request — and follow-ups typed in its popup amend it. Every call sends
- *   the request (inputs filled in fresh) and every follow-up, but not its
- *   earlier replies; the model is told only its reply flows on, so each one is
- *   a complete answer to the request, amended by the follow-ups.
+ *   the request (inputs filled in fresh), then the conversation so far — its
+ *   earlier replies and the follow-ups after them, which the server rebuilds
+ *   from the bullet's last run (`{{ previous }}`). Only the newest reply flows
+ *   on, so each one is a complete answer.
  * - `template` — never sent: its rendered text, with every upstream output
  *   substituted in, *is* its output. Emitted to promptmap as
  *   `{{ config(model_type="template") }}`.
@@ -155,11 +156,17 @@ export interface Bullet {
   threshold: number;
   /**
    * A chat bullet's conversation after its first message (which is `text`):
-   * its replies and the person's follow-ups, oldest first. Only the follow-ups
-   * are sent; the replies are kept to show. The last reply is replaced by each
+   * its replies and the person's follow-ups, oldest first. The follow-ups are
+   * sent; the replies are kept to show, since the server takes the ones the
+   * model sees from its own run history. The last reply is replaced by each
    * new answer. Cleared from the popup to start over. Ignored on other kinds.
    */
   chat: ChatMessage[];
+  /**
+   * Set afresh when the conversation is cleared, so the server's run history
+   * stops supplying the old one. Empty until the first clear.
+   */
+  chatEpoch: string;
 }
 
 /** Which of a bullet's two lines an editor is. */

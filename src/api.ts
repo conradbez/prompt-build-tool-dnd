@@ -57,6 +57,8 @@ export interface NodePayload {
   files: FileRef[];
   /** A chat bullet's conversation so far — see `Bullet.chat`. */
   chat: ChatMessage[];
+  /** Changed when the conversation is cleared — see `Bullet.chatEpoch`. */
+  chatEpoch: string;
 }
 
 export interface RunResponse {

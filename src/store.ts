@@ -35,6 +35,7 @@ function makeBullet(partial: Partial<Bullet> & { id: string }): Bullet {
     judge: 'llm',
     threshold: 0.5,
     chat: [],
+    chatEpoch: '',
     ...partial,
   };
 }
@@ -120,6 +121,7 @@ export function parseDoc(value: unknown): Doc | null {
         judge: b.judge === 'classifier' ? 'classifier' : 'llm',
         threshold: typeof b.threshold === 'number' ? clampThreshold(b.threshold) : 0.5,
         chat: Array.isArray(b.chat) ? (b.chat as unknown[]).filter(isChatMessage) : [],
+        chatEpoch: typeof b.chatEpoch === 'string' ? b.chatEpoch : '',
       });
     }
     // A child naming a parent that did not come with it would strand it, so
@@ -371,6 +373,7 @@ export function buildNodePayloads(s: OutlineState = state) {
     judge: b.judge,
     threshold: b.threshold,
     chat: b.kind === 'chat' ? b.chat : [],
+    chatEpoch: b.kind === 'chat' ? b.chatEpoch : '',
   }));
 }
 
@@ -597,13 +600,14 @@ export const actions = {
 
   /**
    * Forget a chat bullet's follow-ups and replies. Its first message — its
-   * text — stays, so the next run answers that alone.
+   * text — stays, so the next run answers that alone. A new epoch tells the
+   * server to stop carrying the old conversation over.
    */
   clearChat(id: string) {
     const b = state.bullets[id];
     if (!b || !b.chat.length) return;
     const next = clone(state);
-    const cleared = { ...b, chat: [] };
+    const cleared = { ...b, chat: [], chatEpoch: nanoid(8) };
     next.bullets[id] = { ...cleared, refs: refsFromText(cleared, id) };
     emit(next);
   },
